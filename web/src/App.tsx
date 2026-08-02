@@ -162,6 +162,17 @@ function AppInner() {
         queryClient.clear()
     }, [baseUrl, queryClient])
 
+    // Self-heal: when authentication fails against a stored hub URL that is
+    // not the page's own origin (e.g. a LAN address that is no longer
+    // reachable), drop it so the app falls back to the page origin instead of
+    // being stuck on a dead endpoint.
+    const pageOrigin = typeof window !== 'undefined' ? window.location.origin : null
+    useEffect(() => {
+        if (authError && serverUrl && pageOrigin && serverUrl !== pageOrigin) {
+            clearServerUrl()
+        }
+    }, [authError, serverUrl, pageOrigin, clearServerUrl])
+
     // Clean up URL params after successful auth (for direct access links)
     useEffect(() => {
         if (!token || !api) return
