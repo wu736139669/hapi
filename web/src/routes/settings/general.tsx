@@ -39,14 +39,18 @@ function ConnectionSwitch() {
         return null
     }
 
-    let lanOrigin: string
+    let publicOrigin: string | null = null
     try {
-        lanOrigin = new URL(info.lanUrl).origin
+        publicOrigin = info.publicUrl ? new URL(info.publicUrl).origin : null
     } catch {
-        return null
+        publicOrigin = null
     }
     const currentOrigin = typeof window !== 'undefined' ? window.location.origin : ''
-    const isOnLan = currentOrigin === lanOrigin
+    // Anything other than the public domain counts as the alternative
+    // (LAN) connection — this also covers IP-based access like
+    // http://192.168.x.x:3006 even when the configured lanUrl uses a
+    // hostname.
+    const isOnLan = currentOrigin !== '' && currentOrigin !== publicOrigin
     const target = isOnLan ? info.publicUrl : info.lanUrl
     if (!target) {
         return null
