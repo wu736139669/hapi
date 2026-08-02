@@ -68,10 +68,19 @@ function ConnectionSwitch() {
                     <button
                         type="button"
                         onClick={() => {
-                            // Switch the hub connection in place — the app
-                            // reconnects to the target origin without a full
-                            // page navigation (same hub, so the token stays
-                            // valid).
+                            // Browsers block in-place requests from an HTTPS
+                            // page to an HTTP hub (mixed content), so an
+                            // HTTPS→HTTP switch must navigate instead. The
+                            // loaded page is then HTTP same-origin and works.
+                            const pageIsHttps = typeof window !== 'undefined'
+                                && window.location.protocol === 'https:'
+                            const targetIsHttps = target.startsWith('https://')
+                            if (pageIsHttps && !targetIsHttps) {
+                                window.location.href = target
+                                return
+                            }
+                            // Otherwise switch the hub connection in place —
+                            // the app reconnects without a full navigation.
                             setServerUrl(target)
                         }}
                         className="shrink-0 rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2 py-1.5 text-xs text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]"
