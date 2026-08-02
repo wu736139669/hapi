@@ -11,7 +11,7 @@ const locales: ReadonlyArray<{ value: Locale; label: string }> = [
 
 function ConnectionSwitch() {
     const { t } = useTranslation()
-    const { api } = useAppContext()
+    const { api, setServerUrl } = useAppContext()
     const [info, setInfo] = useState<{ publicUrl: string | null; lanUrl: string | null } | null>(null)
 
     useEffect(() => {
@@ -68,7 +68,11 @@ function ConnectionSwitch() {
                     <button
                         type="button"
                         onClick={() => {
-                            window.location.href = target
+                            // Switch the hub connection in place — the app
+                            // reconnects to the target origin without a full
+                            // page navigation (same hub, so the token stays
+                            // valid).
+                            setServerUrl(target)
                         }}
                         className="shrink-0 rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2 py-1.5 text-xs text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]"
                     >

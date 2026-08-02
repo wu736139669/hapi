@@ -1,10 +1,13 @@
 import { createContext, useContext, type ReactNode } from 'react'
 import type { ApiClient } from '@/api/client'
 
+import type { ServerUrlResult } from '@/hooks/useServerUrl'
+
 type AppContextValue = {
     api: ApiClient
     token: string
     baseUrl: string
+    setServerUrl: (input: string) => ServerUrlResult
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
