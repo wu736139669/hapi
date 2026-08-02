@@ -271,6 +271,10 @@ export class RpcGateway {
         return await this.sessionRpc(sessionId, RPC_METHODS.ReadFile, { path }) as RpcReadFileResponse
     }
 
+    async readAbsoluteFileForMachine(machineId: string, path: string): Promise<RpcReadFileResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.ReadAbsoluteFile, { path }) as RpcReadFileResponse
+    }
+
     async readGeneratedImage(sessionId: string, imageId: string): Promise<RpcGeneratedImageResponse> {
         return await this.sessionRpc(sessionId, RPC_METHODS.ReadGeneratedImage, { id: imageId }) as RpcGeneratedImageResponse
     }

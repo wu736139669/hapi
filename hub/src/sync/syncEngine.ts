@@ -2056,6 +2056,10 @@ async uploadScratchlistAttachment(
         return await this.rpcGateway.listCodexSessionsForMachine(machineId, cwd, sessionIds)
     }
 
+    async readAbsoluteFileForMachine(machineId: string, path: string): Promise<import('./rpcGateway').RpcReadFileResponse> {
+        return await this.rpcGateway.readAbsoluteFileForMachine(machineId, path)
+    }
+
     async archiveCodexSessionForMachine(machineId: string, sessionId: string): Promise<RpcArchiveCodexSessionResponse> {
         return await this.rpcGateway.archiveCodexSessionForMachine(machineId, sessionId)
     }

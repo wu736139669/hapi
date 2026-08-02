@@ -84,6 +84,57 @@ function BackIcon(props: { className?: string }) {
     )
 }
 
+/**
+ * Preview page for absolute file paths opened directly against the hub
+ * (e.g. an agent links http://host/Users/.../index.html). The app boots via
+ * the SPA fallback, this route renders the file through the raw endpoint.
+ */
+function AbsolutePathFilePreview() {
+    const { t } = useTranslation()
+    const { baseUrl, token } = useAppContext()
+    const navigate = useNavigate()
+    const location = useLocation()
+    const pathname = decodeURIComponent(location.pathname)
+    const isAbsoluteFilePath = /^\/(Users|home|private|tmp|opt|var|srv|mnt|data|root)\//.test(pathname)
+    const previewUrl = token
+        ? `${baseUrl}/api/files/raw?path=${encodeURIComponent(pathname)}&token=${encodeURIComponent(token)}`
+        : null
+
+    if (!isAbsoluteFilePath) {
+        return (
+            <div className="flex h-full items-center justify-center p-8 text-sm text-[var(--app-hint)]">
+                {t('file.page.missingPath')}
+            </div>
+        )
+    }
+
+    return (
+        <div className="flex h-full min-h-0 flex-col bg-[var(--app-bg)]">
+            <div className="flex items-center gap-2 border-b border-[var(--app-divider)] p-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
+                <button
+                    type="button"
+                    onClick={() => navigate({ to: '/sessions' })}
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
+                >
+                    <BackIcon />
+                </button>
+                <div className="min-w-0 flex-1">
+                    <div className="truncate font-semibold">{pathname.split('/').pop()}</div>
+                    <div className="truncate text-xs text-[var(--app-hint)]">{pathname}</div>
+                </div>
+            </div>
+            {previewUrl ? (
+                <iframe
+                    src={previewUrl}
+                    title={pathname}
+                    sandbox="allow-scripts"
+                    className="min-h-0 w-full flex-1 bg-white"
+                />
+            ) : null}
+        </div>
+    )
+}
+
 function PlusIcon(props: { className?: string }) {
     return (
         <svg
@@ -886,6 +937,7 @@ function BrowsePage() {
 
 const rootRoute = createRootRoute({
     component: App,
+    notFoundComponent: AbsolutePathFilePreview,
 })
 
 const indexRoute = createRoute({

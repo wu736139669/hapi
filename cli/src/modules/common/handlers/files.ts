@@ -15,6 +15,10 @@ interface ReadFileRequest {
 
 type ReadFileResponse = FileReadResponse
 
+interface ReadAbsoluteFileRequest {
+    path: string
+}
+
 interface ReadGeneratedImageRequest {
     id: string
 }
@@ -49,6 +53,31 @@ export function registerFileHandlers(rpcHandlerManager: RpcHandlerManager, worki
             return { success: true, content }
         } catch (error) {
             logger.debug('Failed to read file:', error)
+            return rpcError(getErrorMessage(error, 'Failed to read file'))
+        }
+    })
+
+    // Absolute-path file read for the web UI's raw preview endpoint. The
+    // runner process has the user's terminal file permissions (unlike a
+    // launchd-spawned hub, which macOS TCC can block from protected folders
+    // such as Documents).
+    rpcHandlerManager.registerHandler<ReadAbsoluteFileRequest, ReadFileResponse>(RPC_METHODS.ReadAbsoluteFile, async (data) => {
+        logger.debug('Read absolute file request:', data.path)
+        if (!data.path.startsWith('/')) {
+            return rpcError('Path must be absolute')
+        }
+        try {
+            const fileStat = await stat(data.path)
+            if (!fileStat.isFile()) {
+                return rpcError('Not a file')
+            }
+            if (fileStat.size > 10 * 1024 * 1024) {
+                return rpcError('File too large to preview')
+            }
+            const buffer = await readFile(data.path)
+            return { success: true, content: buffer.toString('base64') }
+        } catch (error) {
+            logger.debug('Failed to read absolute file:', error)
             return rpcError(getErrorMessage(error, 'Failed to read file'))
         }
     })

@@ -195,6 +195,61 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
         })
     })
 
+    // Raw file bytes by absolute path, for previewing files the agent links
+    // as plain hub URLs (e.g. http://host/Users/.../index.html). Requires the
+    // JWT query token. Reading is delegated to the machine (runner) RPC so it
+    // works under macOS TCC (the hub process itself may be blocked from
+    // protected folders such as Documents).
+    app.get('/files/raw', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+        const parsed = filePathSchema.safeParse(c.req.query())
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid file path' }, 400)
+        }
+
+        const filePath = parsed.data.path
+        if (!filePath.startsWith('/')) {
+            return c.json({ error: 'Path must be absolute' }, 400)
+        }
+
+        const machines = engine.getMachines()
+        const requestedMachineId = c.req.query('machineId')
+        const candidates = [
+            ...(requestedMachineId ? machines.filter((m) => m.id === requestedMachineId) : []),
+            ...machines.filter((m) => m.active),
+            ...machines
+        ]
+        if (candidates.length === 0) {
+            return c.json({ error: 'No online machine available' }, 503)
+        }
+
+        // Try machines in order — a stale machine entry (e.g. an old runner
+        // whose process is gone) can respond with "handler not registered",
+        // so fall through to the next candidate.
+        let lastError: string | null = null
+        for (const machine of candidates) {
+            try {
+                const result = await runRpc(() => engine.readAbsoluteFileForMachine(machine.id, filePath))
+                if (result.success && typeof result.content === 'string') {
+                    const bytes = Uint8Array.from(Buffer.from(result.content, 'base64'))
+                    const isHtml = /\.html?$/i.test(filePath)
+                    return c.body(bytes, 200, {
+                        'Content-Type': isHtml ? 'text/html; charset=utf-8' : 'application/octet-stream',
+                        'Content-Disposition': 'inline',
+                        'Cache-Control': 'private, max-age=60'
+                    })
+                }
+                lastError = result.error ?? 'Failed to read file'
+            } catch (error) {
+                lastError = error instanceof Error ? error.message : 'Failed to read file'
+            }
+        }
+        return c.json({ success: false, error: lastError ?? 'Failed to read file' }, 404)
+    })
+
     app.get('/sessions/:id/generated-images/:imageId', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) {
