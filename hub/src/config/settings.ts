@@ -22,6 +22,8 @@ export interface Settings {
     corsOrigins?: string[]
     /** Custom model names offered in the Claude model picker (e.g. DeepSeek via ANTHROPIC_BASE_URL). */
     customClaudeModels?: string[]
+    /** Alternative LAN access URL (e.g. http://my-mac.local:3006) offered in the web UI for same-network access. */
+    lanUrl?: string
 }
 
 export function getSettingsFile(dataDir: string): string {

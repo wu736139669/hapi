@@ -26,6 +26,7 @@ import { createPushRoutes } from './routes/push'
 import { createDevicesRoutes } from './routes/devices'
 import { createVoiceRoutes } from './routes/voice'
 import { createClaudeModelsRoutes } from './routes/claudeModels'
+import { createServerInfoRoutes } from './routes/serverInfo'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 import type { Server as BunServer, ServerWebSocket } from 'bun'
@@ -260,6 +261,7 @@ function createWebApp(options: {
     }))
     app.route('/api', createPushRoutes(options.store, options.vapidPublicKey))
     app.route('/api', createClaudeModelsRoutes(options.dataDir))
+    app.route('/api', createServerInfoRoutes(options.dataDir))
     app.route('/api', createDevicesRoutes(options.store))
     app.route('/api', createVoiceRoutes())
 

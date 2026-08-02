@@ -202,6 +202,10 @@ export class ApiClient {
         return await this.request<{ models: string[] }>('/api/claude/custom-models')
     }
 
+    async getServerSwitchInfo(): Promise<{ publicUrl: string | null; lanUrl: string | null }> {
+        return await this.request<{ publicUrl: string | null; lanUrl: string | null }>('/api/server/switch-info')
+    }
+
     async subscribePushNotifications(payload: PushSubscriptionPayload): Promise<void> {
         await this.request('/api/push/subscribe', {
             method: 'POST',
