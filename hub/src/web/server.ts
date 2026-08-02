@@ -232,16 +232,7 @@ function createWebApp(options: {
 
     const configuration = getConfiguration()
     const corsOrigins = options.corsOrigins ?? configuration.corsOrigins
-    const mergedCorsOrigins = configuration.lanUrl
-        ? (() => {
-            try {
-                return [...new Set([...corsOrigins, new URL(configuration.lanUrl).origin])]
-            } catch {
-                return corsOrigins
-            }
-        })()
-        : corsOrigins
-    const corsOriginOption = mergedCorsOrigins.includes('*') ? '*' : mergedCorsOrigins
+    const corsOriginOption = corsOrigins.includes('*') ? '*' : corsOrigins
     const corsMiddleware = cors({
         origin: corsOriginOption,
         allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],

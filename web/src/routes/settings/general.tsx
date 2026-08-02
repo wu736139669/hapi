@@ -9,9 +9,9 @@ const locales: ReadonlyArray<{ value: Locale; label: string }> = [
     { value: 'zh-CN', label: '简体中文' },
 ]
 
-function ConnectionSwitch() {
+function ConnectionInfo() {
     const { t } = useTranslation()
-    const { api, baseUrl, setServerUrl } = useAppContext()
+    const { api, baseUrl } = useAppContext()
     const [info, setInfo] = useState<{ publicUrl: string | null; lanUrl: string | null } | null>(null)
 
     useEffect(() => {
@@ -35,26 +35,19 @@ function ConnectionSwitch() {
         }
     }, [api])
 
-    if (!info?.lanUrl) {
-        return null
-    }
-
     let publicOrigin: string | null = null
-    try {
-        publicOrigin = info.publicUrl ? new URL(info.publicUrl).origin : null
-    } catch {
-        publicOrigin = null
+    if (info?.publicUrl) {
+        try {
+            publicOrigin = new URL(info.publicUrl).origin
+        } catch {
+            publicOrigin = null
+        }
     }
     // Anything other than the public domain counts as the alternative
     // (LAN) connection — this also covers IP-based access like
     // http://192.168.x.x:3006 even when the configured lanUrl uses a
-    // hostname. baseUrl is the hub the app is actually talking to — it
-    // updates in place after setServerUrl() without a page reload.
+    // hostname. baseUrl is the hub the app is actually talking to.
     const isOnLan = baseUrl !== '' && baseUrl !== publicOrigin
-    const target = isOnLan ? info.publicUrl : info.lanUrl
-    if (!target) {
-        return null
-    }
 
     return (
         <SettingsSection title={t('settings.connection.title')} description={t('settings.connection.hint')}>
@@ -62,33 +55,16 @@ function ConnectionSwitch() {
                 label={t('settings.connection.current')}
                 trailing={<span className="max-w-[60%] truncate text-xs text-[var(--app-hint)]">{baseUrl}</span>}
             />
-            <SettingsRow
-                label={isOnLan ? t('settings.connection.public') : t('settings.connection.lan')}
-                trailing={
-                    <button
-                        type="button"
-                        onClick={() => {
-                            // Browsers block in-place requests from an HTTPS
-                            // page to an HTTP hub (mixed content), so an
-                            // HTTPS→HTTP switch must navigate instead. The
-                            // loaded page is then HTTP same-origin and works.
-                            const pageIsHttps = typeof window !== 'undefined'
-                                && window.location.protocol === 'https:'
-                            const targetIsHttps = target.startsWith('https://')
-                            if (pageIsHttps && !targetIsHttps) {
-                                window.location.href = target
-                                return
-                            }
-                            // Otherwise switch the hub connection in place —
-                            // the app reconnects without a full navigation.
-                            setServerUrl(target)
-                        }}
-                        className="shrink-0 rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2 py-1.5 text-xs text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]"
-                    >
-                        {isOnLan ? t('settings.connection.switchToPublic') : t('settings.connection.switchToLan')}
-                    </button>
-                }
-            />
+            {info ? (
+                <SettingsRow
+                    label={t('settings.connection.mode')}
+                    trailing={
+                        <span className="text-xs text-[var(--app-hint)]">
+                            {isOnLan ? t('settings.connection.lan') : t('settings.connection.public')}
+                        </span>
+                    }
+                />
+            ) : null}
         </SettingsSection>
     )
 }
@@ -98,7 +74,7 @@ export default function SettingsGeneralPage() {
     const { baseUrl } = useAppContext()
     return (
         <SettingsPageContent description={t('settings.general.description')}>
-            <ConnectionSwitch />
+            <ConnectionInfo />
             <SettingsSection title={t('settings.language.label')}>
                 <SettingsChoiceGroup hideLabel label={t('settings.language.label')} value={locale} options={locales} onChange={setLocale} />
             </SettingsSection>

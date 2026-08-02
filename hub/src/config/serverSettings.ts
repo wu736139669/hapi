@@ -21,7 +21,6 @@ export interface ServerSettings {
     listenPort: number
     publicUrl: string
     corsOrigins: string[]
-    lanUrl: string | null
 }
 
 export interface ServerSettingsResult {
@@ -34,7 +33,6 @@ export interface ServerSettingsResult {
         listenHost: 'env' | 'file' | 'default'
         listenPort: 'env' | 'file' | 'default'
         publicUrl: 'env' | 'file' | 'default'
-        lanUrl: 'file' | 'default'
         corsOrigins: 'env' | 'file' | 'default'
     }
     savedToFile: boolean
@@ -112,7 +110,6 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
         listenHost: 'default',
         listenPort: 'default',
         publicUrl: 'default',
-        lanUrl: 'default',
         corsOrigins: 'default',
     }
     // telegramBotToken: env > file > null
@@ -217,15 +214,6 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
         sources.publicUrl = 'file'
     }
 
-    // lanUrl: file only (optional alternative access URL, e.g. LAN direct)
-    let lanUrl: string | null = null
-    if (typeof settings.lanUrl === 'string' && settings.lanUrl.trim()) {
-        lanUrl = settings.lanUrl.trim()
-        sources.lanUrl = 'file'
-    } else {
-        sources.lanUrl = 'default'
-    }
-
     // corsOrigins: env > file > derived from publicUrl
     let corsOrigins: string[]
     if (process.env.CORS_ORIGINS) {
@@ -256,7 +244,6 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
             listenHost,
             listenPort,
             publicUrl,
-            lanUrl,
             corsOrigins,
         },
         sources,
