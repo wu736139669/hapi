@@ -171,7 +171,7 @@ function extractCommandError(result: GitCommandResponse | undefined): string | n
 }
 
 export default function FilePage() {
-    const { api } = useAppContext()
+    const { api, baseUrl, token } = useAppContext()
     const { t } = useTranslation()
     const { copied: pathCopied, copy: copyPath } = useCopyToClipboard()
     const { copied: contentCopied, copy: copyContent } = useCopyToClipboard()
@@ -185,6 +185,11 @@ export default function FilePage() {
     const fileName = filePath.split('/').pop() || filePath || t('file.page.fallbackName')
     const imageMimeType = useMemo(() => resolveImageMimeType(filePath), [filePath])
     const markdownFile = useMemo(() => isMarkdownFile(filePath), [filePath])
+    const htmlFile = useMemo(() => /\.html?$/i.test(filePath), [filePath])
+    const [htmlPreview, setHtmlPreview] = useState(false)
+    useEffect(() => {
+        setHtmlPreview(false)
+    }, [filePath])
 
     const diffQuery = useQuery({
         queryKey: queryKeys.gitFileDiff(sessionId, filePath, staged),
@@ -223,6 +228,9 @@ export default function FilePage() {
         : false
     const imagePreviewUrl = fileContentResult?.success && fileContentResult.content && imageMimeType
         ? `data:${imageMimeType};base64,${fileContentResult.content}`
+        : null
+    const htmlPreviewUrl = htmlFile && token
+        ? `${baseUrl}/api/sessions/${encodeURIComponent(sessionId)}/file/raw?path=${encodeURIComponent(filePath)}&token=${encodeURIComponent(token)}`
         : null
 
     const language = useMemo(() => imageMimeType ? undefined : resolveLanguage(filePath), [filePath, imageMimeType])
@@ -355,6 +363,25 @@ export default function FilePage() {
                                 </button>
                             </>
                         ) : null}
+                        {htmlFile && displayMode === 'file' ? (
+                            <>
+                                {diffContent ? <span className="mx-1 h-4 w-px bg-[var(--app-divider)]" aria-hidden="true" /> : null}
+                                <button
+                                    type="button"
+                                    onClick={() => setHtmlPreview(false)}
+                                    className={`rounded px-3 py-1 text-xs font-semibold ${!htmlPreview ? 'bg-[var(--app-button)] text-[var(--app-button-text)] opacity-80' : 'bg-[var(--app-subtle-bg)] text-[var(--app-hint)]'}`}
+                                >
+                                    {t('file.page.tab.source')}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setHtmlPreview(true)}
+                                    className={`rounded px-3 py-1 text-xs font-semibold ${htmlPreview ? 'bg-[var(--app-button)] text-[var(--app-button-text)] opacity-80' : 'bg-[var(--app-subtle-bg)] text-[var(--app-hint)]'}`}
+                                >
+                                    {t('file.page.tab.preview')}
+                                </button>
+                            </>
+                        ) : null}
                     </div>
                 </div>
             ) : null}
@@ -387,6 +414,13 @@ export default function FilePage() {
                             <div className="text-sm text-[var(--app-hint)]">
                                 {t('file.page.binary')}
                             </div>
+                        ) : htmlFile && htmlPreview && htmlPreviewUrl ? (
+                            <iframe
+                                src={htmlPreviewUrl}
+                                title={fileName}
+                                sandbox="allow-scripts"
+                                className="h-[70vh] w-full rounded-md border border-[var(--app-border)] bg-white"
+                            />
                         ) : (
                             decodedContent ? (
                                 markdownFile && !showMarkdownSource ? (

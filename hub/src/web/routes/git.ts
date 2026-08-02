@@ -157,6 +157,44 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
         return c.json(result)
     })
 
+    // Raw file bytes with a browser-friendly Content-Type, for iframe previews
+    // (e.g. rendering HTML files). Auth via the JWT query token so it works
+    // inside <iframe src> which cannot send Authorization headers.
+    app.get('/sessions/:id/file/raw', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const sessionPath = sessionResult.session.metadata?.path
+        if (!sessionPath) {
+            return c.json({ success: false, error: 'Session path not available' })
+        }
+
+        const parsed = filePathSchema.safeParse(c.req.query())
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid file path' }, 400)
+        }
+
+        const result = await runRpc(() => engine.readSessionFile(sessionResult.sessionId, parsed.data.path))
+        if (!result.success || typeof result.content !== 'string') {
+            return c.json({ success: false, error: result.error ?? 'Failed to read file' }, 404)
+        }
+
+        const bytes = Uint8Array.from(Buffer.from(result.content, 'base64'))
+        const isHtml = /\.html?$/i.test(parsed.data.path)
+        return c.body(bytes, 200, {
+            'Content-Type': isHtml ? 'text/html; charset=utf-8' : 'application/octet-stream',
+            'Content-Disposition': 'inline',
+            'Cache-Control': 'private, max-age=60'
+        })
+    })
+
     app.get('/sessions/:id/generated-images/:imageId', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) {

@@ -324,6 +324,8 @@ export default {
 
   // Chat
   'chat.placeholder': '输入消息…',
+  'chat.filePreview': '预览效果',
+  'chat.filePreviewClose': '收起预览',
   'chat.send': '发送',
   'chat.abort': '中止',
   'chat.settings': '设置',

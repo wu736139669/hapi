@@ -23,6 +23,7 @@ import { MermaidDiagram } from '@/components/assistant-ui/mermaid-diagram'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { useCodeWrap } from '@/hooks/useCodeWrap'
 import { CopyIcon, CheckIcon, WrapIcon } from '@/components/icons'
+import { useAppContext } from '@/lib/app-context'
 import { useTranslation } from '@/lib/use-translation'
 import { useOptionalHappyChatContext } from '@/components/AssistantChat/context'
 import { decodeFilePathHref, remarkFilePathLinks } from '@/lib/remark-file-path-links'
@@ -495,9 +496,16 @@ function Code(props: ComponentPropsWithoutRef<'code'>) {
 
 function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { filePath: string; sessionId: string }) {
     const navigate = useNavigate()
+    const { t } = useTranslation()
+    const { baseUrl, token } = useAppContext()
+    const [showPreview, setShowPreview] = useState(false)
     const rel = props.target === '_blank' ? (props.rel ?? 'noreferrer') : props.rel
     const search = new URLSearchParams({ path: encodeBase64(props.filePath) }).toString()
     const href = `/sessions/${encodeURIComponent(props.sessionId)}/file?${search}`
+    const isHtml = /\.html?$/i.test(props.filePath)
+    const previewUrl = isHtml && token
+        ? `${baseUrl}/api/sessions/${encodeURIComponent(props.sessionId)}/file/raw?path=${encodeURIComponent(props.filePath)}&token=${encodeURIComponent(token)}`
+        : null
 
     const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
         props.onClick?.(event)
@@ -513,13 +521,41 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { filePath: strin
     }
 
     return (
-        <a
-            {...props}
-            href={href}
-            rel={rel}
-            onClick={handleClick}
-            className={cn('aui-md-a font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3', props.className)}
-        />
+        <>
+            <a
+                {...props}
+                href={href}
+                rel={rel}
+                onClick={handleClick}
+                className={cn('aui-md-a font-medium text-[var(--app-link)] underline decoration-[color:var(--app-link-muted)] underline-offset-3', props.className)}
+            />
+            {previewUrl ? (
+                <>
+                    {' '}
+                    <button
+                        type="button"
+                        onClick={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            setShowPreview((value) => !value)
+                        }}
+                        className="rounded border border-[var(--app-border)] px-1.5 py-0.5 align-middle text-[11px] text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]"
+                    >
+                        {showPreview ? t('chat.filePreviewClose') : t('chat.filePreview')}
+                    </button>
+                    {showPreview ? (
+                        <span className="block">
+                            <iframe
+                                src={previewUrl}
+                                title={props.filePath}
+                                sandbox="allow-scripts"
+                                className="mt-1 h-64 w-full rounded-md border border-[var(--app-border)] bg-white"
+                            />
+                        </span>
+                    ) : null}
+                </>
+            ) : null}
+        </>
     )
 }
 

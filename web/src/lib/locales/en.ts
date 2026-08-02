@@ -320,6 +320,8 @@ export default {
 
   // Chat
   'chat.placeholder': 'Type a message…',
+  'chat.filePreview': 'Preview',
+  'chat.filePreviewClose': 'Close preview',
   'chat.send': 'Send',
   'chat.abort': 'Abort',
   'chat.settings': 'Settings',
