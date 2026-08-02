@@ -501,6 +501,31 @@ describe('SessionList collapse behavior', () => {
         expect(header.getAttribute('aria-expanded')).toBe('true')
     })
 
+    it('marks a just-finished session as completed until it is opened', async () => {
+        localStorage.clear()
+        const working = [
+            makeSession({ id: 'session-task', active: true, thinking: true, updatedAt: 100, metadata: { path: '/work/hapi', name: 'Task', flavor: 'codex' } }),
+        ]
+        const { rerender } = render(renderSessionList(working))
+
+        // The task finishes: working → idle
+        rerender(renderSessionList([
+            makeSession({ id: 'session-task', active: true, thinking: false, updatedAt: 110, metadata: { path: '/work/hapi', name: 'Task', flavor: 'codex' } }),
+        ]))
+
+        expect(screen.getByText(/Completed \(1\)/)).toBeInTheDocument()
+        expect(screen.queryByText(/Idle \(1\)/)).toBeNull()
+
+        // Opening the session acknowledges it → back to plain idle
+        // (row click is bound to mouseup via the long-press handler)
+        const taskRow = screen.getByRole('button', { name: /Task/ })
+        fireEvent.mouseDown(taskRow)
+        fireEvent.mouseUp(taskRow)
+
+        expect(screen.queryByText(/Completed/)).toBeNull()
+        expect(screen.getByText(/Idle \(1\)/)).toBeInTheDocument()
+    })
+
     it('keeps the previous selected path open when selection moves', async () => {
         const sessions = [
             makeSession({

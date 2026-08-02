@@ -113,6 +113,8 @@ export function SessionRowSummary(props: {
     className?: string
     /** Rows inside the pinned "in progress" section skip the text label (dot only). */
     inRunningSection?: boolean
+    /** Task just finished and the user has not opened it yet (green dot). */
+    completedUnseen?: boolean
     /** Short project name shown under the title (pinned "in progress" rows). */
     projectLabel?: string
     /** Machine label shown next to the project name (pinned "in progress" rows). */
@@ -128,6 +130,7 @@ export function SessionRowSummary(props: {
         scheduleTooltipId: scheduleTooltipIdProp,
         className,
         inRunningSection = false,
+        completedUnseen = false,
         projectLabel,
         machineLabel,
     } = props
@@ -203,6 +206,16 @@ export function SessionRowSummary(props: {
                             <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" aria-hidden="true" />
                             {!inRunningSection ? (
                                 <span className="text-[11px] font-medium leading-none">{t('session.item.pending')}</span>
+                            ) : null}
+                        </span>
+                    ) : s.active && completedUnseen ? (
+                        <span
+                            className="inline-flex shrink-0 items-center gap-1 text-[var(--app-badge-success-text)]"
+                            title={t('session.item.completed')}
+                        >
+                            <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" aria-hidden="true" />
+                            {!inRunningSection ? (
+                                <span className="text-[11px] font-medium leading-none">{t('session.item.completed')}</span>
                             ) : null}
                         </span>
                     ) : s.active ? (

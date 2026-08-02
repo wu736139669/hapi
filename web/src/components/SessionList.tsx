@@ -20,6 +20,7 @@ import { useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { subscribeCodexImportedSessions } from '@/lib/codexImportedSessions'
 import { formatReopenError } from '@/lib/reopenError'
 import { getSessionTitle } from '@/lib/sessionTitle'
+import { readCompletedUnseen, writeCompletedUnseen } from '@/lib/completedUnseen'
 import { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
 import type { Machine } from '@/types/api'
 import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
@@ -44,7 +45,6 @@ type SessionGroup = {
 const RUNNING_BUCKETS = [
     { key: 'working', labelKey: 'session.item.running', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'pending', labelKey: 'session.item.pending', colorClass: 'text-[var(--app-badge-warning-text)]', pulse: true },
-    { key: 'idle', labelKey: 'session.item.idle', colorClass: 'text-[var(--app-hint)]', pulse: false },
 ] as const
 
 export type SessionTimeRange = {
@@ -771,11 +771,12 @@ function SessionItem(props: {
     selected?: boolean
     showDetailedStatus?: boolean
     inRunningSection?: boolean
+    completedUnseen?: boolean
     projectLabel?: string
     machineLabel?: string
 }) {
     const { t } = useTranslation()
-    const { session: s, onSelect, showPath = true, api, selected = false, showDetailedStatus = false, inRunningSection = false, projectLabel, machineLabel } = props
+    const { session: s, onSelect, showPath = true, api, selected = false, showDetailedStatus = false, inRunningSection = false, completedUnseen = false, projectLabel, machineLabel } = props
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -869,6 +870,7 @@ function SessionItem(props: {
                     attentionTooltipId={attentionId}
                     scheduleTooltipId={scheduleId}
                     inRunningSection={inRunningSection}
+                    completedUnseen={completedUnseen}
                     projectLabel={projectLabel}
                     machineLabel={machineLabel}
                 />
@@ -1105,6 +1107,64 @@ export function SessionList(props: {
     const runningSessionTotal = runningSessions.working.length
         + runningSessions.pending.length
         + runningSessions.idle.length
+    const [completedUnseen, setCompletedUnseen] = useState<Set<string>>(readCompletedUnseen)
+    const prevSessionStateRef = useRef<Map<string, string>>(new Map())
+    const updateCompletedUnseen = (mutate: (set: Set<string>) => void) => {
+        setCompletedUnseen(prev => {
+            const next = new Set(prev)
+            mutate(next)
+            writeCompletedUnseen(next)
+            return next
+        })
+    }
+    // Detect "just finished" sessions: a session that was working and is now
+    // idle gets a green dot until the user opens it.
+    useEffect(() => {
+        const prev = prevSessionStateRef.current
+        const next = new Map<string, string>()
+        const toMark = new Set<string>()
+        const toUnmark = new Set<string>()
+        for (const session of machineFilteredSessions) {
+            let state: string
+            if (!session.active) {
+                state = 'inactive'
+            } else if (session.thinking || (session.backgroundTaskCount ?? 0) > 0) {
+                state = 'working'
+            } else if ((session.pendingRequestsCount ?? 0) > 0) {
+                state = 'pending'
+            } else {
+                state = 'idle'
+            }
+            next.set(session.id, state)
+            const prevState = prev.get(session.id)
+            if (prevState === 'working' && state === 'idle') {
+                toMark.add(session.id)
+            } else if ((prevState === 'idle' || prevState === 'pending') && state === 'working') {
+                toUnmark.add(session.id)
+            }
+        }
+        for (const id of prev.keys()) {
+            if (!next.has(id)) {
+                toUnmark.add(id)
+            }
+        }
+        if (toMark.size > 0 || toUnmark.size > 0) {
+            updateCompletedUnseen(set => {
+                for (const id of toMark) {
+                    set.add(id)
+                }
+                for (const id of toUnmark) {
+                    set.delete(id)
+                }
+            })
+        }
+        prevSessionStateRef.current = next
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [machineFilteredSessions])
+    const handleSelectSession = (sessionId: string) => {
+        updateCompletedUnseen(set => set.delete(sessionId))
+        props.onSelect(sessionId)
+    }
     const groups = useMemo(
         () => groupSessionsByDirectory(machineFilteredSessions.filter((session) => !session.active)),
         [machineFilteredSessions]
@@ -1495,7 +1555,7 @@ export function SessionList(props: {
                                                 <SessionItem
                                                     key={s.id}
                                                     session={s}
-                                                    onSelect={props.onSelect}
+                                                    onSelect={handleSelectSession}
                                                     showPath={false}
                                                     api={api}
                                                     selected={s.id === selectedSessionId}
@@ -1508,6 +1568,47 @@ export function SessionList(props: {
                                         </div>
                                     )
                                 })}
+                                {(() => {
+                                    const completedIdle = runningSessions.idle.filter((s) => completedUnseen.has(s.id))
+                                    const plainIdle = runningSessions.idle.filter((s) => !completedUnseen.has(s.id))
+                                    const sessionItem = (s: SessionSummary, completed: boolean) => (
+                                        <SessionItem
+                                            key={s.id}
+                                            session={s}
+                                            onSelect={handleSelectSession}
+                                            showPath={false}
+                                            api={api}
+                                            selected={s.id === selectedSessionId}
+                                            showDetailedStatus={showDetailedStatus}
+                                            inRunningSection
+                                            completedUnseen={completed}
+                                            projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
+                                            machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
+                                        />
+                                    )
+                                    return (
+                                        <>
+                                            {completedIdle.length > 0 ? (
+                                                <div key="completed">
+                                                    <div className="flex items-center gap-1 px-1 pt-1 pb-0.5 text-[11px] font-medium text-[var(--app-badge-success-text)]">
+                                                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current animate-pulse" aria-hidden="true" />
+                                                        {t('session.item.completed')} ({completedIdle.length})
+                                                    </div>
+                                                    {completedIdle.map((s) => sessionItem(s, true))}
+                                                </div>
+                                            ) : null}
+                                            {plainIdle.length > 0 ? (
+                                                <div key="idle">
+                                                    <div className="flex items-center gap-1 px-1 pt-1 pb-0.5 text-[11px] font-medium text-[var(--app-hint)]">
+                                                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" aria-hidden="true" />
+                                                        {t('session.item.idle')} ({plainIdle.length})
+                                                    </div>
+                                                    {plainIdle.map((s) => sessionItem(s, false))}
+                                                </div>
+                                            ) : null}
+                                        </>
+                                    )
+                                })()}
                             </div>
                             </div>
                         </div>
@@ -1573,13 +1674,13 @@ export function SessionList(props: {
                             <div className="collapsible-panel" data-open={!isCollapsed || undefined}>
                                 <div className="collapsible-inner">
                                 <div className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
-                                    {visibleGroupSessions.map((s) => (
-                                        <SessionItem
-                                            key={s.id}
-                                            session={s}
-                                            onSelect={props.onSelect}
-                                            showPath={false}
-                                            api={api}
+                                            {visibleGroupSessions.map((s) => (
+                                                <SessionItem
+                                                    key={s.id}
+                                                    session={s}
+                                                    onSelect={handleSelectSession}
+                                                    showPath={false}
+                                                    api={api}
                                             selected={s.id === selectedSessionId}
                                             showDetailedStatus={showDetailedStatus}
                                         />
