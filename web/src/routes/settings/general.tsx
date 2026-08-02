@@ -11,7 +11,7 @@ const locales: ReadonlyArray<{ value: Locale; label: string }> = [
 
 function ConnectionSwitch() {
     const { t } = useTranslation()
-    const { api, setServerUrl } = useAppContext()
+    const { api, baseUrl, setServerUrl } = useAppContext()
     const [info, setInfo] = useState<{ publicUrl: string | null; lanUrl: string | null } | null>(null)
 
     useEffect(() => {
@@ -45,12 +45,12 @@ function ConnectionSwitch() {
     } catch {
         publicOrigin = null
     }
-    const currentOrigin = typeof window !== 'undefined' ? window.location.origin : ''
     // Anything other than the public domain counts as the alternative
     // (LAN) connection — this also covers IP-based access like
     // http://192.168.x.x:3006 even when the configured lanUrl uses a
-    // hostname.
-    const isOnLan = currentOrigin !== '' && currentOrigin !== publicOrigin
+    // hostname. baseUrl is the hub the app is actually talking to — it
+    // updates in place after setServerUrl() without a page reload.
+    const isOnLan = baseUrl !== '' && baseUrl !== publicOrigin
     const target = isOnLan ? info.publicUrl : info.lanUrl
     if (!target) {
         return null
@@ -60,7 +60,7 @@ function ConnectionSwitch() {
         <SettingsSection title={t('settings.connection.title')} description={t('settings.connection.hint')}>
             <SettingsRow
                 label={t('settings.connection.current')}
-                trailing={<span className="max-w-[60%] truncate text-xs text-[var(--app-hint)]">{currentOrigin}</span>}
+                trailing={<span className="max-w-[60%] truncate text-xs text-[var(--app-hint)]">{baseUrl}</span>}
             />
             <SettingsRow
                 label={isOnLan ? t('settings.connection.public') : t('settings.connection.lan')}
