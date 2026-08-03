@@ -43,6 +43,7 @@ import type {
     QueuedStateResponse,
     ReopenSessionResponse,
     SqliteStorageUsageResponse,
+    UsageSummaryResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor } from '@hapi/protocol'
@@ -628,6 +629,10 @@ export class ApiClient {
 
     async getSqliteStorageUsage(): Promise<SqliteStorageUsageResponse> {
         return await this.request<SqliteStorageUsageResponse>('/api/storage/sqlite')
+    }
+
+    async getUsageSummary(range: '7d' | '30d' | 'all' = '7d'): Promise<UsageSummaryResponse> {
+        return await this.request<UsageSummaryResponse>(`/api/usage/summary?range=${encodeURIComponent(range)}`)
     }
 
     async listMachineDirectory(

@@ -9,6 +9,7 @@ import { FcmStore } from './fcmStore'
 import { ScratchlistStore } from './scratchlistStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
+import { UsageStore } from './usageStore'
 
 export type {
     StoredMachine,
@@ -28,8 +29,9 @@ export { FcmStore } from './fcmStore'
 export { ScratchlistStore } from './scratchlistStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
+export { UsageStore } from './usageStore'
 
-const SCHEMA_VERSION: number = 16
+const SCHEMA_VERSION: number = 17
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -38,7 +40,8 @@ const REQUIRED_TABLES = [
     'users',
     'push_subscriptions',
     'fcm_devices',
-    'session_scratchlist'
+    'session_scratchlist',
+    'usage_events'
 ] as const
 
 export class Store {
@@ -53,6 +56,7 @@ export class Store {
     readonly push: PushStore
     readonly fcm: FcmStore
     readonly scratchlist: ScratchlistStore
+    readonly usage: UsageStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -105,6 +109,7 @@ export class Store {
         this.push = new PushStore(this.db)
         this.fcm = new FcmStore(this.db)
         this.scratchlist = new ScratchlistStore(this.db)
+        this.usage = new UsageStore(this.db)
     }
 
     /**
@@ -173,6 +178,7 @@ export class Store {
             13: () => this.migrateFromV13ToV14(),
             14: () => this.migrateFromV14ToV15(),
             15: () => this.migrateFromV15ToV16(),
+            16: () => this.migrateFromV16ToV17(),
         })
 
         if (currentVersion === 0) {
@@ -333,6 +339,26 @@ export class Store {
             );
             CREATE INDEX IF NOT EXISTS idx_session_scratchlist_session_created
                 ON session_scratchlist(session_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS usage_events (
+                session_id TEXT NOT NULL,
+                source_key TEXT NOT NULL,
+                source_seq INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                agent TEXT NOT NULL,
+                model TEXT,
+                kind TEXT NOT NULL CHECK (kind IN ('delta', 'cumulative')),
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (session_id, source_key),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_usage_events_session_created
+                ON usage_events(session_id, created_at, source_seq);
+            CREATE INDEX IF NOT EXISTS idx_usage_events_created
+                ON usage_events(created_at);
         `)
     }
 
@@ -604,6 +630,30 @@ export class Store {
      * message as null.
      */
     private migrateFromV15ToV16(): void {}
+
+    private migrateFromV16ToV17(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS usage_events (
+                session_id TEXT NOT NULL,
+                source_key TEXT NOT NULL,
+                source_seq INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                agent TEXT NOT NULL,
+                model TEXT,
+                kind TEXT NOT NULL CHECK (kind IN ('delta', 'cumulative')),
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (session_id, source_key),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_usage_events_session_created
+                ON usage_events(session_id, created_at, source_seq);
+            CREATE INDEX IF NOT EXISTS idx_usage_events_created
+                ON usage_events(created_at);
+        `)
+    }
 
     private getSessionColumnNames(): Set<string> {
         const rows = this.db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>

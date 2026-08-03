@@ -34,6 +34,7 @@ export function SettingsNav(props: { activeId?: string; mobile?: boolean }) {
         voice: t('settings.hub.voice.summary'),
         machines: t('settings.hub.machines.summary'),
         storage: t('settings.storage.summary'),
+        usage: t('settings.usage.summary'),
         about: `v${__APP_VERSION__}`,
     }
     const visibleCategories = settingsCategories.filter((category) => category.id !== 'storage' || getNamespace(token) === 'default')

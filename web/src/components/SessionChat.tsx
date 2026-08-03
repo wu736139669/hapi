@@ -610,6 +610,33 @@ function SessionChatInner(props: SessionChatProps) {
     )
     const agentFlavor = props.session.metadata?.flavor ?? null
     const controlledByUser = props.session.agentState?.controlledByUser === true
+    const [claudeCustomModels, setClaudeCustomModels] = useState<string[]>([])
+    useEffect(() => {
+        if (agentFlavor !== 'claude') {
+            setClaudeCustomModels([])
+            return
+        }
+
+        let cancelled = false
+        try {
+            props.api.getClaudeCustomModels().then((result) => {
+                if (!cancelled) {
+                    setClaudeCustomModels(Array.isArray(result.models) ? result.models : [])
+                }
+            }).catch(() => {
+                // Custom models are optional; keep the built-in Claude presets.
+            })
+        } catch {
+            // Partial API clients (tests, older hubs) may not expose this method.
+        }
+        return () => {
+            cancelled = true
+        }
+    }, [agentFlavor, props.api])
+    const claudeModelOptions = useMemo(
+        () => claudeCustomModels.map((model) => ({ value: model, label: model })),
+        [claudeCustomModels]
+    )
     const codexCollaborationModeSupported = agentFlavor === 'codex' && !controlledByUser
     const codexModelsState = useCodexModels({
         api: props.api,
@@ -1440,7 +1467,9 @@ function SessionChatInner(props: SessionChatProps) {
                         effort={props.session.effort}
                         agentFlavor={agentFlavor}
                         availableModelOptions={
-                            agentFlavor === 'codex'
+                            agentFlavor === 'claude'
+                                ? claudeModelOptions
+                                : agentFlavor === 'codex'
                                 ? codexModelOptions
                                 : agentFlavor === 'cursor'
                                     ? (
