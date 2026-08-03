@@ -315,22 +315,32 @@ export function NewSession(props: {
     })
     const [agySelectedModel, setAgySelectedModel] = useState<string | null>(null)
     const [claudeCustomModels, setClaudeCustomModels] = useState<string[]>([])
+    const [claudeModelsLoaded, setClaudeModelsLoaded] = useState(false)
     useEffect(() => {
         let cancelled = false
+        setClaudeModelsLoaded(false)
         if (!props.api) {
+            setClaudeModelsLoaded(true)
             return
         }
         try {
             props.api.getClaudeCustomModels().then((result) => {
                 if (!cancelled) {
                     setClaudeCustomModels(Array.isArray(result.models) ? result.models : [])
+                    setClaudeModelsLoaded(true)
                 }
             }).catch(() => {
                 // Custom models are optional — fall back to the built-in presets.
+                if (!cancelled) {
+                    setClaudeCustomModels([])
+                    setClaudeModelsLoaded(true)
+                }
             })
         } catch {
             // Partial api clients (tests, older hub versions) without the
             // method must not break the New Session form.
+            setClaudeCustomModels([])
+            setClaudeModelsLoaded(true)
         }
         return () => {
             cancelled = true
@@ -345,6 +355,11 @@ export function NewSession(props: {
         }
         return options
     }, [claudeCustomModels])
+    const claudePreferredModelValues = useMemo(
+        () => agent === 'claude' ? claudeModelOptions.map((option) => option.value) : null,
+        [agent, claudeModelOptions]
+    )
+    const preferredModelCatalogReady = agent !== 'claude' || claudeModelsLoaded
     const runnerSpawnError = useMemo(
         () => formatRunnerSpawnError(selectedMachine),
         [selectedMachine]
@@ -728,14 +743,15 @@ export function NewSession(props: {
     }, [agent, machineId, deferredDirectory])
 
     useEffect(() => {
-        if (!machineId || preserveRestoredDraftRef.current) {
+        if (!machineId || preserveRestoredDraftRef.current || !preferredModelCatalogReady) {
             return
         }
 
         const preferred = resolvePreferredLaunchSettings(
             agent,
             loadPreferredLaunchSettings(machineId, agent),
-            legacyCodexYolo
+            legacyCodexYolo,
+            claudePreferredModelValues ?? undefined
         )
 
         setModel(agent === 'opencode' ? 'auto' : preferred.model)
@@ -751,7 +767,7 @@ export function NewSession(props: {
         setAgySelectedModel(
             agent === 'agy' && preferred.model !== 'auto' ? preferred.model : null
         )
-    }, [agent, legacyCodexYolo, machineId])
+    }, [agent, claudePreferredModelValues, legacyCodexYolo, machineId, preferredModelCatalogReady])
 
     useEffect(() => {
         if (
