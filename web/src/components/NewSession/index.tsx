@@ -1893,7 +1893,7 @@ export function NewSession(props: {
             <LaunchEffortSelector
                 agent={agent}
                 effort={effort}
-                isDisabled={isFormDisabled}
+                isDisabled={isFormDisabled || claudeModelsLoading}
                 onEffortChange={setEffort}
                 grokOptions={agent === 'grok' ? grokEffortOptions : undefined}
             />
