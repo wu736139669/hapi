@@ -31,7 +31,7 @@ export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 export { UsageStore } from './usageStore'
 
-const SCHEMA_VERSION: number = 17
+const SCHEMA_VERSION: number = 18
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -179,6 +179,7 @@ export class Store {
             14: () => this.migrateFromV14ToV15(),
             15: () => this.migrateFromV15ToV16(),
             16: () => this.migrateFromV16ToV17(),
+            17: () => this.migrateFromV17ToV18(),
         })
 
         if (currentVersion === 0) {
@@ -352,6 +353,10 @@ export class Store {
                 output_tokens INTEGER NOT NULL DEFAULT 0,
                 cache_read_tokens INTEGER NOT NULL DEFAULT 0,
                 cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                last_input_tokens INTEGER,
+                last_output_tokens INTEGER,
+                last_cache_read_tokens INTEGER,
+                last_cache_creation_tokens INTEGER,
                 PRIMARY KEY (session_id, source_key),
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
@@ -652,6 +657,18 @@ export class Store {
                 ON usage_events(session_id, created_at, source_seq);
             CREATE INDEX IF NOT EXISTS idx_usage_events_created
                 ON usage_events(created_at);
+        `)
+    }
+
+    private migrateFromV17ToV18(): void {
+        // Usage events are a rebuildable index; v18 changes their source key
+        // and baseline semantics, so stale rows must not be mixed with new ones.
+        this.db.exec(`
+            ALTER TABLE usage_events ADD COLUMN last_input_tokens INTEGER;
+            ALTER TABLE usage_events ADD COLUMN last_output_tokens INTEGER;
+            ALTER TABLE usage_events ADD COLUMN last_cache_read_tokens INTEGER;
+            ALTER TABLE usage_events ADD COLUMN last_cache_creation_tokens INTEGER;
+            DELETE FROM usage_events;
         `)
     }
 

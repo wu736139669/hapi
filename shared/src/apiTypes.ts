@@ -699,6 +699,7 @@ export type UsageSummaryBucket = {
     cacheReadTokens: number
     cacheCreationTokens: number
     totalTokens: number
+    uncachedTokens: number
     requests: number
 }
 
@@ -713,6 +714,7 @@ export type UsageSummaryResponse = {
         cacheReadTokens: number
         cacheCreationTokens: number
         totalTokens: number
+        uncachedTokens: number
         requests: number
         sessions: number
     }

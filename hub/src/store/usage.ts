@@ -14,6 +14,10 @@ export type UsageEvent = {
     outputTokens: number
     cacheReadTokens: number
     cacheCreationTokens: number
+    lastInputTokens: number | null
+    lastOutputTokens: number | null
+    lastCacheReadTokens: number | null
+    lastCacheCreationTokens: number | null
 }
 
 type UsageEventRow = {
@@ -28,6 +32,10 @@ type UsageEventRow = {
     output_tokens: number
     cache_read_tokens: number
     cache_creation_tokens: number
+    last_input_tokens: number | null
+    last_output_tokens: number | null
+    last_cache_read_tokens: number | null
+    last_cache_creation_tokens: number | null
 }
 
 function toUsageEvent(row: UsageEventRow): UsageEvent {
@@ -42,7 +50,11 @@ function toUsageEvent(row: UsageEventRow): UsageEvent {
         inputTokens: row.input_tokens,
         outputTokens: row.output_tokens,
         cacheReadTokens: row.cache_read_tokens,
-        cacheCreationTokens: row.cache_creation_tokens
+        cacheCreationTokens: row.cache_creation_tokens,
+        lastInputTokens: row.last_input_tokens,
+        lastOutputTokens: row.last_output_tokens,
+        lastCacheReadTokens: row.last_cache_read_tokens,
+        lastCacheCreationTokens: row.last_cache_creation_tokens
     }
 }
 
@@ -62,7 +74,11 @@ export function upsertUsageEvents(db: Database, events: UsageEvent[]): void {
                 input_tokens,
                 output_tokens,
                 cache_read_tokens,
-                cache_creation_tokens
+                cache_creation_tokens,
+                last_input_tokens,
+                last_output_tokens,
+                last_cache_read_tokens,
+                last_cache_creation_tokens
             ) VALUES (
                 @session_id,
                 @source_key,
@@ -74,7 +90,11 @@ export function upsertUsageEvents(db: Database, events: UsageEvent[]): void {
                 @input_tokens,
                 @output_tokens,
                 @cache_read_tokens,
-                @cache_creation_tokens
+                @cache_creation_tokens,
+                @last_input_tokens,
+                @last_output_tokens,
+                @last_cache_read_tokens,
+                @last_cache_creation_tokens
             )
             ON CONFLICT(session_id, source_key)
             DO UPDATE SET
@@ -86,7 +106,11 @@ export function upsertUsageEvents(db: Database, events: UsageEvent[]): void {
                 input_tokens = excluded.input_tokens,
                 output_tokens = excluded.output_tokens,
                 cache_read_tokens = excluded.cache_read_tokens,
-                cache_creation_tokens = excluded.cache_creation_tokens
+                cache_creation_tokens = excluded.cache_creation_tokens,
+                last_input_tokens = excluded.last_input_tokens,
+                last_output_tokens = excluded.last_output_tokens,
+                last_cache_read_tokens = excluded.last_cache_read_tokens,
+                last_cache_creation_tokens = excluded.last_cache_creation_tokens
         `)
 
         for (const event of events) {
@@ -101,7 +125,11 @@ export function upsertUsageEvents(db: Database, events: UsageEvent[]): void {
                 input_tokens: event.inputTokens,
                 output_tokens: event.outputTokens,
                 cache_read_tokens: event.cacheReadTokens,
-                cache_creation_tokens: event.cacheCreationTokens
+                cache_creation_tokens: event.cacheCreationTokens,
+                last_input_tokens: event.lastInputTokens,
+                last_output_tokens: event.lastOutputTokens,
+                last_cache_read_tokens: event.lastCacheReadTokens,
+                last_cache_creation_tokens: event.lastCacheCreationTokens
             })
         }
     })()
@@ -123,7 +151,11 @@ export function getUsageEvents(db: Database, sessionIds: string[]): UsageEvent[]
             input_tokens,
             output_tokens,
             cache_read_tokens,
-            cache_creation_tokens
+            cache_creation_tokens,
+            last_input_tokens,
+            last_output_tokens,
+            last_cache_read_tokens,
+            last_cache_creation_tokens
         FROM usage_events
         WHERE session_id IN (${placeholders})
         ORDER BY created_at ASC, source_seq ASC

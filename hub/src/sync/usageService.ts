@@ -70,20 +70,28 @@ function parseUsageEvent(session: StoredSession, message: StoredMessage): UsageE
             inputTokens,
             outputTokens,
             cacheReadTokens,
-            cacheCreationTokens
+            cacheCreationTokens,
+            lastInputTokens: null,
+            lastOutputTokens: null,
+            lastCacheReadTokens: null,
+            lastCacheCreationTokens: null
         }
     }
 
-    // Codex and ACP-compatible backends forward token_count snapshots. The
-    // `total` object is cumulative for a thread; aggregation below diffs it.
+    // Codex forwards cumulative thread totals plus the most recent request.
+    // ACP-compatible backends wrap per-request usage in `total`, so only Codex
+    // should be diffed as a cumulative stream.
     if (data.type === 'token_count' || data.type === 'usage') {
         const info = asRecord(data.info) ?? data
-        const total = asRecord(info.total) ?? info
+        const agent = sessionAgent(session)
+        const total = asRecord(info.total) ?? (agent === 'codex' ? null : info)
+        if (!total) return null
         const inputTokens = firstCount(total, 'inputTokens', 'input_tokens')
         const outputTokens = firstCount(total, 'outputTokens', 'output_tokens')
         const cacheReadTokens = firstCount(total, 'cachedInputTokens', 'cached_input_tokens', 'cacheReadTokens', 'cache_read_input_tokens')
         const cacheCreationTokens = firstCount(total, 'cacheWriteInputTokens', 'cache_write_input_tokens', 'cacheCreationTokens', 'cache_creation_input_tokens')
         if (inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens <= 0) return null
+        const last = asRecord(info.last)
         const threadId = typeof data.threadId === 'string'
             ? data.threadId
             : typeof data.thread_id === 'string'
@@ -94,19 +102,34 @@ function parseUsageEvent(session: StoredSession, message: StoredMessage): UsageE
             : typeof data.scope_role === 'string'
                 ? data.scope_role
                 : 'parent'
-        const agent = sessionAgent(session)
+        const isCumulative = agent === 'codex'
+        const turnId = typeof data.turnId === 'string'
+            ? data.turnId
+            : typeof data.turn_id === 'string'
+                ? data.turn_id
+                : ''
         return {
             sessionId: session.id,
-            sourceKey: `cumulative|${threadId}|${scope}|${message.id}`,
+            sourceKey: isCumulative
+                ? `cumulative|${threadId}|${scope}|${turnId}|${message.id}`
+                : `delta|${message.id}`,
             sourceSeq: message.seq,
             createdAt: message.createdAt,
             agent,
             model: sessionModel(session),
-            kind: 'cumulative',
+            kind: isCumulative ? 'cumulative' : 'delta',
             inputTokens,
             outputTokens,
             cacheReadTokens,
-            cacheCreationTokens
+            cacheCreationTokens,
+            lastInputTokens: last ? firstCount(last, 'inputTokens', 'input_tokens') : null,
+            lastOutputTokens: last ? firstCount(last, 'outputTokens', 'output_tokens') : null,
+            lastCacheReadTokens: last
+                ? firstCount(last, 'cachedInputTokens', 'cached_input_tokens', 'cacheReadTokens', 'cache_read_input_tokens')
+                : null,
+            lastCacheCreationTokens: last
+                ? firstCount(last, 'cacheWriteInputTokens', 'cache_write_input_tokens', 'cacheCreationTokens', 'cache_creation_input_tokens')
+                : null
         }
     }
 
@@ -137,6 +160,7 @@ function emptyTotals(): Totals {
         cacheReadTokens: 0,
         cacheCreationTokens: 0,
         totalTokens: 0,
+        uncachedTokens: 0,
         requests: 0
     }
 }
@@ -149,7 +173,13 @@ function addTotals(target: Totals, inputTokens: number, outputTokens: number, ca
     // Codex/Kimi inputTokens already includes cached input. Claude's raw
     // input_tokens excludes cache fields and is normalized before this call.
     target.totalTokens += inputTokens + outputTokens
+    target.uncachedTokens += Math.max(0, inputTokens - cacheReadTokens) + outputTokens
     target.requests += 1
+}
+
+function cumulativeDelta(current: number, previous: number | null, last: number | null): number {
+    if (previous === null) return last ?? current
+    return current >= previous ? current - previous : last ?? current
 }
 
 function toBucket(key: string, totals: Totals): UsageSummaryBucket {
@@ -180,24 +210,41 @@ export function getUsageSummary(store: Store, namespace: string, range: string |
     const byModel = new Map<string, Totals>()
     const sessionsWithUsage = new Set<string>()
     const cumulativePrevious = new Map<string, [number, number, number, number]>()
+    const cumulativeFingerprints = new Set<string>()
 
     for (const event of events) {
         let inputTokens = event.inputTokens
         let outputTokens = event.outputTokens
         let cacheReadTokens = event.cacheReadTokens
         let cacheCreationTokens = event.cacheCreationTokens
+        let duplicateCumulativeEvent = false
         if (event.kind === 'cumulative') {
-            const streamKey = event.sourceKey.split('|').slice(0, 3).join('|')
+            const sourceParts = event.sourceKey.split('|')
+            const streamKey = sourceParts.slice(0, 3).join('|')
             const previous = cumulativePrevious.get(streamKey)
-            if (previous) {
-                inputTokens = inputTokens >= previous[0] ? inputTokens - previous[0] : inputTokens
-                outputTokens = outputTokens >= previous[1] ? outputTokens - previous[1] : outputTokens
-                cacheReadTokens = cacheReadTokens >= previous[2] ? cacheReadTokens - previous[2] : cacheReadTokens
-                cacheCreationTokens = cacheCreationTokens >= previous[3] ? cacheCreationTokens - previous[3] : cacheCreationTokens
-            }
+            inputTokens = cumulativeDelta(inputTokens, previous?.[0] ?? null, event.lastInputTokens)
+            outputTokens = cumulativeDelta(outputTokens, previous?.[1] ?? null, event.lastOutputTokens)
+            cacheReadTokens = cumulativeDelta(cacheReadTokens, previous?.[2] ?? null, event.lastCacheReadTokens)
+            cacheCreationTokens = cumulativeDelta(cacheCreationTokens, previous?.[3] ?? null, event.lastCacheCreationTokens)
             cumulativePrevious.set(streamKey, [event.inputTokens, event.outputTokens, event.cacheReadTokens, event.cacheCreationTokens])
+            const turnId = sourceParts[3]
+            if (turnId) {
+                const fingerprint = [
+                    turnId,
+                    event.inputTokens,
+                    event.outputTokens,
+                    event.cacheReadTokens,
+                    event.cacheCreationTokens,
+                    event.lastInputTokens,
+                    event.lastOutputTokens,
+                    event.lastCacheReadTokens,
+                    event.lastCacheCreationTokens
+                ].join('|')
+                duplicateCumulativeEvent = cumulativeFingerprints.has(fingerprint)
+                cumulativeFingerprints.add(fingerprint)
+            }
         }
-        if (!isInRange(event) || inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens <= 0) continue
+        if (duplicateCumulativeEvent || !isInRange(event) || inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens <= 0) continue
         const normalizedInputTokens = event.agent === 'claude'
             ? inputTokens + cacheReadTokens + cacheCreationTokens
             : inputTokens

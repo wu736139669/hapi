@@ -76,9 +76,10 @@ export default function SettingsUsagePage() {
             {query.error ? <SettingsSection><SettingsRow label={t('settings.usage.error')} description={query.error instanceof Error ? query.error.message : undefined} /></SettingsSection> : null}
             {query.data ? (
                 <>
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                         {[
                             ['settings.usage.total', query.data.totals.totalTokens],
+                            ['settings.usage.uncached', query.data.totals.uncachedTokens],
                             ['settings.usage.input', query.data.totals.inputTokens],
                             ['settings.usage.output', query.data.totals.outputTokens],
                             ['settings.usage.cacheRead', query.data.totals.cacheReadTokens],
