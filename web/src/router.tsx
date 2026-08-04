@@ -62,6 +62,7 @@ import SettingsVoicePage from '@/routes/settings/voice'
 import SettingsVoiceVoicesPage from '@/routes/settings/voice-voices'
 import SettingsVoiceAdvancedPage from '@/routes/settings/voice-advanced'
 import SettingsMachinesPage from '@/routes/settings/machines'
+import SettingsNotificationsPage from '@/routes/settings/notifications'
 import SettingsAboutPage from '@/routes/settings/about'
 import SettingsStoragePage from '@/routes/settings/storage'
 import SettingsUsagePage from '@/routes/settings/usage'
@@ -1226,6 +1227,12 @@ const settingsMachinesRoute = createRoute({
     component: SettingsMachinesPage,
 })
 
+const settingsNotificationsRoute = createRoute({
+    getParentRoute: () => settingsRoute,
+    path: 'notifications',
+    component: SettingsNotificationsPage,
+})
+
 const settingsAboutRoute = createRoute({
     getParentRoute: () => settingsRoute,
     path: 'about',
@@ -1284,6 +1291,7 @@ export const routeTree = rootRoute.addChildren([
         settingsVoiceVoicesRoute,
         settingsVoiceAdvancedRoute,
         settingsMachinesRoute,
+        settingsNotificationsRoute,
         settingsStorageRoute,
         settingsUsageRoute,
         settingsAboutRoute,

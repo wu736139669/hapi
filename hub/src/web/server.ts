@@ -10,6 +10,7 @@ import { buildGeminiLiveSetupMessage, QWEN_REALTIME_MODEL } from '@hapi/protocol
 import { createQwenProxyWebSocketHandler } from './qwenProxyHandler'
 import { decodeVoiceSystemPromptParam } from '../voiceSystemPromptParam'
 import type { SyncEngine } from '../sync/syncEngine'
+import type { PushService } from '../push/pushService'
 import { createAuthMiddleware, type WebAppEnv } from './middleware/auth'
 import { createAuthRoutes } from './routes/auth'
 import { createBindRoutes } from './routes/bind'
@@ -24,6 +25,7 @@ import { createGitRoutes } from './routes/git'
 import { createCliRoutes } from './routes/cli'
 import { createCodexDesktopRoutes } from './routes/codexDesktop'
 import { createPushRoutes } from './routes/push'
+import { createNotificationPreferencesRoutes } from './routes/notificationPreferences'
 import { createDevicesRoutes } from './routes/devices'
 import { createVoiceRoutes } from './routes/voice'
 import { createClaudeModelsRoutes } from './routes/claudeModels'
@@ -217,6 +219,7 @@ function createWebApp(options: {
     jwtSecret: Uint8Array
     store: Store
     vapidPublicKey: string
+    pushService: PushService
     corsOrigins?: string[]
     embeddedAssetMap: Map<string, EmbeddedWebAsset> | null
     relayMode?: boolean
@@ -260,7 +263,8 @@ function createWebApp(options: {
         store: options.store,
         getSyncEngine: options.getSyncEngine
     }))
-    app.route('/api', createPushRoutes(options.store, options.vapidPublicKey))
+    app.route('/api', createPushRoutes(options.store, options.vapidPublicKey, options.pushService))
+    app.route('/api', createNotificationPreferencesRoutes(options.store))
     app.route('/api', createClaudeModelsRoutes(options.dataDir))
     app.route('/api', createDevicesRoutes(options.store))
     app.route('/api', createVoiceRoutes())
@@ -375,6 +379,7 @@ export async function startWebServer(options: {
     jwtSecret: Uint8Array
     store: Store
     vapidPublicKey: string
+    pushService: PushService
     socketEngine: SocketEngine
     corsOrigins?: string[]
     relayMode?: boolean
@@ -390,6 +395,7 @@ export async function startWebServer(options: {
         jwtSecret: options.jwtSecret,
         store: options.store,
         vapidPublicKey: options.vapidPublicKey,
+        pushService: options.pushService,
         corsOrigins: options.corsOrigins,
         embeddedAssetMap,
         dataDir: options.dataDir,
