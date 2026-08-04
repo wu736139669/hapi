@@ -136,7 +136,10 @@ export default defineConfig({
                 }
             },
             injectManifest: {
-                globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}']
+                globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+                // The app's main chunk exceeds workbox's 2MiB default precache
+                // cap; raising the limit keeps the SPA fully precached offline.
+                maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
             },
             devOptions: {
                 enabled: true,
