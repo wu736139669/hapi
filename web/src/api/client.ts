@@ -14,6 +14,8 @@ import type {
     MachinesResponse,
     MessagesResponse,
     PermissionMode,
+    NotificationCopyConfig,
+    NotificationCopyResponse,
     NotificationPreferences,
     NotificationPreferencesUpdate,
     PushSubscriptionPayload,
@@ -233,6 +235,17 @@ export class ApiClient {
         return await this.request<TestPushResponse>('/api/push/test', {
             method: 'POST',
             body: JSON.stringify({})
+        })
+    }
+
+    async getNotificationCopy(): Promise<NotificationCopyResponse> {
+        return await this.request<NotificationCopyResponse>('/api/notification-copy')
+    }
+
+    async updateNotificationCopy(copy: NotificationCopyConfig): Promise<NotificationCopyResponse> {
+        return await this.request<NotificationCopyResponse>('/api/notification-copy', {
+            method: 'PUT',
+            body: JSON.stringify(copy)
         })
     }
 

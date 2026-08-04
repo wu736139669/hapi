@@ -2,6 +2,8 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
+import type { NotificationCopyConfig } from '../push/notificationCopy'
+
 export interface Settings {
     machineId?: string
     machineIdConfirmedByServer?: boolean
@@ -24,6 +26,8 @@ export interface Settings {
     customClaudeModels?: string[]
     /** Per-hub relay auth key issued by the relay server (/issue) */
     relayAuthKey?: string
+    /** Custom push notification copy templates (web push only). Empty fields fall back to defaults. */
+    notificationCopy?: NotificationCopyConfig
 }
 
 export function getSettingsFile(dataDir: string): string {
