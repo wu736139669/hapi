@@ -1646,6 +1646,8 @@ function SessionChatInner(props: SessionChatProps) {
                                 api={props.api}
                                 pendingSchedule={pendingSchedule}
                                 pendingScheduleRevision={pendingScheduleRevision}
+                                steeringSupported={agentFlavor === 'codex' && !controlledByUser}
+                                isThinking={props.session.thinking}
                                 onEdit={({ pendingSchedule: restored }) => {
                                     // Restore the schedule so the clock button re-activates
                                     updatePendingSchedule(restored)

@@ -49,7 +49,7 @@ import type {
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor } from '@hapi/protocol'
-import type { CancelMessageResponse } from '@hapi/protocol/schemas'
+import type { CancelMessageResponse, SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
 import type { TranscriptionMode, TranscriptionProvider, TranscriptionProviderInfo } from '@hapi/protocol/voice'
 
 type ApiClientOptions = {
@@ -221,10 +221,12 @@ export class ApiClient {
         })
     }
 
-    async getCodexSessions(cwd?: string | null, machineId?: string | null): Promise<CodexLocalSessionsResponse> {
+    async getCodexSessions(cwd?: string | null, machineId?: string | null, modifiedSince?: number, modifiedBefore?: number): Promise<CodexLocalSessionsResponse> {
         const params = new URLSearchParams()
         if (cwd?.trim()) params.set('cwd', cwd.trim())
         if (machineId?.trim()) params.set('machineId', machineId.trim())
+        if (modifiedSince !== undefined) params.set('modifiedSince', String(modifiedSince))
+        if (modifiedBefore !== undefined) params.set('modifiedBefore', String(modifiedBefore))
         const query = params.size ? `?${params.toString()}` : ''
         return await this.request<CodexLocalSessionsResponse>(`/api/codex/sessions${query}`)
     }
@@ -466,6 +468,14 @@ export class ApiClient {
             { method: 'DELETE' }
         )
         return response as CancelMessageResponse
+    }
+
+    async steerQueuedMessage(sessionId: string, messageId: string): Promise<SteerQueuedMessageResponse> {
+        const response = await this.request(
+            `/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/steer`,
+            { method: 'POST', body: JSON.stringify({}) }
+        )
+        return response as SteerQueuedMessageResponse
     }
 
     async abortSession(sessionId: string): Promise<void> {

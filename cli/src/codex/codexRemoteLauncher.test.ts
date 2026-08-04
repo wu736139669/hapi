@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MessageQueue2 } from '@/utils/MessageQueue2';
 import type { EnhancedMode } from './loop';
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 
 const harness = vi.hoisted(() => ({
     notifications: [] as Array<{ method: string; params: unknown }>,
@@ -34,6 +35,10 @@ const harness = vi.hoisted(() => ({
     startTurnThreadIds: [] as string[],
     startTurnParams: [] as Array<Record<string, unknown>>,
     startTurnErrors: [] as Error[],
+    steerTurnParams: [] as Array<Record<string, unknown>>,
+    steerTurnErrors: [] as Error[],
+    deferSteerTurn: false,
+    resolveSteerTurn: null as (() => void) | null,
     interruptedTurns: [] as Array<{ threadId: string; turnId: string }>,
     interruptErrors: [] as Error[],
     rollbackCalls: [] as Array<{ threadId: string; numTurns: number }>,
@@ -935,6 +940,22 @@ vi.mock('./codexAppServerClient', () => {
             return {};
         }
 
+        async steerTurn(params?: Record<string, unknown>): Promise<{ turnId: string }> {
+            harness.steerTurnParams.push(params ?? {});
+            const error = harness.steerTurnErrors.shift();
+            if (error) {
+                throw error;
+            }
+            if (harness.deferSteerTurn) {
+                await new Promise<void>((resolve) => {
+                    harness.resolveSteerTurn = resolve;
+                });
+            }
+            return {
+                turnId: typeof params?.expectedTurnId === 'string' ? params.expectedTurnId : 'turn-unknown'
+            };
+        }
+
         async rollbackThread(params?: { threadId?: string; numTurns?: number }): Promise<{ thread: { id: string } }> {
             const threadId = params?.threadId ?? 'thread-unknown';
             harness.rollbackCalls.push({ threadId, numTurns: params?.numTurns ?? 0 });
@@ -981,7 +1002,8 @@ function createMode(): EnhancedMode {
 function createSessionStub(
     messages = ['hello from launcher test'],
     mode = createMode(),
-    isolateMessages = false
+    isolateMessages = false,
+    closeQueue = true
 ) {
     const queue = new MessageQueue2<EnhancedMode>((mode) => JSON.stringify(mode));
     messages.forEach((message, index) => {
@@ -993,7 +1015,9 @@ function createSessionStub(
             queue.push(message, mode);
         }
     });
-    queue.close();
+    if (closeQueue) {
+        queue.close();
+    }
 
     const sessionEvents: Array<{ type: string; [key: string]: unknown }> = [];
     const codexMessages: unknown[] = [];
@@ -1002,6 +1026,7 @@ function createSessionStub(
     const foundSessionIds: string[] = [];
     const resetThreadCalls: string[] = [];
     const collaborationModes: Array<EnhancedMode['collaborationMode'] | undefined> = [];
+    const consumedLocalIds: string[][] = [];
     let currentPermissionMode: EnhancedMode['permissionMode'] = mode.permissionMode;
     let currentModel: string | null | undefined = mode.model;
     let currentModelReasoningEffort = mode.modelReasoningEffort;
@@ -1031,6 +1056,9 @@ function createSessionStub(
         },
         sendSessionEvent(event: { type: string; [key: string]: unknown }) {
             sessionEvents.push(event);
+        },
+        emitMessagesConsumed(localIds: string[]) {
+            consumedLocalIds.push(localIds);
         }
     };
 
@@ -1101,6 +1129,7 @@ function createSessionStub(
         getModelReasoningEffort: () => currentModelReasoningEffort,
         getCollaborationMode: () => currentCollaborationMode,
         collaborationModes,
+        consumedLocalIds,
         getAgentState: () => agentState
     };
 }
@@ -1138,6 +1167,10 @@ describe('codexRemoteLauncher', () => {
         harness.startTurnThreadIds = [];
         harness.startTurnParams = [];
         harness.startTurnErrors = [];
+        harness.steerTurnParams = [];
+        harness.steerTurnErrors = [];
+        harness.deferSteerTurn = false;
+        harness.resolveSteerTurn = null;
         harness.interruptedTurns = [];
         harness.interruptErrors = [];
         harness.rollbackCalls = [];
@@ -1187,6 +1220,91 @@ describe('codexRemoteLauncher', () => {
         harness.emitCompletedChildTurnBeforeSuppressedParent = false;
         harness.emitTurnAbortedOnInterrupt = false;
         harness.bridgeOptions = [];
+    });
+
+    it('steers one queued message into the active turn and acknowledges it once', async () => {
+        harness.suppressTurnCompletion = true;
+        const mode = createMode();
+        const { session, rpcHandlers, consumedLocalIds } = createSessionStub(['first'], mode, false, false);
+        const running = codexRemoteLauncher(session as never);
+
+        await vi.waitFor(() => {
+            expect(session.thinking).toBe(true);
+            expect(rpcHandlers.has(RPC_METHODS.SteerQueuedMessage)).toBe(true);
+        });
+        session.queue.push('updated direction', mode, 'local-steer');
+
+        await expect(rpcHandlers.get(RPC_METHODS.SteerQueuedMessage)?.({ localId: 'local-steer' }))
+            .resolves.toEqual({ steered: true });
+        expect(harness.steerTurnParams).toEqual([{
+            threadId: 'thread-1',
+            expectedTurnId: 'turn-1',
+            input: [{ type: 'text', text: 'updated direction' }],
+            clientUserMessageId: 'local-steer'
+        }]);
+        expect(consumedLocalIds).toEqual([['local-steer']]);
+        expect(session.queue.size()).toBe(0);
+
+        await rpcHandlers.get(RPC_METHODS.Switch)?.({});
+        await running;
+    });
+
+    it('restores the queued message when turn/steer is unsupported', async () => {
+        harness.suppressTurnCompletion = true;
+        harness.steerTurnErrors.push(new Error('Method not found: turn/steer'));
+        const mode = createMode();
+        const { session, rpcHandlers, consumedLocalIds } = createSessionStub(['first'], mode, false, false);
+        const running = codexRemoteLauncher(session as never);
+
+        await vi.waitFor(() => expect(session.thinking).toBe(true));
+        session.queue.push('keep queued', mode, 'local-fallback');
+
+        await expect(rpcHandlers.get(RPC_METHODS.SteerQueuedMessage)?.({ localId: 'local-fallback' }))
+            .resolves.toEqual({ steered: false, error: 'Active turn is not steerable' });
+        expect(session.queue.queue.map(item => item.localId)).toEqual(['local-fallback']);
+        expect(consumedLocalIds).toEqual([]);
+
+        await rpcHandlers.get(RPC_METHODS.Switch)?.({});
+        await running;
+    });
+
+    it('keeps isolated control commands in the normal queue', async () => {
+        harness.suppressTurnCompletion = true;
+        const mode = createMode();
+        const { session, rpcHandlers, consumedLocalIds } = createSessionStub(['first'], mode, false, false);
+        const running = codexRemoteLauncher(session as never);
+
+        await vi.waitFor(() => expect(session.thinking).toBe(true));
+        session.queue.pushIsolated('/compact', mode, 'local-compact');
+
+        await expect(rpcHandlers.get(RPC_METHODS.SteerQueuedMessage)?.({ localId: 'local-compact' }))
+            .resolves.toEqual({ steered: false, error: 'Control commands cannot be steered' });
+        expect(harness.steerTurnParams).toEqual([]);
+        expect(session.queue.queue.map(item => item.localId)).toEqual(['local-compact']);
+        expect(consumedLocalIds).toEqual([]);
+
+        await rpcHandlers.get(RPC_METHODS.Switch)?.({});
+        await running;
+    });
+
+    it('does not acknowledge a late steer response after the session is aborted', async () => {
+        harness.suppressTurnCompletion = true;
+        harness.deferSteerTurn = true;
+        const mode = createMode();
+        const { session, rpcHandlers, consumedLocalIds } = createSessionStub(['first'], mode, false, false);
+        const running = codexRemoteLauncher(session as never);
+
+        await vi.waitFor(() => expect(session.thinking).toBe(true));
+        session.queue.push('late direction', mode, 'local-late');
+        const steer = rpcHandlers.get(RPC_METHODS.SteerQueuedMessage)?.({ localId: 'local-late' });
+        await vi.waitFor(() => expect(harness.steerTurnParams).toHaveLength(1));
+
+        await rpcHandlers.get(RPC_METHODS.Switch)?.({});
+        harness.resolveSteerTurn?.();
+
+        await expect(steer).resolves.toEqual({ steered: false, error: 'Steer cancelled' });
+        expect(consumedLocalIds).toEqual([]);
+        await running;
     });
 
     it('finishes a turn and emits ready when task lifecycle events include turn_id', async () => {

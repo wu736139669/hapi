@@ -307,7 +307,7 @@ export class ApiMachineClient {
                     : null
                 const allSessions = requestedIds
                     ? listLocalCodexSessionsWithMessagesByIds(requestedIds)
-                    : listLocalCodexSessionSummaries()
+                    : listLocalCodexSessionSummaries(undefined, parsed.data.modifiedSince, parsed.data.modifiedBefore)
                 const sessions = []
                 for (const session of allSessions) {
                     if (await this.isCodexSessionWithinWorkspaceRoots(session)) {

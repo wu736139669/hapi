@@ -1,12 +1,20 @@
 import { logger } from "@/ui/logger";
 
-interface QueueItem<T> {
+export interface QueueItem<T> {
     message: string;
     mode: T;
     modeHash: string;
     localId?: string;
     isolate?: boolean; // If true, this message must be processed alone
 }
+
+export type QueueReservation<T> = {
+    item: QueueItem<T>;
+    index: number;
+    previousItem?: QueueItem<T>;
+    nextItem?: QueueItem<T>;
+    state: 'reserved' | 'dispatching' | 'cancelled';
+};
 
 /**
  * A mode-aware message queue that stores messages with their modes.
@@ -17,6 +25,7 @@ export class MessageQueue2<T> {
     private waiter: ((hasMessages: boolean) => void) | null = null;
     private closed = false;
     private onMessageHandler: ((message: string, mode: T) => void) | null = null;
+    private readonly reservations = new Map<string, QueueReservation<T>>();
     onBatchConsumed: ((localIds: string[]) => void) | null = null;
     modeHasher: (mode: T) => string;
 
@@ -264,8 +273,101 @@ export class MessageQueue2<T> {
     cancelByLocalId(localId: string): boolean {
         if (!localId) return false;
         const idx = this.queue.findIndex(item => item.localId === localId);
-        if (idx === -1) return false;
-        this.queue.splice(idx, 1);
+        if (idx !== -1) {
+            this.queue.splice(idx, 1);
+            return true;
+        }
+
+        const reservation = this.reservations.get(localId);
+        if (!reservation || reservation.state === 'dispatching') return false;
+        reservation.state = 'cancelled';
+        this.reservations.delete(localId);
+        this.notifyWaiterIfQueueReady();
+        return true;
+    }
+
+    /** Reserve one queued item while an asynchronous delivery attempt is in flight. */
+    takeByLocalId(localId: string): QueueReservation<T> | null {
+        if (!localId || this.reservations.has(localId)) return null;
+        const index = this.queue.findIndex(item => item.localId === localId);
+        if (index === -1) return null;
+        const previousItem = this.queue[index - 1];
+        const nextItem = this.queue[index + 1];
+        const [item] = this.queue.splice(index, 1);
+        if (!item) return null;
+
+        const reservation: QueueReservation<T> = {
+            item,
+            index,
+            previousItem,
+            nextItem,
+            state: 'reserved'
+        };
+        this.reservations.set(localId, reservation);
+        return reservation;
+    }
+
+    /** Lock a reservation immediately before dispatch, after which it cannot be cancelled. */
+    beginReservationDispatch(reservation: QueueReservation<T>): boolean {
+        const localId = reservation.item.localId;
+        if (
+            reservation.state !== 'reserved'
+            || !localId
+            || this.reservations.get(localId) !== reservation
+        ) {
+            return false;
+        }
+        reservation.state = 'dispatching';
+        return true;
+    }
+
+    /** Restore a failed delivery attempt at its original queue position. */
+    restoreReservation(reservation: QueueReservation<T>): boolean {
+        const localId = reservation.item.localId;
+        if (
+            reservation.state === 'cancelled'
+            || !localId
+            || this.reservations.get(localId) !== reservation
+        ) {
+            return false;
+        }
+        if (this.closed) {
+            return false;
+        }
+
+        this.reservations.delete(localId);
+        const nextIndex = reservation.nextItem
+            ? this.queue.indexOf(reservation.nextItem)
+            : -1;
+        const previousIndex = reservation.previousItem
+            ? this.queue.indexOf(reservation.previousItem)
+            : -1;
+        const index = nextIndex >= 0
+            ? nextIndex
+            : previousIndex >= 0
+                ? previousIndex + 1
+                : Math.max(0, Math.min(reservation.index, this.queue.length));
+        this.queue.splice(index, 0, reservation.item);
+        if (this.waiter) {
+            const waiter = this.waiter;
+            this.waiter = null;
+            waiter(true);
+        }
+        return true;
+    }
+
+    /** Permanently remove a successfully delivered reservation. */
+    commitReservation(reservation: QueueReservation<T>): boolean {
+        const localId = reservation.item.localId;
+        if (
+            reservation.state === 'cancelled'
+            || !localId
+            || this.reservations.get(localId) !== reservation
+        ) {
+            return false;
+        }
+        this.reservations.delete(localId);
+        this.notifyWaiterIfQueueReady();
         return true;
     }
 
@@ -275,6 +377,10 @@ export class MessageQueue2<T> {
     reset(): void {
         logger.debug(`[MessageQueue2] reset() called. Clearing ${this.queue.length} messages`);
         this.queue = [];
+        for (const reservation of this.reservations.values()) {
+            reservation.state = 'cancelled';
+        }
+        this.reservations.clear();
         this.closed = false;
 
         // Clear waiter without calling it since we're not closing
@@ -287,6 +393,10 @@ export class MessageQueue2<T> {
     close(): void {
         logger.debug(`[MessageQueue2] close() called`);
         this.closed = true;
+        for (const reservation of this.reservations.values()) {
+            reservation.state = 'cancelled';
+        }
+        this.reservations.clear();
 
         // Notify any waiting caller
         if (this.waiter) {
@@ -310,29 +420,33 @@ export class MessageQueue2<T> {
         return this.queue.length;
     }
 
+    private notifyWaiterIfQueueReady(): void {
+        if (!this.waiter || this.queue.length === 0 || this.reservations.size > 0) {
+            return;
+        }
+        const waiter = this.waiter;
+        this.waiter = null;
+        waiter(true);
+    }
+
     /**
      * Wait for messages and return all messages with the same mode as a single string
      * Returns { message: string, mode: T } or null if aborted/closed
      */
     async waitForMessagesAndGetAsString(abortSignal?: AbortSignal): Promise<{ message: string, mode: T, isolate: boolean, hash: string, items: Array<{ message: string, localId?: string }> } | null> {
-        // If we have messages, return them immediately
-        if (this.queue.length > 0) {
-            return this.collectBatch();
+        while (true) {
+            // A steer reservation blocks later rows from overtaking it while
+            // turn/steer is in flight.
+            if (this.queue.length > 0 && this.reservations.size === 0) {
+                return this.collectBatch();
+            }
+            if (this.closed || abortSignal?.aborted) {
+                return null;
+            }
+            if (!await this.waitForMessages(abortSignal)) {
+                return null;
+            }
         }
-
-        // If closed or already aborted, return null
-        if (this.closed || abortSignal?.aborted) {
-            return null;
-        }
-
-        // Wait for messages to arrive
-        const hasMessages = await this.waitForMessages(abortSignal);
-
-        if (!hasMessages) {
-            return null;
-        }
-
-        return this.collectBatch();
     }
 
     /**

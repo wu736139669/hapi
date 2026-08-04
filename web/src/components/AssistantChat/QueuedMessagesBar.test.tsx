@@ -7,6 +7,7 @@ import {
     computeEditPendingSchedule,
     getQueuedMessageEditText,
     getQueuedMessagePreview,
+    isSteerableQueuedText,
     QueuedMessagesBar,
     sortQueuedMessages,
 } from './QueuedMessagesBar'
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => ({
     composerSetText: vi.fn(),
     addToast: vi.fn(),
     mutateAsync: vi.fn(),
+    steerMutateAsync: vi.fn(),
     resolveCancel: null as ((result: DeferredCancelResult) => void) | null,
     rejectCancel: null as ((reason?: unknown) => void) | null,
     saveDraft: vi.fn(),
@@ -48,6 +50,14 @@ vi.mock('@/hooks/mutations/useCancelQueuedMessage', () => ({
         isPending: false,
         variables: undefined,
         mutateAsync: mocks.mutateAsync,
+    }),
+}))
+
+vi.mock('@/hooks/mutations/useSteerQueuedMessage', () => ({
+    useSteerQueuedMessage: () => ({
+        isPending: false,
+        variables: undefined,
+        mutateAsync: mocks.steerMutateAsync,
     }),
 }))
 
@@ -119,6 +129,8 @@ beforeEach(() => {
     mocks.composerSetText.mockReset()
     mocks.addToast.mockReset()
     mocks.mutateAsync.mockReset()
+    mocks.steerMutateAsync.mockReset()
+    mocks.steerMutateAsync.mockResolvedValue({ status: 'steered', localId: 'local-server-message-id' })
     mocks.resolveCancel = null
     mocks.rejectCancel = null
     mocks.saveDraft.mockReset()
@@ -169,6 +181,49 @@ function installManualAnimationFrames() {
 
 afterEach(() => {
     vi.unstubAllGlobals()
+})
+
+describe('QueuedMessagesBar steering', () => {
+    it('offers steer for a queued Codex message while a turn is active', async () => {
+        mocks.messageWindowState = { messages: [makeQueuedMessage()] }
+        render(
+            <QueuedMessagesBar
+                sessionId="session-1"
+                api={null}
+                pendingSchedule={null}
+                pendingScheduleRevision={0}
+                steeringSupported
+                isThinking
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'queuedMessages.steerNow' }))
+
+        await waitFor(() => expect(mocks.steerMutateAsync).toHaveBeenCalledWith({
+            sessionId: 'session-1',
+            messageId: 'server-message-id',
+        }))
+    })
+
+    it('disables steer for future-scheduled and control messages', () => {
+        expect(isSteerableQueuedText('/compact')).toBe(false)
+        expect(isSteerableQueuedText('/goal update docs')).toBe(false)
+        expect(isSteerableQueuedText('please update docs')).toBe(true)
+
+        mocks.messageWindowState = { messages: [makeQueuedMessage(Date.now() + 60_000)] }
+        render(
+            <QueuedMessagesBar
+                sessionId="session-1"
+                api={null}
+                pendingSchedule={null}
+                pendingScheduleRevision={0}
+                steeringSupported
+                isThinking
+            />
+        )
+
+        expect(screen.getByRole('button', { name: 'queuedMessages.steerNow' })).toBeDisabled()
+    })
 })
 
 describe('QueuedMessagesBar edit restore', () => {

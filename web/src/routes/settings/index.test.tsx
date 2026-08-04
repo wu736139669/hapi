@@ -9,6 +9,7 @@ import SettingsAboutPage from './about'
 import SettingsVoicePage from './voice'
 import SettingsVoiceVoicesPage from './voice-voices'
 import SettingsVoiceAdvancedPage from './voice-advanced'
+import { CODEX_QUICK_IMPORT_PREFERENCES_STORAGE_KEY } from '@/hooks/useCodexQuickImportPreferences'
 
 const { context, navigate, setAppearance, setColorTheme, setFontScale, setTerminalFontSize, setComposerEnterBehavior, setCodexExplorationCollapsed, setVoice } = vi.hoisted(() => ({
     context: { token: '' },
@@ -236,6 +237,24 @@ describe('responsive settings pages', () => {
         expect(screen.getByText('Companion pairing')).toBeInTheDocument()
         fireEvent.click(screen.getByRole('radio', { name: '简体中文' }))
         expect(localStorage.getItem('hapi-lang')).toBe('zh-CN')
+    })
+
+    it('configures the Codex quick import window and load-more button', () => {
+        renderPage(<SettingsGeneralPage />)
+        const hours = screen.getByRole('spinbutton', { name: 'Initial time range' })
+        const showLoadMore = screen.getByRole('checkbox', { name: 'Show load more' })
+
+        expect(hours).toHaveValue(5)
+        expect(showLoadMore).toBeChecked()
+
+        fireEvent.change(hours, { target: { value: '8' } })
+        fireEvent.blur(hours)
+        fireEvent.click(showLoadMore)
+
+        expect(JSON.parse(localStorage.getItem(CODEX_QUICK_IMPORT_PREFERENCES_STORAGE_KEY) ?? '{}')).toEqual({
+            initialHours: 8,
+            showLoadMore: false
+        })
     })
 
     it('renders compact display controls without dropdown popovers', () => {

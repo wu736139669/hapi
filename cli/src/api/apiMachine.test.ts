@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, rmSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, mkdirSync, realpathSync, utimesSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -106,7 +106,7 @@ async function callCursorChatStoreStatus(
     return JSON.parse(raw) as unknown
 }
 
-async function callListCodexSessions(client: ApiMachineClient, machineId: string, params: { cwd?: string | null; sessionIds?: string[] }): Promise<unknown> {
+async function callListCodexSessions(client: ApiMachineClient, machineId: string, params: { cwd?: string | null; sessionIds?: string[]; modifiedSince?: number; modifiedBefore?: number }): Promise<unknown> {
     const manager = (client as unknown as { rpcHandlerManager: { handleRequest: (req: { method: string; params: string }) => Promise<string> } }).rpcHandlerManager
     const raw = await manager.handleRequest({
         method: `${machineId}:listCodexSessions`,
@@ -437,6 +437,36 @@ describe('ApiMachineClient Codex transcript handlers', () => {
             expect(result).toMatchObject({ success: true })
             const sessions = (result as { sessions: Array<{ id: string }> }).sessions
             expect(sessions.map((session) => session.id)).toEqual(['allowed-session-id'])
+        } finally {
+            client.shutdown()
+        }
+    })
+
+    it('filters Codex transcripts to the requested modification range', async () => {
+        const now = Date.now()
+        writeCodexTranscript(codexHome, 'recent.jsonl', {
+            id: 'recent-session-id',
+            cwd: workspaceRoot
+        }, 'recent prompt')
+        const oldFile = writeCodexTranscript(codexHome, 'old.jsonl', {
+            id: 'old-session-id',
+            cwd: workspaceRoot
+        }, 'old prompt')
+        const twoHoursAgo = new Date(now - 2 * 60 * 60 * 1000)
+        utimesSync(oldFile, twoHoursAgo, twoHoursAgo)
+
+        const machine = makeMachine('codex-machine-recent')
+        const client = new ApiMachineClient('cli-token', machine, [workspaceRoot])
+
+        try {
+            const result = await callListCodexSessions(client, machine.id, {
+                modifiedSince: now - 3 * 60 * 60 * 1000,
+                modifiedBefore: now - 60 * 60 * 1000
+            })
+
+            expect(result).toMatchObject({ success: true })
+            const sessions = (result as { sessions: Array<{ id: string }> }).sessions
+            expect(sessions.map((session) => session.id)).toEqual(['old-session-id'])
         } finally {
             client.shutdown()
         }

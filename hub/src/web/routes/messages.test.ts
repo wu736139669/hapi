@@ -28,9 +28,11 @@ function createApp(opts: {
         queuedLocalIds: string[]
         invokedLocalMessages: Array<{ localId: string; invokedAt: number }>
     }
+    steerQueuedMessage?: SyncEngine['steerQueuedMessage']
 }) {
     const sentMessages: Array<{ sessionId: string; payload: unknown }> = []
     const queuedStateCalls: Array<{ sessionId: string; localIds: string[] }> = []
+    const steerCalls: Array<{ sessionId: string; messageId: string }> = []
     const sendMessage = opts.sendMessage ?? (async (sessionId: string, payload: unknown) => {
         sentMessages.push({ sessionId, payload })
     })
@@ -59,6 +61,10 @@ function createApp(opts: {
             hasMore: false
         }
     }))
+    const steerQueuedMessage = opts.steerQueuedMessage ?? (async (sessionId: string, messageId: string) => {
+        steerCalls.push({ sessionId, messageId })
+        return { status: 'steered' as const, localId: `local-${messageId}` }
+    })
 
     const engine = {
         resolveSessionAccess: () => ({
@@ -69,6 +75,7 @@ function createApp(opts: {
         sendMessage,
         getQueuedState,
         cancelQueuedMessage: async () => ({ status: 'cancelled' }),
+        steerQueuedMessage,
         getMessagesPage,
     } as unknown as SyncEngine
 
@@ -79,7 +86,7 @@ function createApp(opts: {
     })
     app.route('/api', createMessagesRoutes(() => engine as SyncEngine))
 
-    return { app, sentMessages, queuedStateCalls }
+    return { app, sentMessages, queuedStateCalls, steerCalls }
 }
 
 describe('GET /api/sessions/:id/messages', () => {
@@ -439,5 +446,34 @@ describe('POST /api/sessions/:id/messages/queued-state', () => {
         expect(response.status).toBe(400)
         expect(await response.json()).toMatchObject({ error: 'Invalid body' })
         expect(queuedStateCalls).toHaveLength(0)
+    })
+})
+
+describe('POST /api/sessions/:id/messages/:messageId/steer', () => {
+    it('forwards an active session and queued message to the sync engine', async () => {
+        const { app, steerCalls } = createApp({})
+
+        const response = await app.request('/api/sessions/session-1/messages/message-1/steer', {
+            method: 'POST'
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+            status: 'steered',
+            localId: 'local-message-1'
+        })
+        expect(steerCalls).toEqual([{ sessionId: 'session-1', messageId: 'message-1' }])
+    })
+
+    it('rejects inactive sessions before calling the sync engine', async () => {
+        const { app, steerCalls } = createApp({ active: false })
+
+        const response = await app.request('/api/sessions/session-1/messages/message-1/steer', {
+            method: 'POST'
+        })
+
+        expect(response.status).toBe(409)
+        expect(await response.json()).toMatchObject({ code: 'session_inactive' })
+        expect(steerCalls).toHaveLength(0)
     })
 })

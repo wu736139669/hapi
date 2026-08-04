@@ -10,6 +10,7 @@
 import { isKnownFlavor, type LocalResumeTarget, type ResumableSession, type SessionEndReason } from '@hapi/protocol'
 import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessagesResponse, QueuedStateResponse, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
+import type { SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
 import { randomUUID } from 'node:crypto'
@@ -175,6 +176,8 @@ export class SyncEngine {
     private readonly opencodeClearTails = new Map<string, Promise<ClearOpencodeSessionResult>>()
     /** Serialize fork/rewind per session so concurrent native rollbacks cannot stack. */
     private readonly historyActionsInFlight = new Set<string>()
+    /** Serialize steer per session and prevent cancel from racing the same queued row. */
+    private readonly queuedSteersInFlight = new Map<string, { localId: string; barrier: Promise<void> }>()
 
     constructor(
         private readonly store: Store,
@@ -870,7 +873,83 @@ async uploadScratchlistAttachment(
         sessionId: string,
         messageId: string
     ): Promise<CancelQueuedMessageResult> {
+        const lookup = this.store.messages.lookupQueuedMessage(sessionId, messageId)
+        if (lookup.status === 'queued' && lookup.localId) {
+            const inFlight = this.queuedSteersInFlight.get(sessionId)
+            if (inFlight?.localId === lookup.localId) {
+                await inFlight.barrier
+            }
+        }
         return this.messageService.cancelQueuedMessage(sessionId, messageId)
+    }
+
+    async steerQueuedMessage(
+        sessionId: string,
+        messageId: string
+    ): Promise<SteerQueuedMessageResponse> {
+        const session = this.getSession(sessionId)
+        if (!session) {
+            return { status: 'failed', error: 'Session not found', localId: null }
+        }
+        if (session.metadata?.flavor !== 'codex') {
+            return { status: 'failed', error: 'Steering is only supported for Codex sessions', localId: null }
+        }
+        if (session.agentState?.controlledByUser === true) {
+            return { status: 'failed', error: 'Steering is only available for remote sessions', localId: null }
+        }
+
+        const lookup = this.store.messages.lookupQueuedMessage(sessionId, messageId)
+        if (lookup.status === 'absent') {
+            return { status: 'failed', error: 'Message not found', localId: null }
+        }
+        if (lookup.status === 'invoked') {
+            const message = lookup.message
+            return {
+                status: 'invoked',
+                message: {
+                    id: message.id,
+                    seq: message.seq,
+                    localId: message.localId,
+                    content: message.content,
+                    createdAt: message.createdAt,
+                    invokedAt: message.invokedAt,
+                    scheduledAt: message.scheduledAt
+                }
+            }
+        }
+
+        const { localId, scheduledAt } = lookup
+        if (!localId) {
+            return { status: 'failed', error: 'Message has no localId', localId: null }
+        }
+        if (scheduledAt !== null && scheduledAt > Date.now()) {
+            return { status: 'failed', error: 'Scheduled messages cannot be steered', localId }
+        }
+
+        if (this.queuedSteersInFlight.has(sessionId)) {
+            return { status: 'failed', error: 'Steer already in progress', localId }
+        }
+
+        const rpcPromise = this.rpcGateway.steerQueuedMessage(sessionId, localId)
+        const barrier = rpcPromise.then(() => undefined, () => undefined)
+        const operation = { localId, barrier }
+        this.queuedSteersInFlight.set(sessionId, operation)
+        try {
+            const result = await rpcPromise
+            return result.steered
+                ? { status: 'steered', localId }
+                : { status: 'failed', error: result.error ?? 'Steer failed', localId }
+        } catch (error) {
+            return {
+                status: 'failed',
+                error: error instanceof Error ? error.message : 'Steer failed',
+                localId
+            }
+        } finally {
+            if (this.queuedSteersInFlight.get(sessionId) === operation) {
+                this.queuedSteersInFlight.delete(sessionId)
+            }
+        }
     }
 
     sweepImmediateQueuedOnSessionEnd(sessionId: string, invokedAt: number): void {
@@ -3379,8 +3458,8 @@ async uploadScratchlistAttachment(
         return await this.rpcGateway.listCodexModelsForMachine(machineId)
     }
 
-    async listCodexSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[]) {
-        return await this.rpcGateway.listCodexSessionsForMachine(machineId, cwd, sessionIds)
+    async listCodexSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[], modifiedSince?: number, modifiedBefore?: number) {
+        return await this.rpcGateway.listCodexSessionsForMachine(machineId, cwd, sessionIds, modifiedSince, modifiedBefore)
     }
 
     async readAbsoluteFileForMachine(machineId: string, path: string): Promise<import('./rpcGateway').RpcReadFileResponse> {

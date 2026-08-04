@@ -302,7 +302,8 @@ function deduplicateAdjacentImportedMessages(messages: CodexImportedMessageConte
 function parseCodexLocalSession(
     filePath: string,
     includeMessages: boolean,
-    sessionIndexTitles = new Map<string, CodexSessionIndexTitle>()
+    sessionIndexTitles = new Map<string, CodexSessionIndexTitle>(),
+    knownModifiedAt?: number
 ): LocalCodexSessionWithMessages | LocalCodexSessionSummary | null {
     let content: string
     try { content = readFileSync(filePath, 'utf-8') } catch { return null }
@@ -358,8 +359,10 @@ function parseCodexLocalSession(
     const sessionIndexTitle = sessionIndexTitles.get(sessionId)?.threadName ?? null
     const changedTitle = getLatestCodexChangedTitle(lines)
     const lastUserMessage = getLatestCodexUserMessage(lines)
-    let modifiedAt = Date.now()
-    try { modifiedAt = statSync(filePath).mtimeMs } catch {}
+    let modifiedAt = knownModifiedAt ?? Date.now()
+    if (knownModifiedAt === undefined) {
+        try { modifiedAt = statSync(filePath).mtimeMs } catch {}
+    }
     const summary = {
         id: sessionId,
         title: getCodexSessionTitle(cwd, sessionId, sessionIndexTitle, changedTitle, firstUserMessage),
@@ -376,15 +379,19 @@ function parseCodexLocalSession(
     return includeMessages ? { ...summary, messages: deduplicateAdjacentImportedMessages(messages) } : summary
 }
 
-function listLocalCodexSessions(includeMessages: false, limit?: number): LocalCodexSessionSummary[]
-function listLocalCodexSessions(includeMessages: true, limit?: number): LocalCodexSessionWithMessages[]
-function listLocalCodexSessions(includeMessages: boolean, limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT): Array<LocalCodexSessionSummary | LocalCodexSessionWithMessages> {
+function listLocalCodexSessions(includeMessages: false, limit?: number, modifiedSince?: number, modifiedBefore?: number): LocalCodexSessionSummary[]
+function listLocalCodexSessions(includeMessages: true, limit?: number, modifiedSince?: number, modifiedBefore?: number): LocalCodexSessionWithMessages[]
+function listLocalCodexSessions(includeMessages: boolean, limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT, modifiedSince?: number, modifiedBefore?: number): Array<LocalCodexSessionSummary | LocalCodexSessionWithMessages> {
     const files: string[] = []
     for (const root of getCodexSessionRoots()) collectJsonlFiles(root, files)
     const sessionIndexTitles = readCodexSessionIndexTitles()
     const deduped = new Map<string, LocalCodexSessionSummary | LocalCodexSessionWithMessages>()
     for (const file of files) {
-        const session = parseCodexLocalSession(file, includeMessages, sessionIndexTitles)
+        let modifiedAt: number | undefined
+        try { modifiedAt = statSync(file).mtimeMs } catch {}
+        if (modifiedSince !== undefined && (modifiedAt === undefined || modifiedAt < modifiedSince)) continue
+        if (modifiedBefore !== undefined && (modifiedAt === undefined || modifiedAt >= modifiedBefore)) continue
+        const session = parseCodexLocalSession(file, includeMessages, sessionIndexTitles, modifiedAt)
         if (!session) continue
         const previous = deduped.get(session.id)
         if (!previous || previous.modifiedAt < session.modifiedAt) deduped.set(session.id, session)
@@ -392,8 +399,8 @@ function listLocalCodexSessions(includeMessages: boolean, limit = DEFAULT_CODEX_
     return Array.from(deduped.values()).sort((a, b) => b.modifiedAt - a.modifiedAt).slice(0, limit)
 }
 
-export function listLocalCodexSessionSummaries(limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT): LocalCodexSessionSummary[] {
-    return listLocalCodexSessions(false, limit)
+export function listLocalCodexSessionSummaries(limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT, modifiedSince?: number, modifiedBefore?: number): LocalCodexSessionSummary[] {
+    return listLocalCodexSessions(false, limit, modifiedSince, modifiedBefore)
 }
 
 export function listLocalCodexSessionsWithMessages(limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT): LocalCodexSessionWithMessages[] {

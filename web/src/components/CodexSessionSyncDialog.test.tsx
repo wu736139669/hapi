@@ -246,10 +246,6 @@ describe('CodexSessionSyncDialog', () => {
     })
 
     it('shows imported badge on original session and fork badge on forked session', () => {
-        window.localStorage.setItem('hapi.codexImportedSessions', JSON.stringify({
-            'original-session-id': Date.now()
-        }))
-
         renderDialog([
             {
                 id: 'fork-session-id',
@@ -271,7 +267,8 @@ describe('CodexSessionSyncDialog', () => {
                 originator: 'Codex Desktop',
                 cliVersion: '0.142.2',
                 source: 'vscode',
-                threadSource: 'user'
+                threadSource: 'user',
+                hapiSessionId: 'hapi-session-id'
             }
         ])
 

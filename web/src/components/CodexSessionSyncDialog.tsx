@@ -10,7 +10,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { SelectControl } from '@/components/ui/select-control'
 import { useTranslation } from '@/lib/use-translation'
-import { readCodexImportedSessions, subscribeCodexImportedSessions } from '@/lib/codexImportedSessions'
 
 const ALL_WORKDIR_FILTER = '__all__'
 
@@ -79,11 +78,8 @@ export function CodexSessionSyncDialog(props: {
     const [searchQuery, setSearchQuery] = useState('')
     const [archiveError, setArchiveError] = useState<string | null>(null)
     const wasOpenRef = useRef(false)
-    const [importedSessions, setImportedSessions] = useState(() => readCodexImportedSessions())
     const [archiveMenuSessionId, setArchiveMenuSessionId] = useState<string | null>(null)
     const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-    useEffect(() => subscribeCodexImportedSessions(() => setImportedSessions(readCodexImportedSessions())), [])
 
     const sessionIdSet = useMemo(
         () => new Set(sessions.map((session) => session.id)),
@@ -159,12 +155,15 @@ export function CodexSessionSyncDialog(props: {
         if (!isOpen || isLoading || hasInitializedSelection) return
 
         // 中文注释：弹窗打开后等本地 Codex 会话列表加载完成，再尝试默认勾选当前 Hapi 会话关联的 Codex thread，避免异步加载时默认值丢失。
-        const defaultSelected = currentCodexSessionId && sessionIdSet.has(currentCodexSessionId) && !importedSessions[currentCodexSessionId]
+        const currentSession = currentCodexSessionId
+            ? sessions.find((session) => session.id === currentCodexSessionId)
+            : null
+        const defaultSelected = currentCodexSessionId && sessionIdSet.has(currentCodexSessionId) && !currentSession?.hapiSessionId
             ? [currentCodexSessionId]
             : []
         setSelectedSessionIds(defaultSelected)
         setHasInitializedSelection(true)
-    }, [currentCodexSessionId, hasInitializedSelection, importedSessions, isLoading, isOpen, sessionIdSet])
+    }, [currentCodexSessionId, hasInitializedSelection, isLoading, isOpen, sessionIdSet, sessions])
 
 
     const clearLongPressTimer = () => {
@@ -340,7 +339,7 @@ export function CodexSessionSyncDialog(props: {
                             <div className="divide-y divide-[var(--app-border)]">
                                 {filteredSessions.map((session) => {
                                     const checked = selectedSessionIdSet.has(session.id)
-                                    const isImported = Boolean(importedSessions[session.id])
+                                    const isImported = Boolean(session.hapiSessionId)
                                     const time = formatCodexSessionTime(session.modifiedAt)
                                     const preview = getCodexSessionPreview(session)
                                     const cwd = getCodexSessionCwd(session)

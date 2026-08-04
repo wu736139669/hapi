@@ -65,6 +65,7 @@ type CodexLocalSessionSummary = {
     modifiedAt: number
     originator?: string | null
     cliVersion?: string | null
+    hapiSessionId?: string | null
 }
 
 type CodexLocalSessionsResponse = {
@@ -952,12 +953,20 @@ async function listCodexSessionsViaMachine(options: {
     cwd?: string | null
     machineId?: string | null
     sessionIds?: string[]
+    modifiedSince?: number
+    modifiedBefore?: number
 }): Promise<{ sessions: RemoteCodexSession[]; machineId?: string; error?: string }> {
     const machineId = resolveCodexImportMachineId(options.cwd, options.namespace, options.engine, options.machineId)
     if (!machineId || !options.engine) {
         return { sessions: [], error: 'No online machine available for Codex history import' }
     }
-    const result = await options.engine.listCodexSessionsForMachine(machineId, options.cwd, options.sessionIds)
+    const result = await options.engine.listCodexSessionsForMachine(
+        machineId,
+        options.cwd,
+        options.sessionIds,
+        options.modifiedSince,
+        options.modifiedBefore
+    )
     if (!result || typeof result !== 'object') {
         return { sessions: [], machineId, error: 'Unexpected Codex sessions RPC response' }
     }
@@ -1135,6 +1144,24 @@ function isImportCandidateReusable(candidate: ImportCandidate): boolean {
         return false
     }
     return true
+}
+
+function findImportedHapiSessionId(
+    candidates: ImportCandidate[],
+    codexSessionId: string,
+    sourceMachineId?: string | null
+): string | null {
+    const match = candidates
+        .filter((candidate) => candidate.persisted && isImportCandidateReusable(candidate))
+        .filter((candidate) => getCodexImportIds(candidate.metadata).includes(codexSessionId))
+        .filter((candidate) => (
+            !sourceMachineId
+            || typeof candidate.metadata?.machineId !== 'string'
+            || candidate.metadata.machineId === sourceMachineId
+        ))
+        .sort((a, b) => b.updatedAt - a.updatedAt)[0]
+
+    return match?.sessionId ?? null
 }
 
 function selectImportTargetSession(
@@ -2056,11 +2083,26 @@ export function createCodexDesktopRoutes(options: {
     app.get('/codex/sessions', async (c) => {
         const cwd = c.req.query('cwd')?.trim() || null
         const machineId = c.req.query('machineId')?.trim() || null
+        const modifiedSinceQuery = c.req.query('modifiedSince')?.trim()
+        const modifiedSince = modifiedSinceQuery ? Number(modifiedSinceQuery) : undefined
+        const modifiedBeforeQuery = c.req.query('modifiedBefore')?.trim()
+        const modifiedBefore = modifiedBeforeQuery ? Number(modifiedBeforeQuery) : undefined
+        if (modifiedSinceQuery && (modifiedSince === undefined || !Number.isFinite(modifiedSince) || modifiedSince < 0)) {
+            return c.json({ error: 'modifiedSince must be a non-negative timestamp' }, 400)
+        }
+        if (modifiedBeforeQuery && (modifiedBefore === undefined || !Number.isFinite(modifiedBefore) || modifiedBefore < 0)) {
+            return c.json({ error: 'modifiedBefore must be a non-negative timestamp' }, 400)
+        }
+        if (modifiedSince !== undefined && modifiedBefore !== undefined && modifiedSince >= modifiedBefore) {
+            return c.json({ error: 'modifiedSince must be earlier than modifiedBefore' }, 400)
+        }
         const remote = await listCodexSessionsViaMachine({
             engine: options.getSyncEngine(),
             namespace: c.get('namespace'),
             cwd,
-            machineId
+            machineId,
+            modifiedSince,
+            modifiedBefore
         })
         if (remote.error) {
             return c.json({
@@ -2070,9 +2112,13 @@ export function createCodexDesktopRoutes(options: {
                 ...(remote.machineId ? { machineId: remote.machineId } : {})
             } satisfies CodexLocalSessionsResponse, 503)
         }
+        const importCandidates = collectImportCandidates(options.store, c.get('namespace'), options.getSyncEngine)
         return c.json({
             success: true,
-            sessions: remote.sessions.map(({ messages: _messages, ...summary }) => summary),
+            sessions: remote.sessions.map(({ messages: _messages, ...summary }) => ({
+                ...summary,
+                hapiSessionId: findImportedHapiSessionId(importCandidates, summary.id, remote.machineId)
+            })),
             ...(remote.machineId ? { machineId: remote.machineId } : {})
         } satisfies CodexLocalSessionsResponse)
     })

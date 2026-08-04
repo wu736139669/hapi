@@ -573,6 +573,98 @@ describe('MessageQueue2', () => {
         });
     });
 
+    describe('queue reservations', () => {
+        it('restores a failed dispatch at the original position', () => {
+            const queue = new MessageQueue2<string>(mode => mode);
+            queue.push('first', 'local', 'id-first');
+            queue.push('steer', 'local', 'id-steer');
+            queue.push('last', 'local', 'id-last');
+
+            const reservation = queue.takeByLocalId('id-steer');
+            expect(reservation?.item.message).toBe('steer');
+            expect(queue.queue.map(item => item.localId)).toEqual(['id-first', 'id-last']);
+
+            expect(queue.beginReservationDispatch(reservation!)).toBe(true);
+            expect(queue.restoreReservation(reservation!)).toBe(true);
+            expect(queue.queue.map(item => item.localId)).toEqual(['id-first', 'id-steer', 'id-last']);
+        });
+
+        it('commits a successful dispatch without firing normal batch consumption', () => {
+            const queue = new MessageQueue2<string>(mode => mode);
+            const consumed: string[][] = [];
+            queue.onBatchConsumed = localIds => consumed.push(localIds);
+            queue.push('steer', 'local', 'id-steer');
+
+            const reservation = queue.takeByLocalId('id-steer');
+            expect(queue.beginReservationDispatch(reservation!)).toBe(true);
+            expect(queue.commitReservation(reservation!)).toBe(true);
+            expect(queue.restoreReservation(reservation!)).toBe(false);
+            expect(queue.size()).toBe(0);
+            expect(consumed).toEqual([]);
+        });
+
+        it('lets cancellation invalidate a reservation before dispatch', () => {
+            const queue = new MessageQueue2<string>(mode => mode);
+            queue.push('steer', 'local', 'id-steer');
+
+            const reservation = queue.takeByLocalId('id-steer');
+            expect(queue.cancelByLocalId('id-steer')).toBe(true);
+            expect(reservation?.state).toBe('cancelled');
+            expect(queue.beginReservationDispatch(reservation!)).toBe(false);
+            expect(queue.restoreReservation(reservation!)).toBe(false);
+        });
+
+        it('invalidates reservations on reset so late callbacks cannot restore them', () => {
+            const queue = new MessageQueue2<string>(mode => mode);
+            queue.push('steer', 'local', 'id-steer');
+            const reservation = queue.takeByLocalId('id-steer');
+            expect(queue.beginReservationDispatch(reservation!)).toBe(true);
+
+            queue.reset();
+
+            expect(reservation?.state).toBe('cancelled');
+            expect(queue.restoreReservation(reservation!)).toBe(false);
+            expect(queue.commitReservation(reservation!)).toBe(false);
+            expect(queue.size()).toBe(0);
+        });
+
+        it('blocks later rows until an earlier reservation is restored', async () => {
+            const queue = new MessageQueue2<string>(mode => mode);
+            queue.push('first', 'local', 'id-first');
+            queue.push('second', 'local', 'id-second');
+            const reservation = queue.takeByLocalId('id-first');
+            const nextBatch = queue.waitForMessagesAndGetAsString();
+            let settled = false;
+            void nextBatch.then(() => {
+                settled = true;
+            });
+
+            await Promise.resolve();
+            expect(settled).toBe(false);
+
+            expect(queue.restoreReservation(reservation!)).toBe(true);
+            await expect(nextBatch).resolves.toMatchObject({
+                message: 'first\nsecond',
+                items: [
+                    { message: 'first', localId: 'id-first' },
+                    { message: 'second', localId: 'id-second' }
+                ]
+            });
+        });
+
+        it('uses neighboring rows when cancellation shifts the original index', () => {
+            const queue = new MessageQueue2<string>(mode => mode);
+            queue.push('first', 'local', 'id-first');
+            queue.push('steer', 'local', 'id-steer');
+            queue.push('last', 'local', 'id-last');
+            const reservation = queue.takeByLocalId('id-steer');
+
+            expect(queue.cancelByLocalId('id-first')).toBe(true);
+            expect(queue.restoreReservation(reservation!)).toBe(true);
+            expect(queue.queue.map(item => item.localId)).toEqual(['id-steer', 'id-last']);
+        });
+    });
+
     it('should differentiate between pushImmediate and pushIsolateAndClear behavior', async () => {
         const queue = new MessageQueue2<{ type: string }>((mode) => mode.type);
         

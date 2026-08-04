@@ -16,6 +16,8 @@ import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
 import { App } from '@/App'
 import { SessionChat } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
+import { CodexQuickImportDialog } from '@/components/CodexQuickImportDialog'
+import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { NewSession } from '@/components/NewSession'
 import { WorkspaceBrowser } from '@/components/WorkspaceBrowser'
 import { LoadingState } from '@/components/LoadingState'
@@ -207,6 +209,7 @@ function SessionsPage() {
     const { sessions, isLoading, error, refetch } = useSessions(api)
     const [initializedHub, setInitializedHub] = useState<string | null>(null)
     const { machines } = useMachines(api, true)
+    const [isCodexQuickImportOpen, setIsCodexQuickImportOpen] = useState(false)
     const handleRefresh = useCallback(() => {
         return (async () => {
             try {
@@ -265,6 +268,13 @@ function SessionsPage() {
                 : { directory: args.directory }
         })
     }, [navigate])
+    const handleCodexImported = useCallback(async (sessionId: string) => {
+        await refetch()
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId }
+        })
+    }, [navigate, refetch])
 
     return (
         <>
@@ -295,6 +305,15 @@ function SessionsPage() {
                         renderHeader={false}
                         headerActions={(
                             <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsCodexQuickImportOpen(true)}
+                                    className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
+                                    title={t('codexSync.tooltip')}
+                                    aria-label={t('codexSync.tooltip')}
+                                >
+                                    <AgentFlavorIcon flavor="codex" className="h-5 w-5" />
+                                </button>
                                 {canBrowse && (
                                     <button
                                         type="button"
@@ -343,6 +362,15 @@ function SessionsPage() {
                 </div>
             </div>
             </div>
+            {api ? (
+                <CodexQuickImportDialog
+                    api={api}
+                    machines={machines}
+                    isOpen={isCodexQuickImportOpen}
+                    onClose={() => setIsCodexQuickImportOpen(false)}
+                    onImported={handleCodexImported}
+                />
+            ) : null}
         </>
     )
 }

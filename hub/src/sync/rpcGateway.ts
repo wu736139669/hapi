@@ -34,6 +34,9 @@ import type { Server } from 'socket.io'
 import type { RpcRegistry } from '../socket/rpcRegistry'
 
 const DEFAULT_RPC_TIMEOUT_MS = 30_000
+// The CLI gives app-server turn/steer 30s to settle. Keep the outer socket RPC
+// alive long enough to receive its authoritative restore-or-consume result.
+const STEER_RPC_TIMEOUT_MS = 35_000
 const MODEL_LIST_RPC_TIMEOUT_MS = 120_000
 
 /**
@@ -333,8 +336,8 @@ export class RpcGateway {
         return await this.machineRpc(machineId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
     }
 
-    async listCodexSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[]): Promise<RpcListCodexSessionsResponse> {
-        const result = await this.machineRpc(machineId, RPC_METHODS.ListCodexSessions, { cwd: cwd ?? null, sessionIds }, MODEL_LIST_RPC_TIMEOUT_MS)
+    async listCodexSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[], modifiedSince?: number, modifiedBefore?: number): Promise<RpcListCodexSessionsResponse> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.ListCodexSessions, { cwd: cwd ?? null, sessionIds, modifiedSince, modifiedBefore }, MODEL_LIST_RPC_TIMEOUT_MS)
         return ListCodexSessionsRpcResponseSchema.parse(result)
     }
 
@@ -387,6 +390,21 @@ export class RpcGateway {
             {},
             MODEL_LIST_RPC_TIMEOUT_MS
         ) as RpcListCopilotModelsResponse
+    }
+
+    async steerQueuedMessage(
+        sessionId: string,
+        localId: string
+    ): Promise<{ steered: boolean; error?: string }> {
+        return await this.sessionRpc(
+            sessionId,
+            RPC_METHODS.SteerQueuedMessage,
+            { localId },
+            STEER_RPC_TIMEOUT_MS
+        ) as {
+            steered: boolean
+            error?: string
+        }
     }
 
     /** Generic Pi RPC call — routes all Pi-specific session RPCs through

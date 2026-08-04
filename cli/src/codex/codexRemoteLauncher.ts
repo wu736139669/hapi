@@ -231,6 +231,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
     private diffProcessor: DiffProcessor | null = null;
     private happyServer: HappyServer | null = null;
     private abortController: AbortController = new AbortController();
+    private steerEpoch = 0;
     private currentThreadId: string | null = null;
     private currentTurnId: string | null = null;
     private readonly activeChildTurns = new Map<string, string>();
@@ -287,6 +288,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
     }
 
     private async handleAbort(): Promise<void> {
+        this.steerEpoch++;
         logger.debug('[Codex] Abort requested - stopping current task');
         try {
             await this.interruptActiveTurns('abort');
@@ -1902,6 +1904,75 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             loopWakeWaiter = finish;
             signal.addEventListener('abort', finish, { once: true });
         });
+
+        session.client.rpcHandlerManager.registerHandler(
+            RPC_METHODS.SteerQueuedMessage,
+            async (payload: unknown): Promise<{ steered: boolean; error?: string }> => {
+                const localId = typeof (payload as { localId?: unknown } | null)?.localId === 'string'
+                    ? (payload as { localId: string }).localId
+                    : '';
+                if (!localId) {
+                    return { steered: false, error: 'Missing localId' };
+                }
+
+                const threadId = this.currentThreadId;
+                const turnId = this.currentTurnId;
+                if (!turnInFlight || !threadId || !turnId || !activeMessage) {
+                    return { steered: false, error: 'No active steerable turn' };
+                }
+
+                // Remove before awaiting the app-server so the main loop cannot
+                // collect the same row for a normal turn at the same time.
+                const reservation = session.queue.takeByLocalId(localId);
+                if (!reservation) {
+                    return { steered: false, error: 'Message not in queue' };
+                }
+
+                const item = reservation.item;
+                if (item.isolate || parseCodexSpecialCommand(item.message).type) {
+                    session.queue.restoreReservation(reservation);
+                    return { steered: false, error: 'Control commands cannot be steered' };
+                }
+                if (activeMessage.hash !== item.modeHash) {
+                    session.queue.restoreReservation(reservation);
+                    return { steered: false, error: 'Queued message mode differs from the active turn' };
+                }
+
+                const handlerEpoch = this.steerEpoch;
+                if (!session.queue.beginReservationDispatch(reservation)) {
+                    return { steered: false, error: 'Steer cancelled' };
+                }
+
+                try {
+                    await appServerClient.steerTurn({
+                        threadId,
+                        expectedTurnId: turnId,
+                        input: [{ type: 'text', text: item.message }],
+                        clientUserMessageId: localId
+                    }, { signal: this.abortController.signal });
+                } catch (error) {
+                    if (this.steerEpoch === handlerEpoch && !this.shouldExit) {
+                        session.queue.restoreReservation(reservation);
+                    }
+                    const detail = error instanceof Error ? error.message : String(error);
+                    logger.debug(`[Codex] turn/steer failed (${detail})`);
+                    return { steered: false, error: 'Active turn is not steerable' };
+                }
+
+                if (
+                    this.steerEpoch !== handlerEpoch
+                    || this.shouldExit
+                    || !session.queue.commitReservation(reservation)
+                ) {
+                    return { steered: false, error: 'Steer cancelled' };
+                }
+
+                messageBuffer.addMessage(item.message, 'user');
+                session.client.emitMessagesConsumed([localId]);
+                logger.debug(`[Codex] Steered queued message into active turn ${turnId}`);
+                return { steered: true };
+            }
+        );
 
         const clearCompactRecovery = (recovery: typeof compactRecovery) => {
             if (!recovery) {
@@ -3917,6 +3988,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
 
     protected async cleanup(): Promise<void> {
         logger.debug('[codex-remote]: cleanup start');
+        this.steerEpoch++;
         this.appServerClient.setStderrHandler(null);
         try {
             await this.appServerClient.disconnect();
@@ -3925,6 +3997,10 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         }
 
         this.clearAbortHandlers(this.session.client.rpcHandlerManager);
+        this.session.client.rpcHandlerManager.registerHandler(RPC_METHODS.SteerQueuedMessage, async () => ({
+            steered: false,
+            error: 'Session ending'
+        }));
 
         if (this.happyServer) {
             this.happyServer.stop();

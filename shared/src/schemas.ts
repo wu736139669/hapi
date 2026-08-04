@@ -503,3 +503,11 @@ export const CancelMessageResponseSchema = z.discriminatedUnion('status', [
 ])
 
 export type CancelMessageResponse = z.infer<typeof CancelMessageResponseSchema>
+
+export const SteerQueuedMessageResponseSchema = z.discriminatedUnion('status', [
+    z.object({ status: z.literal('steered'), localId: z.string() }),
+    z.object({ status: z.literal('invoked'), message: DecryptedMessageSchema }),
+    z.object({ status: z.literal('failed'), error: z.string(), localId: z.string().nullable() }),
+])
+
+export type SteerQueuedMessageResponse = z.infer<typeof SteerQueuedMessageResponseSchema>

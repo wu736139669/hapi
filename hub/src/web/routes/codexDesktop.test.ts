@@ -1092,6 +1092,91 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('forwards the modification range to the selected Runner', async () => {
+        const store = new Store(':memory:')
+        const machine = createMachine('machine-1', ['/tmp'])
+        let receivedModifiedSince: number | undefined
+        let receivedModifiedBefore: number | undefined
+        const engine = {
+            getOnlineMachinesByNamespace: () => [machine],
+            getSessionsByNamespace: () => [],
+            listCodexSessionsForMachine: async (
+                _machineId: string,
+                _cwd?: string | null,
+                _sessionIds?: string[],
+                modifiedSince?: number,
+                modifiedBefore?: number
+            ) => {
+                receivedModifiedSince = modifiedSince
+                receivedModifiedBefore = modifiedBefore
+                return { success: true, sessions: [] }
+            }
+        } as unknown as SyncEngine
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createCodexDesktopRoutes({ store, getSyncEngine: () => engine }))
+
+        try {
+            const response = await app.request(`/api/codex/sessions?machineId=${machine.id}&modifiedSince=123456&modifiedBefore=234567`)
+
+            expect(response.status).toBe(200)
+            expect(receivedModifiedSince).toBe(123456)
+            expect(receivedModifiedBefore).toBe(234567)
+        } finally {
+            store.close()
+        }
+    })
+
+    it('returns the matching Hapi session id for imported Codex sessions', async () => {
+        const store = new Store(':memory:')
+        const machine = createMachine('machine-1', ['/tmp'])
+        const codexSessionId = '16161616-1616-4616-8616-161616161616'
+        const imported = store.sessions.getOrCreateSession('hapi-session-1', {
+            path: '/tmp/project',
+            host: 'machine-1',
+            flavor: 'codex',
+            machineId: machine.id,
+            codexSessionId: 'hapi-fork-thread',
+            codexSourceSessionId: codexSessionId,
+            lifecycleState: 'imported'
+        }, {}, 'default')
+        const engine = {
+            ...createImportSyncEngine(store, [machine]),
+            listCodexSessionsForMachine: async () => ({
+                success: true,
+                sessions: [{
+                    id: codexSessionId,
+                    title: 'Managed Codex session',
+                    cwd: '/tmp/project',
+                    file: '/tmp/.codex/sessions/session.jsonl',
+                    modifiedAt: 100
+                }]
+            })
+        } as unknown as SyncEngine
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createCodexDesktopRoutes({ store, getSyncEngine: () => engine }))
+
+        try {
+            const response = await app.request(`/api/codex/sessions?machineId=${machine.id}`)
+            const body = await response.json() as { sessions: Array<{ id: string; hapiSessionId: string | null }> }
+
+            expect(response.status).toBe(200)
+            expect(body.sessions).toEqual([expect.objectContaining({
+                id: codexSessionId,
+                hapiSessionId: imported.id
+            })])
+        } finally {
+            store.close()
+        }
+    })
+
     it('does not append imports to an archived Codex session', async () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-home-archived-target-test-'))
         const store = new Store(':memory:')
