@@ -22,6 +22,8 @@ export interface Settings {
     corsOrigins?: string[]
     /** Custom model names offered in the Claude model picker (e.g. DeepSeek via ANTHROPIC_BASE_URL). */
     customClaudeModels?: string[]
+    /** Per-hub relay auth key issued by the relay server (/issue) */
+    relayAuthKey?: string
 }
 
 export function getSettingsFile(dataDir: string): string {

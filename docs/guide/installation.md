@@ -142,6 +142,8 @@ The terminal displays a URL and QR code. Scan to access from anywhere.
 
 > **Tip:** The relay uses UDP by default. If you experience connectivity issues, set `HAPI_RELAY_FORCE_TCP=true` to force TCP mode.
 
+The hub automatically stores an individually revocable relay key in `settings.json`. If that persisted key is revoked or the relay rotates its signing secret, HAPI discards it after HTTP 403, requests one replacement, and restarts the tunnel. Relay issuance is limited per public IP; HTTP 429 is reported explicitly, which can affect users sharing a CGNAT or corporate egress address. Set `HAPI_RELAY_AUTH` only when an operator has provided a key manually; rejected environment keys are never overwritten automatically.
+
 ### Local Only
 
 ```bash
@@ -190,6 +192,12 @@ On first run, HAPI:
 | `DB_PATH` | `~/.hapi/hapi.db` | - | Database file path |
 | `ELEVENLABS_API_KEY` | - | - | ElevenLabs API key for voice |
 | `ELEVENLABS_AGENT_ID` | Auto-created | - | Custom ElevenLabs agent ID |
+| `OPENAI_API_KEY` | - | - | OpenAI API key for dictation (`gpt-transcribe` / `gpt-live-transcribe`) |
+| `DEEPGRAM_API_KEY` | - | - | Deepgram API key for dictation (`nova-3`) |
+| `GROQ_API_KEY` | - | - | Groq API key for dictation (`whisper-large-v3`) |
+| `TRANSCRIPTION_BASE_URL` | - | - | OpenAI-compatible/local transcription base URL |
+| `TRANSCRIPTION_MODEL` | - | - | Model for the OpenAI-compatible transcription endpoint |
+| `TRANSCRIPTION_API_KEY` | - | - | Optional bearer token for that endpoint |
 </details>
 
 <details>

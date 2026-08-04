@@ -16,6 +16,7 @@ function formatTokens(value: number): string {
 }
 
 function UsageBarList(props: { rows: UsageSummaryBucket[]; empty: string }) {
+    const { t } = useTranslation()
     const max = props.rows[0]?.totalTokens ?? 0
     if (props.rows.length === 0) return <div className="px-3 py-4 text-sm text-[var(--app-hint)]">{props.empty}</div>
     return (
@@ -30,7 +31,11 @@ function UsageBarList(props: { rows: UsageSummaryBucket[]; empty: string }) {
                         <div className="h-full rounded-full bg-[var(--app-link)]" style={{ width: `${max > 0 ? Math.max(2, (row.totalTokens / max) * 100) : 0}%` }} />
                     </div>
                     <div className="mt-1 text-xs text-[var(--app-hint)]">
-                        {row.requests.toLocaleString()} requests · {formatTokens(row.inputTokens)} in · {formatTokens(row.outputTokens)} out
+                        {t('settings.usage.bucketDetails', {
+                            requests: row.requests.toLocaleString(),
+                            input: formatTokens(row.inputTokens),
+                            output: formatTokens(row.outputTokens)
+                        })}
                     </div>
                 </div>
             ))}
@@ -42,11 +47,12 @@ export default function SettingsUsagePage() {
     const { api } = useAppContext()
     const { t } = useTranslation()
     const [range, setRange] = useState<UsageRange>('7d')
+    const [timeZone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
     const query = useQuery({
-        queryKey: queryKeys.usageSummary(range),
+        queryKey: queryKeys.usageSummary(range, timeZone),
         queryFn: async () => {
             if (!api) throw new Error('API unavailable')
-            return await api.getUsageSummary(range)
+            return await api.getUsageSummary(range, timeZone)
         },
         enabled: Boolean(api),
         staleTime: 30_000,
@@ -54,10 +60,13 @@ export default function SettingsUsagePage() {
         retry: false
     })
     const maxDaily = useMemo(() => Math.max(...(query.data?.daily.map((row) => row.totalTokens) ?? [0]), 1), [query.data?.daily])
+    const cacheHitRate = query.data && query.data.totals.inputTokens > 0
+        ? `${((query.data.totals.cacheReadTokens / query.data.totals.inputTokens) * 100).toFixed(1)}%`
+        : '0%'
 
     return (
         <SettingsPageContent description={t('settings.usage.description')}>
-            <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={t('settings.usage.range.label')}>
+            <div className="inline-flex overflow-hidden rounded-lg border border-[var(--app-border)]" role="radiogroup" aria-label={t('settings.usage.range.label')}>
                 {(['7d', '30d', 'all'] as const).map((option) => (
                     <button
                         key={option}
@@ -65,7 +74,7 @@ export default function SettingsUsagePage() {
                         role="radio"
                         aria-checked={range === option}
                         onClick={() => setRange(option)}
-                        className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${range === option ? 'border-[var(--app-link)] bg-[var(--app-subtle-bg)] text-[var(--app-link)]' : 'border-[var(--app-border)] text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'}`}
+                        className={`border-r border-[var(--app-border)] px-3 py-2 text-sm font-medium transition-colors last:border-r-0 ${range === option ? 'bg-[var(--app-subtle-bg)] text-[var(--app-link)]' : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'}`}
                     >
                         {t(`settings.usage.range.${option}`)}
                     </button>
@@ -84,9 +93,10 @@ export default function SettingsUsagePage() {
                             ['settings.usage.output', query.data.totals.outputTokens],
                             ['settings.usage.cacheRead', query.data.totals.cacheReadTokens],
                             ['settings.usage.cacheCreation', query.data.totals.cacheCreationTokens],
+                            ['settings.usage.cacheHitRate', cacheHitRate],
                             ['settings.usage.requests', query.data.totals.requests]
                         ].map(([label, value]) => (
-                            <div key={label} className="rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-3 shadow-sm">
+                            <div key={label} className="rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-3 shadow-sm">
                                 <div className="text-xs text-[var(--app-hint)]">{t(label as string)}</div>
                                 <div className="mt-1 text-xl font-semibold text-[var(--app-fg)]">{typeof value === 'number' ? formatTokens(value) : value}</div>
                             </div>

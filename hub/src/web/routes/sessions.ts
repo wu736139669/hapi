@@ -1,14 +1,17 @@
 import {
     CursorMigrateToAcpRequestSchema,
     DeleteUploadRequestSchema,
+    ForkConversationRequestSchema,
     getPermissionModesForFlavor,
     isPermissionModeAllowedForFlavor,
     RenameSessionRequestSchema,
     ResumeSessionRequestSchema,
+    RewindConversationRequestSchema,
     SCRATCHLIST_MAX_ENTRIES,
     ScratchlistEntryCreateRequestSchema,
     ScratchlistEntryUpdateRequestSchema,
     SessionCollaborationModeRequestSchema,
+    SessionCopilotAgentModeRequestSchema,
     SessionEffortRequestSchema,
     SessionModelReasoningEffortRequestSchema,
     SessionServiceTierRequestSchema,
@@ -326,6 +329,73 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         return c.json({ ok: true })
     })
 
+    app.post('/sessions/:id/fork', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const rawBody = await c.req.text()
+        let body: unknown = {}
+        if (rawBody.trim()) {
+            try {
+                body = JSON.parse(rawBody)
+            } catch {
+                return c.json({ error: 'Invalid JSON body' }, 400)
+            }
+        }
+        const parsed = ForkConversationRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        const result = await engine.forkConversation(
+            sessionResult.sessionId,
+            c.get('namespace'),
+            parsed.data.messageLocalId
+        )
+        if (result.type === 'error') {
+            return c.json({ error: result.message }, 409)
+        }
+        return c.json({ sessionId: result.sessionId })
+    })
+
+    app.post('/sessions/:id/rewind', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = RewindConversationRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        const result = await engine.rewindConversation(
+            sessionResult.sessionId,
+            c.get('namespace'),
+            parsed.data.messageLocalId
+        )
+        if (result.type === 'error') {
+            return c.json({
+                error: result.message,
+                hydrateFailed: result.hydrateFailed === true
+            }, result.hydrateFailed ? 500 : 409)
+        }
+        return c.json({ success: true as const })
+    })
+
     app.post('/sessions/:id/archive', async (c) => {
         // tiann/hapi#916: relax the blanket `requireActive: true` guard so
         // the endpoint is idempotent for already-archived rows AND can clean
@@ -490,6 +560,40 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ ok: true })
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to apply collaboration mode'
+            return c.json({ error: message }, 409)
+        }
+    })
+
+    app.post('/sessions/:id/copilot-agent-mode', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const flavor = sessionResult.session.metadata?.flavor ?? 'claude'
+        if (flavor !== 'copilot') {
+            return c.json({ error: 'Copilot agent mode is only supported for Copilot sessions' }, 400)
+        }
+        if (sessionResult.session.agentState?.controlledByUser === true) {
+            return c.json({ error: 'Copilot agent mode can only be changed for remote Copilot sessions' }, 409)
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = SessionCopilotAgentModeRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        try {
+            await engine.applySessionConfig(sessionResult.sessionId, { copilotAgentMode: parsed.data.mode })
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to apply Copilot agent mode'
             return c.json({ error: message }, 409)
         }
     })
@@ -1203,6 +1307,24 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to list Grok effort options'
+            }, 500)
+        }
+    })
+
+    app.get('/sessions/:id/copilot-models', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        if (sessionResult instanceof Response) return sessionResult
+        if (sessionResult.session.metadata?.flavor !== 'copilot') {
+            return c.json({ success: false, error: 'Copilot models are only available for Copilot sessions' }, 400)
+        }
+        try {
+            return c.json(await engine.listCopilotModelsForSession(sessionResult.sessionId))
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to list Copilot models'
             }, 500)
         }
     })

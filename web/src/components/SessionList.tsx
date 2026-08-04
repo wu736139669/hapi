@@ -14,6 +14,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { DEFAULT_SESSION_PREVIEW_LIMIT, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
 import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
+import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
 import { classifySessionAttention } from '@/lib/sessionAttention'
 import { getSessionLastSeenAt } from '@/lib/sessionLastSeen'
 import { useSessionRowTooltipIds } from '@/components/HoverTooltip'
@@ -972,6 +973,24 @@ export function getPullToRefreshState(distancePx: number): PullToRefreshState {
     return 'idle'
 }
 
+export function getPullRefreshIndicatorRotation(state: PullToRefreshState): number {
+    return state === 'ready' ? 180 : 0
+}
+
+function PullRefreshIcon(props: { rotation: number }) {
+    return (
+        <svg
+            aria-hidden="true"
+            className="h-4 w-4 shrink-0 transition-transform duration-200"
+            viewBox="0 0 24 24"
+            fill="none"
+            style={{ transform: `rotate(${props.rotation}deg)` }}
+        >
+            <path d="M12 5v14M6 13l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+    )
+}
+
 export function SessionList(props: {
     sessions: SessionSummary[]
     onSelect: (sessionId: string) => void
@@ -992,6 +1011,7 @@ export function SessionList(props: {
     const { sessionPreviewLimit } = useSessionPreviewLimit()
     const { sessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly } = useShowActiveSessionsOnly()
+    const { pinInProgressSessions } = usePinInProgressSessions()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
     const [searchQuery, setSearchQuery] = useState('')
@@ -1086,6 +1106,9 @@ export function SessionList(props: {
             pending: [],
             idle: []
         }
+        if (!pinInProgressSessions) {
+            return buckets
+        }
         for (const session of machineFilteredSessions) {
             if (!session.active) {
                 continue
@@ -1103,27 +1126,27 @@ export function SessionList(props: {
             buckets[key].sort(byRecent)
         }
         return buckets
-    }, [machineFilteredSessions])
+    }, [machineFilteredSessions, pinInProgressSessions])
     const runningSessionTotal = runningSessions.working.length
         + runningSessions.pending.length
         + runningSessions.idle.length
     const [completedUnseen, setCompletedUnseen] = useState<Set<string>>(readCompletedUnseen)
-    const prevSessionStateRef = useRef<Map<string, string>>(new Map())
+    const previousSessionStateRef = useRef<Map<string, string>>(new Map())
     const updateCompletedUnseen = (mutate: (set: Set<string>) => void) => {
-        setCompletedUnseen(prev => {
-            const next = new Set(prev)
+        setCompletedUnseen(previous => {
+            const next = new Set(previous)
             mutate(next)
             writeCompletedUnseen(next)
             return next
         })
     }
-    // Detect "just finished" sessions: a session that was working and is now
-    // idle gets a green dot until the user opens it.
+
     useEffect(() => {
-        const prev = prevSessionStateRef.current
-        const next = new Map<string, string>()
+        const previousStates = previousSessionStateRef.current
+        const nextStates = new Map<string, string>()
         const toMark = new Set<string>()
         const toUnmark = new Set<string>()
+
         for (const session of machineFilteredSessions) {
             let state: string
             if (!session.active) {
@@ -1135,39 +1158,43 @@ export function SessionList(props: {
             } else {
                 state = 'idle'
             }
-            next.set(session.id, state)
-            const prevState = prev.get(session.id)
-            if (prevState === 'working' && state === 'idle') {
+
+            nextStates.set(session.id, state)
+            const previousState = previousStates.get(session.id)
+            if (previousState === 'working' && state === 'idle') {
                 toMark.add(session.id)
-            } else if ((prevState === 'idle' || prevState === 'pending') && state === 'working') {
+            } else if ((previousState === 'idle' || previousState === 'pending') && state === 'working') {
                 toUnmark.add(session.id)
             }
         }
-        for (const id of prev.keys()) {
-            if (!next.has(id)) {
+
+        for (const id of previousStates.keys()) {
+            if (!nextStates.has(id)) {
                 toUnmark.add(id)
             }
         }
+
         if (toMark.size > 0 || toUnmark.size > 0) {
             updateCompletedUnseen(set => {
-                for (const id of toMark) {
-                    set.add(id)
-                }
-                for (const id of toUnmark) {
-                    set.delete(id)
-                }
+                for (const id of toMark) set.add(id)
+                for (const id of toUnmark) set.delete(id)
             })
         }
-        prevSessionStateRef.current = next
+        previousSessionStateRef.current = nextStates
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [machineFilteredSessions])
+
     const handleSelectSession = (sessionId: string) => {
         updateCompletedUnseen(set => set.delete(sessionId))
         props.onSelect(sessionId)
     }
     const groups = useMemo(
-        () => groupSessionsByDirectory(machineFilteredSessions.filter((session) => !session.active)),
-        [machineFilteredSessions]
+        () => groupSessionsByDirectory(
+            pinInProgressSessions
+                ? machineFilteredSessions.filter((session) => !session.active)
+                : machineFilteredSessions
+        ),
+        [machineFilteredSessions, pinInProgressSessions]
     )
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
@@ -1483,7 +1510,9 @@ export function SessionList(props: {
                     aria-live="polite"
                     className="pointer-events-none absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[var(--app-border)] bg-[var(--app-bg)]/90 px-2.5 py-1 text-xs text-[var(--app-hint)] shadow-sm backdrop-blur"
                 >
-                    {isRefreshing || props.isLoading ? <Spinner size="sm" label={null} className="text-current" /> : null}
+                    {isRefreshing || props.isLoading
+                        ? <Spinner size="sm" label={null} className="text-current" />
+                        : <PullRefreshIcon rotation={getPullRefreshIndicatorRotation(pullState)} />}
                     <span>
                         {isRefreshing
                             ? t('sessions.refresh.refreshing')
@@ -1569,23 +1598,24 @@ export function SessionList(props: {
                                     )
                                 })}
                                 {(() => {
-                                    const completedIdle = runningSessions.idle.filter((s) => completedUnseen.has(s.id))
-                                    const plainIdle = runningSessions.idle.filter((s) => !completedUnseen.has(s.id))
-                                    const sessionItem = (s: SessionSummary, completed: boolean) => (
+                                    const completedIdle = runningSessions.idle.filter((session) => completedUnseen.has(session.id))
+                                    const plainIdle = runningSessions.idle.filter((session) => !completedUnseen.has(session.id))
+                                    const renderIdleSession = (session: SessionSummary, completed: boolean) => (
                                         <SessionItem
-                                            key={s.id}
-                                            session={s}
+                                            key={session.id}
+                                            session={session}
                                             onSelect={handleSelectSession}
                                             showPath={false}
                                             api={api}
-                                            selected={s.id === selectedSessionId}
+                                            selected={session.id === selectedSessionId}
                                             showDetailedStatus={showDetailedStatus}
                                             inRunningSection
                                             completedUnseen={completed}
-                                            projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
-                                            machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
+                                            projectLabel={getGroupDisplayName(session.metadata?.worktree?.basePath ?? session.metadata?.path ?? 'Other')}
+                                            machineLabel={resolveMachineLabel(session.metadata?.machineId ?? null)}
                                         />
                                     )
+
                                     return (
                                         <>
                                             {completedIdle.length > 0 ? (
@@ -1594,7 +1624,7 @@ export function SessionList(props: {
                                                         <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current animate-pulse" aria-hidden="true" />
                                                         {t('session.item.completed')} ({completedIdle.length})
                                                     </div>
-                                                    {completedIdle.map((s) => sessionItem(s, true))}
+                                                    {completedIdle.map((session) => renderIdleSession(session, true))}
                                                 </div>
                                             ) : null}
                                             {plainIdle.length > 0 ? (
@@ -1603,7 +1633,7 @@ export function SessionList(props: {
                                                         <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" aria-hidden="true" />
                                                         {t('session.item.idle')} ({plainIdle.length})
                                                     </div>
-                                                    {plainIdle.map((s) => sessionItem(s, false))}
+                                                    {plainIdle.map((session) => renderIdleSession(session, false))}
                                                 </div>
                                             ) : null}
                                         </>
@@ -1674,13 +1704,13 @@ export function SessionList(props: {
                             <div className="collapsible-panel" data-open={!isCollapsed || undefined}>
                                 <div className="collapsible-inner">
                                 <div className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
-                                            {visibleGroupSessions.map((s) => (
-                                                <SessionItem
-                                                    key={s.id}
-                                                    session={s}
-                                                    onSelect={handleSelectSession}
-                                                    showPath={false}
-                                                    api={api}
+                                    {visibleGroupSessions.map((s) => (
+                                        <SessionItem
+                                            key={s.id}
+                                            session={s}
+                                            onSelect={handleSelectSession}
+                                            showPath={false}
+                                            api={api}
                                             selected={s.id === selectedSessionId}
                                             showDetailedStatus={showDetailedStatus}
                                         />

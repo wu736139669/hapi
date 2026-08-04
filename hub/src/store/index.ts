@@ -4,6 +4,8 @@ import { dirname } from 'node:path'
 
 import { MachineStore } from './machineStore'
 import { MessageStore } from './messageStore'
+import { addMessage } from './messages'
+import type { StoredMessage } from './types'
 import { PushStore } from './pushStore'
 import { FcmStore } from './fcmStore'
 import { ScratchlistStore } from './scratchlistStore'
@@ -31,7 +33,7 @@ export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 export { UsageStore } from './usageStore'
 
-const SCHEMA_VERSION: number = 18
+const SCHEMA_VERSION: number = 19
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -41,7 +43,8 @@ const REQUIRED_TABLES = [
     'push_subscriptions',
     'fcm_devices',
     'session_scratchlist',
-    'usage_events'
+    'usage_events',
+    'usage_scan_state'
 ] as const
 
 export class Store {
@@ -142,6 +145,101 @@ export class Store {
         })()
     }
 
+    /** Resolve a durable OpenCode clear reservation and insert in one SQLite transaction. */
+    addMessageForCurrentSession(
+        sessionId: string,
+        content: unknown,
+        localId?: string,
+        scheduledAt?: number | null
+    ): { sessionId: string; message: StoredMessage } {
+        return this.db.transaction(() => {
+            const row = this.db.prepare('SELECT namespace, metadata FROM sessions WHERE id = ?').get(sessionId) as { namespace: string; metadata: string | null } | undefined
+            if (!row) throw new Error('Message source session not found')
+            let targetSessionId = sessionId
+            if (row?.metadata) {
+                const metadata = JSON.parse(row.metadata) as { opencodeClearOperation?: { replacementSessionId?: string; state?: string }, supersededBySessionId?: string }
+                targetSessionId = metadata.supersededBySessionId
+                    ?? (metadata.opencodeClearOperation?.state !== 'aborted'
+                        ? metadata.opencodeClearOperation?.replacementSessionId
+                        : undefined)
+                    ?? sessionId
+            }
+            if (targetSessionId !== sessionId) {
+                const target = this.db.prepare('SELECT 1 FROM sessions WHERE id = ? AND namespace = ?')
+                    .get(targetSessionId, row.namespace)
+                if (!target) throw new Error('OpenCode clear redirect target is unavailable in the source namespace')
+            }
+            return { sessionId: targetSessionId, message: addMessage(this.db, targetSessionId, content, localId, scheduledAt) }
+        })()
+    }
+
+    /** Durable delivery gate for a preallocated replacement owned by an unfinished clear. */
+    isOpenCodeClearDeliveryGated(sessionId: string): boolean {
+        const target = this.db.prepare('SELECT namespace FROM sessions WHERE id = ?')
+            .get(sessionId) as { namespace: string } | undefined
+        if (!target) return false
+        const rows = this.db.prepare('SELECT metadata FROM sessions WHERE namespace = ? AND metadata IS NOT NULL')
+            .all(target.namespace) as Array<{ metadata: string }>
+        return rows.some((row) => {
+            try {
+                const operation = (JSON.parse(row.metadata) as {
+                    opencodeClearOperation?: { replacementSessionId?: string; state?: string }
+                }).opencodeClearOperation
+                return operation?.replacementSessionId === sessionId
+                    && operation.state !== 'completed'
+                    && operation.state !== 'aborted'
+            } catch {
+                return false
+            }
+        })
+    }
+
+    abortOpenCodeClearOperation(
+        sessionId: string,
+        replacementSessionId: string,
+        metadata: unknown,
+        expectedVersion: number,
+        namespace: string,
+        expected?: { replacementSessionId: string; state: string; requireInactive?: boolean }
+    ) {
+        return this.db.transaction(() => {
+            const current = this.sessions.getSessionByNamespace(sessionId, namespace)
+            const operation = current?.metadata && typeof current.metadata === 'object'
+                ? (current.metadata as { opencodeClearOperation?: { replacementSessionId?: string; state?: string } }).opencodeClearOperation
+                : undefined
+            if (expected && (!current
+                || (expected.requireInactive === true && current.active)
+                || operation?.replacementSessionId !== expected.replacementSessionId
+                || operation.state !== expected.state)) {
+                return { result: 'version-mismatch' as const }
+            }
+            const result = this.sessions.updateSessionMetadata(sessionId, metadata, expectedVersion, namespace, { touchUpdatedAt: false })
+            if (result.result === 'success') this.messages.moveUninvokedMessages(replacementSessionId, sessionId)
+            return result
+        })()
+    }
+
+    transitionOpenCodeClearOperation(
+        sessionId: string,
+        metadata: unknown,
+        expectedVersion: number,
+        namespace: string,
+        expected: { replacementSessionId: string; state: string }
+    ) {
+        return this.db.transaction(() => {
+            const current = this.sessions.getSessionByNamespace(sessionId, namespace)
+            const operation = current?.metadata && typeof current.metadata === 'object'
+                ? (current.metadata as { opencodeClearOperation?: { replacementSessionId?: string; state?: string } }).opencodeClearOperation
+                : undefined
+            if (!current
+                || operation?.replacementSessionId !== expected.replacementSessionId
+                || operation.state !== expected.state) {
+                return { result: 'version-mismatch' as const }
+            }
+            return this.sessions.updateSessionMetadata(sessionId, metadata, expectedVersion, namespace, { touchUpdatedAt: false })
+        })()
+    }
+
     close(): void {
         if (this.closed) return
         this.db.close()
@@ -180,6 +278,7 @@ export class Store {
             15: () => this.migrateFromV15ToV16(),
             16: () => this.migrateFromV16ToV17(),
             17: () => this.migrateFromV17ToV18(),
+            18: () => this.migrateFromV18ToV19(),
         })
 
         if (currentVersion === 0) {
@@ -364,6 +463,13 @@ export class Store {
                 ON usage_events(session_id, created_at, source_seq);
             CREATE INDEX IF NOT EXISTS idx_usage_events_created
                 ON usage_events(created_at);
+
+            CREATE TABLE IF NOT EXISTS usage_scan_state (
+                session_id TEXT PRIMARY KEY,
+                message_epoch INTEGER NOT NULL DEFAULT 0,
+                last_seq INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
         `)
     }
 
@@ -663,12 +769,35 @@ export class Store {
     private migrateFromV17ToV18(): void {
         // Usage events are a rebuildable index; v18 changes their source key
         // and baseline semantics, so stale rows must not be mixed with new ones.
+        const columns = new Set(
+            (this.db.prepare('PRAGMA table_info(usage_events)').all() as Array<{ name: string }>)
+                .map((column) => column.name)
+        )
+        for (const name of [
+            'last_input_tokens',
+            'last_output_tokens',
+            'last_cache_read_tokens',
+            'last_cache_creation_tokens'
+        ]) {
+            if (!columns.has(name)) {
+                this.db.exec(`ALTER TABLE usage_events ADD COLUMN ${name} INTEGER`)
+            }
+        }
+        this.db.exec('DELETE FROM usage_events')
+    }
+
+    private migrateFromV18ToV19(): void {
+        // Cumulative event keys are stable in v19, so repeated transcript
+        // imports collapse to one snapshot. Rebuild the derived index once.
         this.db.exec(`
-            ALTER TABLE usage_events ADD COLUMN last_input_tokens INTEGER;
-            ALTER TABLE usage_events ADD COLUMN last_output_tokens INTEGER;
-            ALTER TABLE usage_events ADD COLUMN last_cache_read_tokens INTEGER;
-            ALTER TABLE usage_events ADD COLUMN last_cache_creation_tokens INTEGER;
+            CREATE TABLE IF NOT EXISTS usage_scan_state (
+                session_id TEXT PRIMARY KEY,
+                message_epoch INTEGER NOT NULL DEFAULT 0,
+                last_seq INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
             DELETE FROM usage_events;
+            DELETE FROM usage_scan_state;
         `)
     }
 

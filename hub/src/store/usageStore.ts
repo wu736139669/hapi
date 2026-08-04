@@ -1,24 +1,36 @@
 import type { Database } from 'bun:sqlite'
 
 import {
-    getMaxUsageSourceSeqBySession,
     getUsageEvents,
-    upsertUsageEvents,
-    type UsageEvent
+    getUsageScanStates,
+    recordUsageScan,
+    transferUsageSession,
+    type UsageEvent,
+    type UsageScanState
 } from './usage'
 
 export class UsageStore {
     constructor(private readonly db: Database) {}
 
-    upsertEvents(events: UsageEvent[]): void {
-        upsertUsageEvents(this.db, events)
+    recordScan(
+        sessionId: string,
+        messageEpoch: number,
+        lastSeq: number,
+        events: UsageEvent[],
+        replaceEvents: boolean
+    ): void {
+        recordUsageScan(this.db, sessionId, messageEpoch, lastSeq, events, replaceEvents)
     }
 
     getEvents(sessionIds: string[]): UsageEvent[] {
         return getUsageEvents(this.db, sessionIds)
     }
 
-    getMaxSourceSeqBySession(sessionIds: string[]): Map<string, number> {
-        return getMaxUsageSourceSeqBySession(this.db, sessionIds)
+    getScanStates(sessionIds: string[]): Map<string, UsageScanState> {
+        return getUsageScanStates(this.db, sessionIds)
+    }
+
+    transferSession(fromSessionId: string, toSessionId: string): void {
+        transferUsageSession(this.db, fromSessionId, toSessionId)
     }
 }

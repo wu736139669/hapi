@@ -301,9 +301,10 @@ export function ConversationOutlinePanel(props: {
 
     return (
         <aside
-            className="absolute inset-y-0 right-0 z-30 flex w-full max-w-[24rem] flex-col border-l border-[var(--app-border)] bg-[var(--app-bg)] shadow-2xl sm:w-[24rem]"
+            className="absolute inset-y-0 right-0 z-30 flex w-full max-w-[24rem] flex-col bg-[var(--app-bg)] shadow-2xl sm:w-[24rem]"
             aria-label={t('session.outline.title')}
         >
+            <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 -left-px w-px bg-[var(--app-border)]" />
             <div className="border-b border-[var(--app-border)] p-3">
                 <div className="flex items-center gap-2">
                     <div className="relative min-w-0 flex-1">
@@ -421,6 +422,10 @@ export function HappyThread(props: {
     disabled: boolean
     onRefresh: () => void
     onRetryMessage?: (localId: string) => void
+    historyActionPending?: boolean
+    onForkConversation?: (messageLocalId?: string) => Promise<void>
+    onRewindConversation?: (messageLocalId: string) => Promise<void>
+    isLatestCompletedBoundary?: (messageId: string) => boolean
     onViewModeChange: (mode: 'tail' | 'history') => void
     isSyncingTail: boolean
     messagesWarning: string | null
@@ -1439,6 +1444,10 @@ export function HappyThread(props: {
             disabled: props.disabled,
             onRefresh: props.onRefresh,
             onRetryMessage: props.onRetryMessage,
+            historyActionPending: props.historyActionPending,
+            onForkConversation: props.onForkConversation,
+            onRewindConversation: props.onRewindConversation,
+            isLatestCompletedBoundary: props.isLatestCompletedBoundary,
             onShareTurn: handleShareTurn,
             hasMoreMessages: props.hasMoreMessages,
             isSyncingTail: props.isSyncingTail,

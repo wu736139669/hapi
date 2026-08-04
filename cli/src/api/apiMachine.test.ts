@@ -6,6 +6,7 @@ import { join } from 'node:path'
 const ioMock = vi.hoisted(() => vi.fn())
 const listOpencodeModelsForCwdMock = vi.hoisted(() => vi.fn())
 const listGrokModelsForCwdMock = vi.hoisted(() => vi.fn())
+const listCopilotModelsForCwdMock = vi.hoisted(() => vi.fn())
 const inspectCursorChatStoreMock = vi.hoisted(() => vi.fn())
 
 vi.mock('socket.io-client', () => ({
@@ -22,6 +23,10 @@ vi.mock('../modules/common/opencodeModels', () => ({
 
 vi.mock('../modules/common/grokModels', () => ({
     listGrokModelsForCwd: listGrokModelsForCwdMock
+}))
+
+vi.mock('../modules/common/copilotModels', () => ({
+    listCopilotModelsForCwd: listCopilotModelsForCwdMock
 }))
 
 vi.mock('@/cursor/cursorChatStoreStatus', () => ({
@@ -74,6 +79,15 @@ async function callListGrokModels(client: ApiMachineClient, machineId: string, c
     const manager = (client as unknown as { rpcHandlerManager: { handleRequest: (req: { method: string; params: string }) => Promise<string> } }).rpcHandlerManager
     const raw = await manager.handleRequest({
         method: `${machineId}:listGrokModelsForCwd`,
+        params: JSON.stringify({ cwd })
+    })
+    return JSON.parse(raw) as unknown
+}
+
+async function callListCopilotModels(client: ApiMachineClient, machineId: string, cwd: string): Promise<unknown> {
+    const manager = (client as unknown as { rpcHandlerManager: { handleRequest: (req: { method: string; params: string }) => Promise<string> } }).rpcHandlerManager
+    const raw = await manager.handleRequest({
+        method: `${machineId}:listCopilotModelsForCwd`,
         params: JSON.stringify({ cwd })
     })
     return JSON.parse(raw) as unknown
@@ -277,6 +291,58 @@ describe('ApiMachineClient listOpencodeModelsForCwd handler', () => {
     })
 })
 
+describe('ApiMachineClient listCopilotModelsForCwd handler', () => {
+    let workspaceRoot: string
+
+    beforeEach(() => {
+        ioMock.mockReset()
+        listCopilotModelsForCwdMock.mockReset()
+        workspaceRoot = mkdtempSync(join(tmpdir(), 'hapi-copilot-machine-ws-'))
+    })
+
+    afterEach(() => {
+        rmSync(workspaceRoot, { recursive: true, force: true })
+    })
+
+    it('rejects cwd outside workspace roots before running the Copilot model probe', async () => {
+        const machine = makeMachine('copilot-machine-1')
+        const client = new ApiMachineClient('cli-token', machine, [workspaceRoot])
+        const outsideCwd = mkdtempSync(join(tmpdir(), 'hapi-copilot-outside-'))
+
+        try {
+            expect(await callListCopilotModels(client, machine.id, outsideCwd)).toEqual({
+                success: false,
+                error: 'Path is outside workspace roots'
+            })
+            expect(listCopilotModelsForCwdMock).not.toHaveBeenCalled()
+        } finally {
+            rmSync(outsideCwd, { recursive: true, force: true })
+            client.shutdown()
+        }
+    })
+
+    it('forwards a resolved workspace cwd to the Copilot model probe', async () => {
+        const machine = makeMachine('copilot-machine-2')
+        const client = new ApiMachineClient('cli-token', machine, [workspaceRoot])
+        listCopilotModelsForCwdMock.mockResolvedValueOnce({
+            success: true,
+            availableModels: [{ modelId: 'gpt-5.6' }],
+            currentModelId: 'gpt-5.6'
+        })
+
+        try {
+            expect(await callListCopilotModels(client, machine.id, workspaceRoot)).toEqual({
+                success: true,
+                availableModels: [{ modelId: 'gpt-5.6' }],
+                currentModelId: 'gpt-5.6'
+            })
+            expect(listCopilotModelsForCwdMock).toHaveBeenCalledWith(realpathSync.native(workspaceRoot))
+        } finally {
+            client.shutdown()
+        }
+    })
+})
+
 describe('ApiMachineClient listGrokModelsForCwd handler', () => {
     let workspaceRoot: string
 
@@ -458,7 +524,7 @@ describe('ApiMachineClient SpawnHappySession handler', () => {
 
         client.setRPCHandlers({
             spawnSession,
-            stopSession: vi.fn(() => true),
+            stopSession: vi.fn(async () => 'stopped' as const),
             requestShutdown: vi.fn()
         })
 
@@ -539,5 +605,62 @@ describe('ApiMachineClient keepAlive lifecycle', () => {
 
         expect(emit).toHaveBeenCalledTimes(1)
         expect(priv.keepAliveInterval).toBeNull()
+    })
+})
+
+describe('ApiMachineClient list-directory handler', () => {
+    let workspaceRoot: string
+
+    beforeEach(() => {
+        ioMock.mockReset()
+        workspaceRoot = mkdtempSync(join(tmpdir(), 'hapi-machine-ls-'))
+        mkdirSync(join(workspaceRoot, 'visible-dir'))
+        mkdirSync(join(workspaceRoot, '.hidden-dir'))
+        writeFileSync(join(workspaceRoot, 'plain.txt'), 'x')
+        writeFileSync(join(workspaceRoot, '.hidden-file'), 'x')
+    })
+
+    afterEach(() => {
+        rmSync(workspaceRoot, { recursive: true, force: true })
+    })
+
+    async function callListDirectory(client: ApiMachineClient, machineId: string, params: { path: string; includeHidden?: boolean }): Promise<unknown> {
+        const manager = (client as unknown as { rpcHandlerManager: { handleRequest: (req: { method: string; params: string }) => Promise<string> } }).rpcHandlerManager
+        const raw = await manager.handleRequest({
+            method: `${machineId}:list-directory`,
+            params: JSON.stringify(params)
+        })
+        return JSON.parse(raw) as unknown
+    }
+
+    function entryNames(result: unknown): string[] {
+        const entries = (result as { success: boolean; entries?: { name: string }[] }).entries ?? []
+        return entries.map((entry) => entry.name).sort()
+    }
+
+    it('filters dot-prefixed entries by default', async () => {
+        const machine = makeMachine('machine-ls-1')
+        const client = new ApiMachineClient('cli-token', machine, [workspaceRoot])
+
+        try {
+            const result = await callListDirectory(client, machine.id, { path: workspaceRoot })
+            expect((result as { success: boolean }).success).toBe(true)
+            expect(entryNames(result)).toEqual(['plain.txt', 'visible-dir'])
+        } finally {
+            client.shutdown()
+        }
+    })
+
+    it('includes dot-prefixed entries when includeHidden is true', async () => {
+        const machine = makeMachine('machine-ls-2')
+        const client = new ApiMachineClient('cli-token', machine, [workspaceRoot])
+
+        try {
+            const result = await callListDirectory(client, machine.id, { path: workspaceRoot, includeHidden: true })
+            expect((result as { success: boolean }).success).toBe(true)
+            expect(entryNames(result)).toEqual(['.hidden-dir', '.hidden-file', 'plain.txt', 'visible-dir'])
+        } finally {
+            client.shutdown()
+        }
     })
 })

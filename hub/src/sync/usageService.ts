@@ -31,10 +31,6 @@ function sessionAgent(session: StoredSession): string {
     return typeof flavor === 'string' && flavor.trim() ? flavor.trim() : 'unknown'
 }
 
-function sessionModel(session: StoredSession): string | null {
-    return typeof session.model === 'string' && session.model.trim() ? session.model.trim() : null
-}
-
 function parseUsageEvent(session: StoredSession, message: StoredMessage): UsageEvent | null {
     const envelope = asRecord(message.content)
     if (envelope?.role !== 'agent') return null
@@ -58,7 +54,7 @@ function parseUsageEvent(session: StoredSession, message: StoredMessage): UsageE
         const providerId = typeof assistant?.id === 'string' ? assistant.id : message.id
         const model = typeof assistant?.model === 'string' && assistant.model.trim()
             ? assistant.model.trim()
-            : sessionModel(session)
+            : null
         return {
             sessionId: session.id,
             sourceKey: `claude|${providerId}`,
@@ -82,41 +78,69 @@ function parseUsageEvent(session: StoredSession, message: StoredMessage): UsageE
     // ACP-compatible backends wrap per-request usage in `total`, so only Codex
     // should be diffed as a cumulative stream.
     if (data.type === 'token_count' || data.type === 'usage') {
+        if (data.hapiUsageScope === 'imported-history') return null
         const info = asRecord(data.info) ?? data
         const agent = sessionAgent(session)
-        const total = asRecord(info.total) ?? (agent === 'codex' ? null : info)
+        const explicitThreadId = typeof data.threadId === 'string'
+            ? data.threadId
+            : typeof data.thread_id === 'string'
+                ? data.thread_id
+                : null
+        const metadata = asRecord(session.metadata)
+        const hasImportedCodexHistory = typeof metadata?.codexSourceSessionId === 'string'
+            || metadata?.lifecycleState === 'imported'
+        if (agent === 'codex' && explicitThreadId === null && hasImportedCodexHistory) {
+            return null
+        }
+        const cumulativeTotal = agent === 'codex'
+            ? asRecord(info.total)
+                ?? asRecord(info.total_token_usage)
+                ?? asRecord(info.totalTokenUsage)
+            : null
+        const last = asRecord(info.last)
+            ?? asRecord(info.last_token_usage)
+            ?? asRecord(info.lastTokenUsage)
+            ?? (data.type === 'usage' ? info : null)
+        const total = cumulativeTotal ?? (agent === 'codex' ? last : asRecord(info.total) ?? info)
         if (!total) return null
         const inputTokens = firstCount(total, 'inputTokens', 'input_tokens')
         const outputTokens = firstCount(total, 'outputTokens', 'output_tokens')
         const cacheReadTokens = firstCount(total, 'cachedInputTokens', 'cached_input_tokens', 'cacheReadTokens', 'cache_read_input_tokens')
         const cacheCreationTokens = firstCount(total, 'cacheWriteInputTokens', 'cache_write_input_tokens', 'cacheCreationTokens', 'cache_creation_input_tokens')
         if (inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens <= 0) return null
-        const last = asRecord(info.last)
-        const threadId = typeof data.threadId === 'string'
-            ? data.threadId
-            : typeof data.thread_id === 'string'
-                ? data.thread_id
-                : session.id
+        const threadId = explicitThreadId ?? session.id
         const scope = typeof data.scopeRole === 'string'
             ? data.scopeRole
             : typeof data.scope_role === 'string'
                 ? data.scope_role
                 : 'parent'
-        const isCumulative = agent === 'codex'
+        const isCumulative = cumulativeTotal !== null
         const turnId = typeof data.turnId === 'string'
             ? data.turnId
             : typeof data.turn_id === 'string'
                 ? data.turn_id
                 : ''
+        const model = typeof data.model === 'string' && data.model.trim()
+            ? data.model.trim()
+            : null
         return {
             sessionId: session.id,
             sourceKey: isCumulative
-                ? `cumulative|${threadId}|${scope}|${turnId}|${message.id}`
+                ? [
+                    'cumulative',
+                    threadId,
+                    scope,
+                    turnId,
+                    inputTokens,
+                    outputTokens,
+                    cacheReadTokens,
+                    cacheCreationTokens
+                ].join('|')
                 : `delta|${message.id}`,
             sourceSeq: message.seq,
             createdAt: message.createdAt,
             agent,
-            model: sessionModel(session),
+            model,
             kind: isCumulative ? 'cumulative' : 'delta',
             inputTokens,
             outputTokens,
@@ -137,18 +161,32 @@ function parseUsageEvent(session: StoredSession, message: StoredMessage): UsageE
 }
 
 function collectUsageEvents(store: Store, sessions: StoredSession[]): void {
-    const events: UsageEvent[] = []
-    const maxSourceSeq = store.usage.getMaxSourceSeqBySession(sessions.map((session) => session.id))
+    const scanStates = store.usage.getScanStates(sessions.map((session) => session.id))
     for (const session of sessions) {
-        const afterSeq = maxSourceSeq.get(session.id) ?? 0
-        const messages = store.messages.getAllMessages(session.id)
+        const messageEpoch = store.messages.getMessageEpoch(session.id)
+        const scanState = scanStates.get(session.id)
+        const replaceEvents = !scanState || scanState.messageEpoch !== messageEpoch
+        const afterSeq = replaceEvents ? 0 : scanState.lastSeq
+        const messages = store.messages.getMessagesAfterSeq(session.id, afterSeq)
+        const events = new Map<string, UsageEvent>()
         for (const message of messages) {
-            if (afterSeq > 0 && message.seq <= afterSeq) continue
             const event = parseUsageEvent(session, message)
-            if (event) events.push(event)
+            if (!event) continue
+            if (event.kind === 'delta' || !events.has(event.sourceKey)) {
+                events.set(event.sourceKey, event)
+            }
+        }
+        const lastSeq = messages.at(-1)?.seq ?? afterSeq
+        if (messages.length > 0 || replaceEvents) {
+            store.usage.recordScan(
+                session.id,
+                messageEpoch,
+                lastSeq,
+                Array.from(events.values()),
+                replaceEvents
+            )
         }
     }
-    store.usage.upsertEvents(events)
 }
 
 type Totals = Omit<UsageSummaryBucket, 'key'>
@@ -186,11 +224,32 @@ function toBucket(key: string, totals: Totals): UsageSummaryBucket {
     return { key, ...totals }
 }
 
-function dayKey(timestamp: number): string {
-    return new Date(timestamp).toISOString().slice(0, 10)
+function createDayFormatter(timeZone: string): Intl.DateTimeFormat {
+    return new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        calendar: 'iso8601',
+        numberingSystem: 'latn',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    })
 }
 
-export function getUsageSummary(store: Store, namespace: string, range: string | undefined): UsageSummaryResponse {
+function dayKey(timestamp: number, formatter: Intl.DateTimeFormat): string {
+    const parts = formatter.formatToParts(new Date(timestamp))
+    const year = parts.find((part) => part.type === 'year')?.value
+    const month = parts.find((part) => part.type === 'month')?.value
+    const day = parts.find((part) => part.type === 'day')?.value
+    if (!year || !month || !day) throw new Error('Failed to format usage day')
+    return `${year}-${month}-${day}`
+}
+
+export function getUsageSummary(
+    store: Store,
+    namespace: string,
+    range: string | undefined,
+    timeZone: string = 'UTC'
+): UsageSummaryResponse {
     const sessions = store.sessions.getSessionsByNamespace(namespace)
     // This is intentionally lazy. Existing HAPI databases have no usage table;
     // the first dashboard request backfills history, while later requests only
@@ -211,6 +270,7 @@ export function getUsageSummary(store: Store, namespace: string, range: string |
     const sessionsWithUsage = new Set<string>()
     const cumulativePrevious = new Map<string, [number, number, number, number]>()
     const cumulativeFingerprints = new Set<string>()
+    const dayFormatter = createDayFormatter(timeZone)
 
     for (const event of events) {
         let inputTokens = event.inputTokens
@@ -230,6 +290,7 @@ export function getUsageSummary(store: Store, namespace: string, range: string |
             const turnId = sourceParts[3]
             if (turnId) {
                 const fingerprint = [
+                    event.sessionId,
                     turnId,
                     event.inputTokens,
                     event.outputTokens,
@@ -249,9 +310,10 @@ export function getUsageSummary(store: Store, namespace: string, range: string |
             ? inputTokens + cacheReadTokens + cacheCreationTokens
             : inputTokens
         addTotals(totals, normalizedInputTokens, outputTokens, cacheReadTokens, cacheCreationTokens)
-        const dailyTotals = daily.get(dayKey(event.createdAt)) ?? emptyTotals()
+        const eventDayKey = dayKey(event.createdAt, dayFormatter)
+        const dailyTotals = daily.get(eventDayKey) ?? emptyTotals()
         addTotals(dailyTotals, normalizedInputTokens, outputTokens, cacheReadTokens, cacheCreationTokens)
-        daily.set(dayKey(event.createdAt), dailyTotals)
+        daily.set(eventDayKey, dailyTotals)
         const agentTotals = byAgent.get(event.agent) ?? emptyTotals()
         addTotals(agentTotals, normalizedInputTokens, outputTokens, cacheReadTokens, cacheCreationTokens)
         byAgent.set(event.agent, agentTotals)
