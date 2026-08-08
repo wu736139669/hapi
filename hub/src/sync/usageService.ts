@@ -25,10 +25,34 @@ function firstCount(record: RecordValue, ...keys: string[]): number {
     return 0
 }
 
+function normalizeInputTokens(
+    data: RecordValue,
+    inputTokens: number,
+    cacheReadTokens: number,
+    cacheCreationTokens: number,
+    legacySemantics: 'includes-cache' | 'excludes-cache'
+): number {
+    // v1 generic usage messages make their input contract self-describing.
+    // Unknown/missing metadata intentionally falls back to the historical
+    // provider shape so already persisted transcripts remain readable.
+    const declaredSemantics = data.usageSchema === 'hapi.usage.v1'
+        && (data.inputTokenSemantics === 'includes-cache' || data.inputTokenSemantics === 'excludes-cache')
+        ? data.inputTokenSemantics
+        : null
+    const semantics = declaredSemantics ?? legacySemantics
+    return semantics === 'excludes-cache'
+        ? inputTokens + cacheReadTokens + cacheCreationTokens
+        : inputTokens
+}
+
 function sessionAgent(session: StoredSession): string {
     const metadata = asRecord(session.metadata)
     const flavor = metadata?.flavor
     return typeof flavor === 'string' && flavor.trim() ? flavor.trim() : 'unknown'
+}
+
+function sessionModel(session: StoredSession): string | null {
+    return typeof session.model === 'string' && session.model.trim() ? session.model.trim() : null
 }
 
 function parseUsageEvent(session: StoredSession, message: StoredMessage): UsageEvent | null {
@@ -63,7 +87,7 @@ function parseUsageEvent(session: StoredSession, message: StoredMessage): UsageE
             agent: 'claude',
             model,
             kind: 'delta',
-            inputTokens,
+            inputTokens: normalizeInputTokens(data, inputTokens, cacheReadTokens, cacheCreationTokens, 'excludes-cache'),
             outputTokens,
             cacheReadTokens,
             cacheCreationTokens,
@@ -103,11 +127,11 @@ function parseUsageEvent(session: StoredSession, message: StoredMessage): UsageE
             ?? (data.type === 'usage' ? info : null)
         const total = cumulativeTotal ?? (agent === 'codex' ? last : asRecord(info.total) ?? info)
         if (!total) return null
-        const inputTokens = firstCount(total, 'inputTokens', 'input_tokens')
+        const rawInputTokens = firstCount(total, 'inputTokens', 'input_tokens')
         const outputTokens = firstCount(total, 'outputTokens', 'output_tokens')
         const cacheReadTokens = firstCount(total, 'cachedInputTokens', 'cached_input_tokens', 'cacheReadTokens', 'cache_read_input_tokens')
         const cacheCreationTokens = firstCount(total, 'cacheWriteInputTokens', 'cache_write_input_tokens', 'cacheCreationTokens', 'cache_creation_input_tokens')
-        if (inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens <= 0) return null
+        if (rawInputTokens + outputTokens + cacheReadTokens + cacheCreationTokens <= 0) return null
         const threadId = explicitThreadId ?? session.id
         const scope = typeof data.scopeRole === 'string'
             ? data.scopeRole
@@ -122,6 +146,40 @@ function parseUsageEvent(session: StoredSession, message: StoredMessage): UsageE
                 : ''
         const model = typeof data.model === 'string' && data.model.trim()
             ? data.model.trim()
+            : null
+        // Codex/Kimi provider formats have always reported inclusive input.
+        // Imported Pi usage is known-inclusive, and for generic ACP an own
+        // `model` property is the only strong provenance for the unmarked
+        // inclusive wire introduced with the usage dashboard. Older ambiguous
+        // payloads are conservatively treated as cache-exclusive.
+        const legacyInputSemantics = agent === 'codex'
+            || agent === 'kimi'
+            || (agent === 'pi' && message.localId?.startsWith('pi:'))
+            || Object.prototype.hasOwnProperty.call(data, 'model')
+            ? 'includes-cache'
+            : 'excludes-cache'
+        const inputTokens = normalizeInputTokens(
+            data,
+            rawInputTokens,
+            cacheReadTokens,
+            cacheCreationTokens,
+            legacyInputSemantics
+        )
+        const lastOutputTokens = last ? firstCount(last, 'outputTokens', 'output_tokens') : null
+        const lastCacheReadTokens = last
+            ? firstCount(last, 'cachedInputTokens', 'cached_input_tokens', 'cacheReadTokens', 'cache_read_input_tokens')
+            : null
+        const lastCacheCreationTokens = last
+            ? firstCount(last, 'cacheWriteInputTokens', 'cache_write_input_tokens', 'cacheCreationTokens', 'cache_creation_input_tokens')
+            : null
+        const lastInputTokens = last
+            ? normalizeInputTokens(
+                data,
+                firstCount(last, 'inputTokens', 'input_tokens'),
+                lastCacheReadTokens ?? 0,
+                lastCacheCreationTokens ?? 0,
+                legacyInputSemantics
+            )
             : null
         return {
             sessionId: session.id,
@@ -146,14 +204,10 @@ function parseUsageEvent(session: StoredSession, message: StoredMessage): UsageE
             outputTokens,
             cacheReadTokens,
             cacheCreationTokens,
-            lastInputTokens: last ? firstCount(last, 'inputTokens', 'input_tokens') : null,
-            lastOutputTokens: last ? firstCount(last, 'outputTokens', 'output_tokens') : null,
-            lastCacheReadTokens: last
-                ? firstCount(last, 'cachedInputTokens', 'cached_input_tokens', 'cacheReadTokens', 'cache_read_input_tokens')
-                : null,
-            lastCacheCreationTokens: last
-                ? firstCount(last, 'cacheWriteInputTokens', 'cache_write_input_tokens', 'cacheCreationTokens', 'cache_creation_input_tokens')
-                : null
+            lastInputTokens,
+            lastOutputTokens,
+            lastCacheReadTokens,
+            lastCacheCreationTokens
         }
     }
 
@@ -169,11 +223,32 @@ function collectUsageEvents(store: Store, sessions: StoredSession[]): void {
         const afterSeq = replaceEvents ? 0 : scanState.lastSeq
         const messages = store.messages.getMessagesAfterSeq(session.id, afterSeq)
         const events = new Map<string, UsageEvent>()
+        let indexedModels: Map<string, string> | null = null
+        const getIndexedModel = (sourceKey: string): string | null => {
+            if (indexedModels === null) {
+                indexedModels = new Map(
+                    store.usage.getEvents([session.id])
+                        .filter((event): event is UsageEvent & { model: string } => event.model !== null)
+                        .map((event) => [event.sourceKey, event.model])
+                )
+            }
+            return indexedModels.get(sourceKey) ?? null
+        }
+        const fallbackModel = sessionModel(session)
         for (const message of messages) {
             const event = parseUsageEvent(session, message)
             if (!event) continue
-            if (event.kind === 'delta' || !events.has(event.sourceKey)) {
+            const existingEvent = events.get(event.sourceKey)
+            const explicitModel = event.model
+            event.model = explicitModel
+                ?? existingEvent?.model
+                ?? getIndexedModel(event.sourceKey)
+                ?? fallbackModel
+            if (event.kind === 'delta' || !existingEvent) {
                 events.set(event.sourceKey, event)
+            } else if (explicitModel !== null) {
+                // A replay may add model metadata missing from the original snapshot.
+                existingEvent.model = explicitModel
             }
         }
         const lastSeq = messages.at(-1)?.seq ?? afterSeq
@@ -215,9 +290,19 @@ function addTotals(target: Totals, inputTokens: number, outputTokens: number, ca
     target.requests += 1
 }
 
-function cumulativeDelta(current: number, previous: number | null, last: number | null): number {
-    if (previous === null) return last ?? current
-    return current >= previous ? current - previous : last ?? current
+type UsageSnapshot = [number, number, number, number]
+
+function cumulativeSnapshotDelta(
+    current: UsageSnapshot,
+    previous: UsageSnapshot | null,
+    last: UsageSnapshot | null
+): UsageSnapshot {
+    // A provider reset applies to the entire snapshot. Mixing a `last` value
+    // for one regressed counter with deltas from the old baseline for the other
+    // counters invents a request that never existed.
+    const reset = previous === null || current.some((value, index) => value < previous[index])
+    if (reset) return last ?? current
+    return current.map((value, index) => value - previous[index]) as UsageSnapshot
 }
 
 function toBucket(key: string, totals: Totals): UsageSummaryBucket {
@@ -268,7 +353,7 @@ export function getUsageSummary(
     const byAgent = new Map<string, Totals>()
     const byModel = new Map<string, Totals>()
     const sessionsWithUsage = new Set<string>()
-    const cumulativePrevious = new Map<string, [number, number, number, number]>()
+    const cumulativePrevious = new Map<string, UsageSnapshot>()
     const cumulativeFingerprints = new Set<string>()
     const dayFormatter = createDayFormatter(timeZone)
 
@@ -281,12 +366,30 @@ export function getUsageSummary(
         if (event.kind === 'cumulative') {
             const sourceParts = event.sourceKey.split('|')
             const streamKey = sourceParts.slice(0, 3).join('|')
-            const previous = cumulativePrevious.get(streamKey)
-            inputTokens = cumulativeDelta(inputTokens, previous?.[0] ?? null, event.lastInputTokens)
-            outputTokens = cumulativeDelta(outputTokens, previous?.[1] ?? null, event.lastOutputTokens)
-            cacheReadTokens = cumulativeDelta(cacheReadTokens, previous?.[2] ?? null, event.lastCacheReadTokens)
-            cacheCreationTokens = cumulativeDelta(cacheCreationTokens, previous?.[3] ?? null, event.lastCacheCreationTokens)
-            cumulativePrevious.set(streamKey, [event.inputTokens, event.outputTokens, event.cacheReadTokens, event.cacheCreationTokens])
+            const previous = cumulativePrevious.get(streamKey) ?? null
+            const current: UsageSnapshot = [
+                event.inputTokens,
+                event.outputTokens,
+                event.cacheReadTokens,
+                event.cacheCreationTokens
+            ]
+            const last: UsageSnapshot | null = event.lastInputTokens !== null
+                && event.lastOutputTokens !== null
+                && event.lastCacheReadTokens !== null
+                && event.lastCacheCreationTokens !== null
+                ? [
+                    event.lastInputTokens,
+                    event.lastOutputTokens,
+                    event.lastCacheReadTokens,
+                    event.lastCacheCreationTokens
+                ]
+                : null
+            const delta = cumulativeSnapshotDelta(current, previous, last)
+            inputTokens = delta[0]
+            outputTokens = delta[1]
+            cacheReadTokens = delta[2]
+            cacheCreationTokens = delta[3]
+            cumulativePrevious.set(streamKey, current)
             const turnId = sourceParts[3]
             if (turnId) {
                 const fingerprint = [
@@ -306,20 +409,25 @@ export function getUsageSummary(
             }
         }
         if (duplicateCumulativeEvent || !isInRange(event) || inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens <= 0) continue
-        const normalizedInputTokens = event.agent === 'claude'
-            ? inputTokens + cacheReadTokens + cacheCreationTokens
-            : inputTokens
-        addTotals(totals, normalizedInputTokens, outputTokens, cacheReadTokens, cacheCreationTokens)
+        // Cache reads and writes partition processed input. Preserve the
+        // request and its primary token counts when a provider emits an
+        // impossible partition, but conservatively decline to credit either
+        // cache bucket because their split is not trustworthy.
+        if (cacheReadTokens + cacheCreationTokens > inputTokens) {
+            cacheReadTokens = 0
+            cacheCreationTokens = 0
+        }
+        addTotals(totals, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens)
         const eventDayKey = dayKey(event.createdAt, dayFormatter)
         const dailyTotals = daily.get(eventDayKey) ?? emptyTotals()
-        addTotals(dailyTotals, normalizedInputTokens, outputTokens, cacheReadTokens, cacheCreationTokens)
+        addTotals(dailyTotals, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens)
         daily.set(eventDayKey, dailyTotals)
         const agentTotals = byAgent.get(event.agent) ?? emptyTotals()
-        addTotals(agentTotals, normalizedInputTokens, outputTokens, cacheReadTokens, cacheCreationTokens)
+        addTotals(agentTotals, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens)
         byAgent.set(event.agent, agentTotals)
         const modelKey = event.model ?? 'unknown'
         const modelTotals = byModel.get(modelKey) ?? emptyTotals()
-        addTotals(modelTotals, normalizedInputTokens, outputTokens, cacheReadTokens, cacheCreationTokens)
+        addTotals(modelTotals, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens)
         byModel.set(modelKey, modelTotals)
         sessionsWithUsage.add(event.sessionId)
     }

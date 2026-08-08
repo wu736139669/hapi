@@ -21,6 +21,9 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
         activeAt: 0,
         updatedAt: 0,
         metadata: null,
+        metadataVersion: 0,
+        agentStateVersion: 0,
+        todosUpdatedAt: 0,
         todoProgress: null,
         pendingRequestsCount: 0,
         pendingRequestKinds: [],
@@ -158,7 +161,7 @@ describe('SessionList time filter', () => {
         vi.useRealTimers()
     })
 
-    it('filters after selecting a start and end date', () => {
+    it('keeps the date filter beside collapsed search and filters without expanding it', () => {
         const recent = makeSession({
             id: 'recent',
             updatedAt: Date.now(),
@@ -186,8 +189,14 @@ describe('SessionList time filter', () => {
         expect(screen.getByRole('button', { name: /Recent session/ })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Old session/ })).toBeInTheDocument()
 
-        fireEvent.click(screen.getByRole('button', { name: 'Search sessions' }))
-        fireEvent.click(screen.getByRole('button', { name: 'Filter sessions by last activity' }))
+        const searchButton = screen.getByRole('button', { name: 'Search sessions' })
+        const filterButton = screen.getByRole('button', { name: 'Filter sessions by last activity' })
+        expect(searchButton.nextElementSibling).toBe(filterButton)
+        expect(searchButton.parentElement).toBe(filterButton.parentElement)
+        expect(searchButton.parentElement).toHaveClass('relative', 'gap-1')
+        expect(screen.queryByPlaceholderText('Search sessions…')).toBeNull()
+
+        fireEvent.click(filterButton)
         const emptyDate = screen.getByRole('button', { name: new Date(2026, 6, 17).toLocaleDateString() })
         const activeDate = screen.getByRole('button', { name: `${new Date(2026, 6, 18).toLocaleDateString()}, has session activity` })
         expect(emptyDate).toHaveClass('text-[var(--app-hint)]')
@@ -198,6 +207,10 @@ describe('SessionList time filter', () => {
 
         expect(screen.getByRole('button', { name: /Recent session/ })).toBeInTheDocument()
         expect(screen.queryByRole('button', { name: /Old session/ })).toBeNull()
+        expect(screen.queryByPlaceholderText('Search sessions…')).toBeNull()
+        expect(filterButton).toHaveAttribute('title', '2026-07-17 – 2026-07-18')
+        expect(filterButton).toHaveAccessibleName('Filter sessions by last activity: 2026-07-17 – 2026-07-18')
+        expect(filterButton).toHaveFocus()
     })
 
     it('highlights today without requiring hover or session activity', () => {
@@ -456,6 +469,58 @@ describe('SessionList collapse behavior', () => {
         expect(screen.getByRole('button', { name: /Running task/ })).toBeInTheDocument()
         // Directory group retains only the inactive session.
         expect(getProjectPanel().getAttribute('data-open')).toBeNull()
+    })
+
+    it('does not label quiet active sessions as Idle', () => {
+        const sessions = [
+            makeSession({
+                id: 'session-quiet',
+                active: true,
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'Quiet task', flavor: 'codex' },
+            }),
+        ]
+        render(renderSessionList(sessions, null))
+
+        expect(screen.getByRole('button', { name: /Quiet task/ })).toBeInTheDocument()
+        expect(screen.queryByText('Idle')).toBeNull()
+        expect(screen.queryByTitle('Idle')).toBeNull()
+    })
+
+    it('keeps quiet active sessions in directory groups when pin-in-progress is on', () => {
+        localStorage.setItem('hapi-pin-in-progress-sessions', 'true')
+        const sessions = [
+            makeSession({
+                id: 'session-running',
+                active: true,
+                thinking: true,
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'Running task', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'session-quiet',
+                active: true,
+                updatedAt: 90,
+                metadata: { path: '/work/hapi', name: 'Quiet task', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'session-pending',
+                active: true,
+                pendingRequestsCount: 1,
+                updatedAt: 80,
+                metadata: { path: '/work/other', name: 'Pending task', flavor: 'codex' },
+            }),
+        ]
+        render(renderSessionList(sessions, null))
+
+        expect(screen.getByTitle('In progress')).toBeInTheDocument()
+        expect(screen.getByText(/Running \(1\)/)).toBeInTheDocument()
+        expect(screen.getByText(/pending \(1\)/)).toBeInTheDocument()
+        expect(screen.queryByText(/Idle \(/)).toBeNull()
+        // Quiet active stays under its project directory, not an Idle pin bucket.
+        expect(screen.getByTitle('/work/hapi')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /Quiet task/ })).toBeInTheDocument()
+        expect(getProjectPanel().getAttribute('data-open')).toBe('true')
     })
 
     it('auto-expands the path again when the selected session changes', async () => {
@@ -785,8 +850,49 @@ describe('SessionList search toggle', () => {
         // Blur collapses back to the icon; the query stays applied.
         fireEvent.blur(input)
         expect(screen.queryByPlaceholderText('Search sessions…')).toBeNull()
-        expect(screen.getByRole('button', { name: 'Search sessions' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /Search sessions/ })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Matching task/ })).toBeInTheDocument()
+        expect(screen.queryByRole('button', { name: /Other task/ })).toBeNull()
+    })
+
+    it('shows truncated query text on the collapsed search control when a text filter is active', () => {
+        const sessions = [
+            makeSession({
+                id: 'session-jelly',
+                updatedAt: 100,
+                metadata: { path: '/work/hapi', name: 'jellybot task', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'session-other',
+                updatedAt: 90,
+                metadata: { path: '/work/hapi', name: 'Other task', flavor: 'codex' },
+            }),
+        ]
+
+        renderWithProviders(
+            <SessionList
+                sessions={sessions}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={null}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'Search sessions' }))
+        const input = screen.getByPlaceholderText('Search sessions…')
+        fireEvent.change(input, { target: { value: 'jellybot' } })
+        fireEvent.blur(input)
+
+        expect(screen.queryByPlaceholderText('Search sessions…')).toBeNull()
+        const collapsed = screen.getByRole('button', { name: /Search sessions/ })
+        expect(collapsed).toHaveTextContent('jellybot')
+        expect(collapsed.className).toContain('bg-[var(--app-chat-user-chip-bg)]')
+        expect(collapsed.className).toContain('text-[var(--app-chat-user-chip-fg)]')
+        expect(screen.getByRole('button', { name: /jellybot task/ })).toBeInTheDocument()
         expect(screen.queryByRole('button', { name: /Other task/ })).toBeNull()
     })
 

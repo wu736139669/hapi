@@ -15,8 +15,8 @@ import { DEFAULT_SESSION_PREVIEW_LIMIT, useSessionPreviewLimit } from '@/hooks/u
 import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
 import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
-import { classifySessionAttention } from '@/lib/sessionAttention'
-import { getSessionLastSeenAt } from '@/lib/sessionLastSeen'
+import { classifySessionAttention, sessionIsUnread } from '@/lib/sessionAttention'
+import { getSessionLastSeenAt, getSessionLastSeenSnapshot } from '@/lib/sessionLastSeen'
 import { useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { subscribeCodexImportedSessions } from '@/lib/codexImportedSessions'
 import { formatReopenError } from '@/lib/reopenError'
@@ -47,6 +47,16 @@ const RUNNING_BUCKETS = [
     { key: 'working', labelKey: 'session.item.running', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'pending', labelKey: 'session.item.pending', colorClass: 'text-[var(--app-badge-warning-text)]', pulse: true },
 ] as const
+
+/** Active sessions that warrant the optional pinned In progress section. Quiet actives stay in directory groups. */
+function isPinnedInProgressSession(session: SessionSummary): boolean {
+    if (!session.active) {
+        return false
+    }
+    return session.thinking
+        || (session.backgroundTaskCount ?? 0) > 0
+        || (session.pendingRequestsCount ?? 0) > 0
+}
 
 export type SessionTimeRange = {
     start: number | null
@@ -225,6 +235,19 @@ export function prepareSidebarSessions(sessions: SessionSummary[], selectedSessi
 // selected session out from under them.
 export function filterActiveSessionsOnly(sessions: SessionSummary[], selectedSessionId?: string | null): SessionSummary[] {
     return sessions.filter(session => session.active || session.id === selectedSessionId)
+}
+
+// Transient unread lens: hide sessions the operator has already seen.
+// Keep the open session visible. Not Overseer / "needs attention" — just unread.
+export function filterUnreadSessionsOnly(
+    sessions: SessionSummary[],
+    selectedSessionId: string | null | undefined,
+    getLastSeenAt: (sessionId: string) => number
+): SessionSummary[] {
+    return sessions.filter(session =>
+        session.id === selectedSessionId
+        || sessionIsUnread(session, { lastSeenAt: getLastSeenAt(session.id) })
+    )
 }
 
 // Paginated session previews move one batch at a time in either direction.
@@ -547,6 +570,7 @@ function SessionDateRangePicker(props: {
     onChange: (start: string, end: string) => void
     onClear: () => void
     onClose: () => void
+    align: 'left' | 'right'
 }) {
     const { t } = useTranslation()
     const initialDate = parseLocalDate(props.start) ?? new Date()
@@ -568,7 +592,10 @@ function SessionDateRangePicker(props: {
     }
 
     return (
-        <div className="absolute right-0 top-full z-30 mt-2 w-72 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3 shadow-xl">
+        <div className={cn(
+            'absolute top-full z-30 mt-2 w-72 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3 shadow-xl',
+            props.align === 'left' ? 'left-0' : 'right-0'
+        )}>
             <div className="mb-2 flex items-center justify-between">
                 <button
                     type="button"
@@ -659,8 +686,8 @@ function SessionListSearch(props: {
     const { t } = useTranslation()
     const [datePickerOpen, setDatePickerOpen] = useState(false)
     const inputRef = useRef<HTMLInputElement>(null)
+    const dateButtonRef = useRef<HTMLButtonElement>(null)
     const hasDateRange = Boolean(props.customStart && props.customEnd)
-    const hasActiveFilters = props.value.length > 0 || hasDateRange
 
     useEffect(() => {
         if (props.expanded) {
@@ -670,18 +697,99 @@ function SessionListSearch(props: {
         }
     }, [props.expanded])
 
-    if (!props.expanded) {
+    const renderDateFilter = (variant: 'standalone' | 'embedded') => {
+        const returnFocus = () => {
+            (variant === 'embedded' ? inputRef.current : dateButtonRef.current)?.focus()
+        }
+
         return (
-            <button
-                type="button"
-                onClick={() => props.onExpandedChange(true)}
-                className="relative shrink-0 rounded-full p-1.5 text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
-                title={t('sessions.search.open')}
-                aria-label={t('sessions.search.open')}
-            >
-                <SearchIcon className="h-5 w-5" />
-                {hasActiveFilters ? <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--app-link)]" /> : null}
-            </button>
+            <>
+                <button
+                    ref={dateButtonRef}
+                    type="button"
+                    onClick={() => setDatePickerOpen(open => !open)}
+                    className={cn(
+                        'relative shrink-0 transition-colors hover:bg-[var(--app-subtle-bg)]',
+                        variant === 'standalone'
+                            ? 'rounded-full p-1.5 hover:text-[var(--app-fg)]'
+                            : 'flex items-center rounded-r-lg rounded-l-md px-2',
+                        hasDateRange ? 'text-[var(--app-link)]' : 'text-[var(--app-hint)]'
+                    )}
+                    title={hasDateRange ? `${props.customStart} – ${props.customEnd}` : t('sessions.timeFilter.label')}
+                    aria-label={hasDateRange
+                        ? `${t('sessions.timeFilter.label')}: ${props.customStart} – ${props.customEnd}`
+                        : t('sessions.timeFilter.label')}
+                    aria-expanded={datePickerOpen}
+                >
+                    <CalendarIcon className="h-5 w-5" />
+                    {hasDateRange ? (
+                        <span className={cn(
+                            'absolute h-1.5 w-1.5 rounded-full bg-[var(--app-link)]',
+                            variant === 'standalone' ? 'right-0.5 top-0.5' : 'right-1 top-1'
+                        )} />
+                    ) : null}
+                </button>
+                {datePickerOpen ? (
+                    <>
+                        <button
+                            type="button"
+                            aria-label={t('sessions.timeFilter.close')}
+                            className="fixed inset-0 z-20 cursor-default"
+                            onClick={() => {
+                                setDatePickerOpen(false)
+                                returnFocus()
+                            }}
+                        />
+                        <SessionDateRangePicker
+                            start={props.customStart}
+                            end={props.customEnd}
+                            sessionActivityDates={props.sessionActivityDates}
+                            onChange={props.onDateRangeChange}
+                            onClear={() => {
+                                props.onDateRangeChange('', '')
+                                // The footer Clear button unmounts once the range is
+                                // empty; return focus so it does not drop to <body>.
+                                returnFocus()
+                            }}
+                            onClose={() => {
+                                setDatePickerOpen(false)
+                                returnFocus()
+                            }}
+                            align={variant === 'standalone' ? 'left' : 'right'}
+                        />
+                    </>
+                ) : null}
+            </>
+        )
+    }
+
+    if (!props.expanded) {
+        const hasTextQuery = props.value.length > 0
+        const openLabel = t('sessions.search.open')
+        const collapsedLabel = hasTextQuery ? `${openLabel}: ${props.value}` : openLabel
+        return (
+            <div className="relative flex items-center gap-1">
+                <button
+                    type="button"
+                    onClick={() => props.onExpandedChange(true)}
+                    className={cn(
+                        'relative flex min-w-0 max-w-[9rem] items-center gap-1 rounded-full transition-colors',
+                        hasTextQuery
+                            // Dedicated chip tokens (blue wash) so the active query stays
+                            // readable when truncated text disappears at small widths.
+                            ? 'bg-[var(--app-chat-user-chip-bg)] px-2 py-1 text-[var(--app-chat-user-chip-fg)] hover:opacity-90'
+                            : 'shrink-0 p-1.5 text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
+                    )}
+                    title={collapsedLabel}
+                    aria-label={collapsedLabel}
+                >
+                    <SearchIcon className="h-5 w-5 shrink-0" />
+                    {hasTextQuery ? (
+                        <span className="min-w-0 truncate text-xs font-medium">{props.value}</span>
+                    ) : null}
+                </button>
+                {renderDateFilter('standalone')}
+            </div>
         )
     }
 
@@ -721,44 +829,7 @@ function SessionListSearch(props: {
                 </button>
             ) : null}
             <div className="absolute inset-y-0 right-0 flex items-stretch">
-                <button
-                    type="button"
-                    onClick={() => setDatePickerOpen(open => !open)}
-                    className={cn(
-                        'relative flex items-center rounded-r-lg rounded-l-md px-2 transition-colors hover:bg-[var(--app-subtle-bg)]',
-                        hasDateRange ? 'text-[var(--app-link)]' : 'text-[var(--app-hint)]'
-                    )}
-                    title={hasDateRange ? `${props.customStart} – ${props.customEnd}` : t('sessions.timeFilter.label')}
-                    aria-label={t('sessions.timeFilter.label')}
-                    aria-expanded={datePickerOpen}
-                >
-                    <CalendarIcon className="h-5 w-5" />
-                    {hasDateRange ? <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[var(--app-link)]" /> : null}
-                </button>
-                {datePickerOpen ? (
-                    <>
-                        <button type="button" aria-label={t('sessions.timeFilter.close')} className="fixed inset-0 z-20 cursor-default" onClick={() => {
-                            setDatePickerOpen(false)
-                            inputRef.current?.focus()
-                        }} />
-                        <SessionDateRangePicker
-                            start={props.customStart}
-                            end={props.customEnd}
-                            sessionActivityDates={props.sessionActivityDates}
-                            onChange={props.onDateRangeChange}
-                            onClear={() => {
-                                props.onDateRangeChange('', '')
-                                // The footer Clear button unmounts once the range is
-                                // empty; return focus so the wrapper blur still works.
-                                inputRef.current?.focus()
-                            }}
-                            onClose={() => {
-                                setDatePickerOpen(false)
-                                inputRef.current?.focus()
-                            }}
-                        />
-                    </>
-                ) : null}
+                {renderDateFilter('embedded')}
             </div>
         </div>
     )
@@ -1011,6 +1082,8 @@ export function SessionList(props: {
     const { sessionPreviewLimit } = useSessionPreviewLimit()
     const { sessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly } = useShowActiveSessionsOnly()
+    // Transient unread lens — not a Settings preference. Cleared on reload; rows drop as they're seen.
+    const [showUnreadOnly, setShowUnreadOnly] = useState(false)
     const { pinInProgressSessions } = usePinInProgressSessions()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
@@ -1043,7 +1116,9 @@ export function SessionList(props: {
     const allSessions = useMemo(
         () => {
             const prepared = prepareSidebarSessions(props.sessions, selectedSessionId)
-            return showActiveSessionsOnly ? filterActiveSessionsOnly(prepared, selectedSessionId) : prepared
+            return showActiveSessionsOnly
+                ? filterActiveSessionsOnly(prepared, selectedSessionId)
+                : prepared
         },
         [props.sessions, selectedSessionId, showActiveSessionsOnly]
     )
@@ -1094,17 +1169,30 @@ export function SessionList(props: {
         && machineFilters.some(mg => (mg.machineId ?? UNKNOWN_MACHINE_ID) === machineFilter)
         ? machineFilter
         : null
+    // Unread after search/time, before machine scope — so machineFilters (from allSessions)
+    // stay stable. Filtering unread into allSessions would drop machines with zero unread
+    // and clear a persisted machine selection (showing other machines' unread instead).
+    const unreadFilteredSessions = useMemo(() => {
+        if (!showUnreadOnly) return visibleSessions
+        const lastSeenById = getSessionLastSeenSnapshot()
+        return filterUnreadSessionsOnly(
+            visibleSessions,
+            selectedSessionId,
+            id => lastSeenById[id] ?? 0
+        )
+    }, [visibleSessions, selectedSessionId, showUnreadOnly])
     const machineFilteredSessions = useMemo(
         () => activeMachineFilter === null
-            ? visibleSessions
-            : visibleSessions.filter(session => (session.metadata?.machineId ?? UNKNOWN_MACHINE_ID) === activeMachineFilter),
-        [visibleSessions, activeMachineFilter]
+            ? unreadFilteredSessions
+            : unreadFilteredSessions.filter(session =>
+                (session.metadata?.machineId ?? UNKNOWN_MACHINE_ID) === activeMachineFilter
+            ),
+        [unreadFilteredSessions, activeMachineFilter]
     )
     const runningSessions = useMemo(() => {
-        const buckets: Record<'working' | 'pending' | 'idle', SessionSummary[]> = {
+        const buckets: Record<'working' | 'pending', SessionSummary[]> = {
             working: [],
             pending: [],
-            idle: []
         }
         if (!pinInProgressSessions) {
             return buckets
@@ -1117,9 +1205,8 @@ export function SessionList(props: {
                 buckets.working.push(session)
             } else if ((session.pendingRequestsCount ?? 0) > 0) {
                 buckets.pending.push(session)
-            } else {
-                buckets.idle.push(session)
             }
+            // Quiet active sessions stay in directory groups (no Idle pin bucket).
         }
         const byRecent = (a: SessionSummary, b: SessionSummary) => b.updatedAt - a.updatedAt
         for (const key of Object.keys(buckets) as Array<keyof typeof buckets>) {
@@ -1129,7 +1216,6 @@ export function SessionList(props: {
     }, [machineFilteredSessions, pinInProgressSessions])
     const runningSessionTotal = runningSessions.working.length
         + runningSessions.pending.length
-        + runningSessions.idle.length
     const [completedUnseen, setCompletedUnseen] = useState<Set<string>>(readCompletedUnseen)
     const previousSessionStateRef = useRef<Map<string, string>>(new Map())
     const updateCompletedUnseen = (mutate: (set: Set<string>) => void) => {
@@ -1191,7 +1277,7 @@ export function SessionList(props: {
     const groups = useMemo(
         () => groupSessionsByDirectory(
             pinInProgressSessions
-                ? machineFilteredSessions.filter((session) => !session.active)
+                ? machineFilteredSessions.filter((session) => !isPinnedInProgressSession(session))
                 : machineFilteredSessions
         ),
         [machineFilteredSessions, pinInProgressSessions]
@@ -1477,6 +1563,30 @@ export function SessionList(props: {
                                     onChange={setMachineFilter}
                                 />
                             ) : null}
+                            <button
+                                type="button"
+                                onClick={() => setShowUnreadOnly(!showUnreadOnly)}
+                                aria-pressed={showUnreadOnly}
+                                title={t('sessions.unreadFilter.toggle')}
+                                aria-label={t('sessions.unreadFilter.toggle')}
+                                className={cn(
+                                    'flex h-9 w-9 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                                    showUnreadOnly
+                                        ? 'bg-[var(--app-subtle-bg)]'
+                                        : 'hover:bg-[var(--app-subtle-bg)]'
+                                )}
+                            >
+                                {/* Same shape/color language as session-row unread dots (SessionAttentionIndicator). */}
+                                <span
+                                    aria-hidden
+                                    className={cn(
+                                        'inline-flex h-2.5 w-2.5 shrink-0 rounded-full',
+                                        showUnreadOnly
+                                            ? 'bg-[var(--app-link)]'
+                                            : 'bg-[var(--app-hint)]'
+                                    )}
+                                />
+                            </button>
                             {renderHeader ? (
                                 <button
                                     type="button"
@@ -1533,7 +1643,7 @@ export function SessionList(props: {
                     />
                 ) : null}
 
-                {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null) && groups.length === 0 && runningSessionTotal === 0 ? (
+                {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null || showUnreadOnly) && groups.length === 0 && runningSessionTotal === 0 ? (
                     <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
                         {t('sessions.search.noResults')}
                     </div>
@@ -1597,48 +1707,6 @@ export function SessionList(props: {
                                         </div>
                                     )
                                 })}
-                                {(() => {
-                                    const completedIdle = runningSessions.idle.filter((session) => completedUnseen.has(session.id))
-                                    const plainIdle = runningSessions.idle.filter((session) => !completedUnseen.has(session.id))
-                                    const renderIdleSession = (session: SessionSummary, completed: boolean) => (
-                                        <SessionItem
-                                            key={session.id}
-                                            session={session}
-                                            onSelect={handleSelectSession}
-                                            showPath={false}
-                                            api={api}
-                                            selected={session.id === selectedSessionId}
-                                            showDetailedStatus={showDetailedStatus}
-                                            inRunningSection
-                                            completedUnseen={completed}
-                                            projectLabel={getGroupDisplayName(session.metadata?.worktree?.basePath ?? session.metadata?.path ?? 'Other')}
-                                            machineLabel={resolveMachineLabel(session.metadata?.machineId ?? null)}
-                                        />
-                                    )
-
-                                    return (
-                                        <>
-                                            {completedIdle.length > 0 ? (
-                                                <div key="completed">
-                                                    <div className="flex items-center gap-1 px-1 pt-1 pb-0.5 text-[11px] font-medium text-[var(--app-badge-success-text)]">
-                                                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current animate-pulse" aria-hidden="true" />
-                                                        {t('session.item.completed')} ({completedIdle.length})
-                                                    </div>
-                                                    {completedIdle.map((session) => renderIdleSession(session, true))}
-                                                </div>
-                                            ) : null}
-                                            {plainIdle.length > 0 ? (
-                                                <div key="idle">
-                                                    <div className="flex items-center gap-1 px-1 pt-1 pb-0.5 text-[11px] font-medium text-[var(--app-hint)]">
-                                                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" aria-hidden="true" />
-                                                        {t('session.item.idle')} ({plainIdle.length})
-                                                    </div>
-                                                    {plainIdle.map((session) => renderIdleSession(session, false))}
-                                                </div>
-                                            ) : null}
-                                        </>
-                                    )
-                                })()}
                             </div>
                             </div>
                         </div>
@@ -1713,6 +1781,7 @@ export function SessionList(props: {
                                             api={api}
                                             selected={s.id === selectedSessionId}
                                             showDetailedStatus={showDetailedStatus}
+                                            completedUnseen={completedUnseen.has(s.id)}
                                         />
                                     ))}
                                     {group.sessions.length > sessionPreviewLimit && (hiddenSessionCount > 0 || canShowFewerSessions) ? (

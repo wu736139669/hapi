@@ -33,7 +33,7 @@ export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 export { UsageStore } from './usageStore'
 
-const SCHEMA_VERSION: number = 19
+const SCHEMA_VERSION: number = 21
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -151,7 +151,7 @@ export class Store {
         content: unknown,
         localId?: string,
         scheduledAt?: number | null
-    ): { sessionId: string; message: StoredMessage } {
+    ): { sessionId: string; message: StoredMessage; inserted: boolean } {
         return this.db.transaction(() => {
             const row = this.db.prepare('SELECT namespace, metadata FROM sessions WHERE id = ?').get(sessionId) as { namespace: string; metadata: string | null } | undefined
             if (!row) throw new Error('Message source session not found')
@@ -169,7 +169,15 @@ export class Store {
                     .get(targetSessionId, row.namespace)
                 if (!target) throw new Error('OpenCode clear redirect target is unavailable in the source namespace')
             }
-            return { sessionId: targetSessionId, message: addMessage(this.db, targetSessionId, content, localId, scheduledAt) }
+            const alreadyExists = localId
+                ? Boolean(this.db.prepare('SELECT 1 FROM messages WHERE session_id = ? AND local_id = ? LIMIT 1')
+                    .get(targetSessionId, localId))
+                : false
+            return {
+                sessionId: targetSessionId,
+                message: addMessage(this.db, targetSessionId, content, localId, scheduledAt),
+                inserted: !alreadyExists
+            }
         })()
     }
 
@@ -279,6 +287,8 @@ export class Store {
             16: () => this.migrateFromV16ToV17(),
             17: () => this.migrateFromV17ToV18(),
             18: () => this.migrateFromV18ToV19(),
+            19: () => this.migrateFromV19ToV20(),
+            20: () => this.migrateFromV20ToV21(),
         })
 
         if (currentVersion === 0) {
@@ -796,6 +806,34 @@ export class Store {
                 last_seq INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
+            DELETE FROM usage_events;
+            DELETE FROM usage_scan_state;
+        `)
+    }
+
+    private migrateFromV19ToV20(): void {
+        // tiann/hapi#1359 stamps a stable session-model fallback onto usage
+        // events that predate model attribution. That only helps events
+        // indexed after the upgrade, so clear the scan state once to force
+        // usageService's lazy re-index to re-derive every event. The events
+        // table is left alone: the re-index replaces each session's rows and
+        // reuses any previously indexed explicit models.
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS usage_scan_state (
+                session_id TEXT PRIMARY KEY,
+                message_epoch INTEGER NOT NULL DEFAULT 0,
+                last_seq INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            DELETE FROM usage_scan_state;
+        `)
+    }
+
+    private migrateFromV20ToV21(): void {
+        // Usage events and scan cursors are a derived index. v21 moves cache
+        // normalization to parse time, so every row must be rebuilt under the
+        // same inclusive-input invariant rather than mixing old and new rows.
+        this.db.exec(`
             DELETE FROM usage_events;
             DELETE FROM usage_scan_state;
         `)

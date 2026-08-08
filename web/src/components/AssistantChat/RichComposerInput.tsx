@@ -7,6 +7,7 @@ import {
     useRef,
     useState,
     type ClipboardEvent as ReactClipboardEvent,
+    type FocusEvent as ReactFocusEvent,
     type FormEvent as ReactFormEvent,
     type KeyboardEvent as ReactKeyboardEvent,
     type PointerEvent as ReactPointerEvent,
@@ -72,6 +73,7 @@ type Props = {
     onMirrorChange: (state: { text: string; selection: ComposerSelection }) => void
     onKeyDown?: (e: ReactKeyboardEvent<HTMLDivElement>) => void
     onPaste?: (e: ReactClipboardEvent<HTMLDivElement>) => void
+    onFocus?: (e: ReactFocusEvent<HTMLDivElement>) => void
     onEdit?: () => void
     /** Live session meta for chip hover / aria-label (from useSessions). */
     resolveSessionMentionTooltip?: ResolveSessionMentionTooltip
@@ -106,6 +108,33 @@ function createMentionSpan(
 const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'TR', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'PRE'])
 /** Zero-width pad so a trailing linebreak keeps a caret line-box (pre-wrap / br). */
 const CARET_PAD = '\u200B'
+const PLACEHOLDER_MAX_FONT_SIZE_PX = 16
+const PLACEHOLDER_FIT_GUTTER_PX = 1
+
+export function fitSingleLineFontSize(
+    availableWidth: number,
+    contentWidth: number,
+    maxFontSize = PLACEHOLDER_MAX_FONT_SIZE_PX
+): number {
+    const resolvedMaxFontSize = Number.isFinite(maxFontSize) && maxFontSize > 0
+        ? maxFontSize
+        : PLACEHOLDER_MAX_FONT_SIZE_PX
+    if (
+        !Number.isFinite(availableWidth)
+        || !Number.isFinite(contentWidth)
+        || availableWidth <= 0
+        || contentWidth <= 0
+        || contentWidth <= availableWidth
+    ) {
+        return resolvedMaxFontSize
+    }
+
+    // Keep a tiny buffer for fractional glyph metrics: scrollWidth is rounded
+    // to an integer, while the browser can paint glyphs on sub-pixels.
+    return resolvedMaxFontSize
+        * Math.max(0, availableWidth - PLACEHOLDER_FIT_GUTTER_PX)
+        / contentWidth
+}
 
 function stripCaretPad(text: string): string {
     return text.replaceAll(CARET_PAD, '')
@@ -138,6 +167,29 @@ function selectionIsAfterCaretPad(
         && selection.start > 0
         && mirror[selection.start - 1] === '\n'
         && caretIsAfterCaretPad(root)
+}
+
+/**
+ * True for the bogus `<br>` Chromium/WebKit/Gecko park in an editor whose
+ * content was just deleted (Firefox marks it `type="_moz"`, Blink leaves it
+ * bare). It is a caret placeholder, not user content: counting it as a newline
+ * leaves a visually empty composer holding `"\n"` forever, which then persists
+ * as a draft and repaints as a real blank first line.
+ *
+ * Our own renderer never emits a naked trailing `<br>` — a real trailing
+ * newline always carries a CARET_PAD text node after it (see
+ * `renderSegmentsToEditor` / `insertLineBreakAtCaret`), so "nothing at all
+ * after this node" is exactly the filler shape.
+ */
+function isFillerLineBreak(root: HTMLElement, br: Node): boolean {
+    for (let node: Node | null = br; node && node !== root; node = node.parentNode) {
+        for (let next = node.nextSibling; next; next = next.nextSibling) {
+            if (next.nodeType !== Node.TEXT_NODE) return false
+            // Raw length, not stripCaretPad: the pad marks a deliberate break.
+            if ((next.textContent ?? '').length > 0) return false
+        }
+    }
+    return true
 }
 
 type ComposerDomSpan = {
@@ -223,6 +275,11 @@ function mapComposerEditorDom(root: HTMLElement): ComposerDomMapping {
             return
         }
         if (el.tagName === 'BR') {
+            if (isFillerLineBreak(root, node)) {
+                // Zero-width: the caret placeholder owns no mirror position.
+                spans.set(node, { start: mirrorLength, end: mirrorLength, producesOutput: false })
+                return
+            }
             pushNewlineIfNeeded()
             const start = mirrorLength
             pushText('\n')
@@ -563,6 +620,9 @@ function setMirrorSelection(root: HTMLElement, selection: ComposerSelection) {
         if (el.tagName === 'BR') {
             const parent = el.parentNode
             if (!parent) return true
+            // Mirror mapping gives a filler br zero width; consuming one here
+            // would shift every later offset by one.
+            if (isFillerLineBreak(root, el)) return false
             if (remaining === 0) {
                 place(parent, Array.from(parent.childNodes).indexOf(el))
                 return true
@@ -619,6 +679,7 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, Props>(func
         onMirrorChange,
         onKeyDown,
         onPaste,
+        onFocus,
         onEdit,
         resolveSessionMentionTooltip,
     },
@@ -683,6 +744,9 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, Props>(func
         syncFromValue(value)
     }, [value, syncFromValue])
 
+    const onFocusRef = useRef(onFocus)
+    onFocusRef.current = onFocus
+
     useEffect(() => {
         if (!autoFocus || disabled) return
         const root = rootRef.current
@@ -692,6 +756,18 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, Props>(func
         } catch {
             root.focus()
         }
+        // Programmatic focus is not guaranteed to fire a DOM focus event in
+        // every engine (notably Playwright headless). Notify the parent so
+        // FUE / other first-focus hooks still run.
+        onFocusRef.current?.(
+            {
+                type: 'focus',
+                target: root,
+                currentTarget: root,
+                preventDefault() {},
+                stopPropagation() {},
+            } as ReactFocusEvent<HTMLDivElement>
+        )
     }, [autoFocus, disabled])
 
     useImperativeHandle(ref, () => ({
@@ -946,6 +1022,48 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, Props>(func
     // No onDrop: intercepting without caretRangeFromPoint appends at EOF / no-ops
     // in-editor moves. Native CE drop + plaintext-only / paste path is enough for #1215.
 
+    const placeholderRef = useRef<HTMLDivElement>(null)
+
+    useLayoutEffect(() => {
+        const element = placeholderRef.current
+        if (!element || !domIsEmpty || !placeholder) return
+
+        let cancelled = false
+        const fitPlaceholder = () => {
+            if (cancelled) return
+
+            // Restore the configured text-base size before measuring. Measuring
+            // the already-shrunk text would make successive resizes compound.
+            element.style.removeProperty('font-size')
+            const baseFontSize = Number.parseFloat(getComputedStyle(element).fontSize)
+            const fontSize = fitSingleLineFontSize(
+                element.clientWidth,
+                element.scrollWidth,
+                baseFontSize
+            )
+            element.style.fontSize = `${fontSize}px`
+        }
+
+        fitPlaceholder()
+
+        const resizeObserver = typeof ResizeObserver === 'undefined'
+            ? null
+            : new ResizeObserver(fitPlaceholder)
+        resizeObserver?.observe(element)
+        window.addEventListener('resize', fitPlaceholder)
+
+        const fonts = document.fonts
+        void fonts?.ready.then(fitPlaceholder)
+        fonts?.addEventListener?.('loadingdone', fitPlaceholder)
+
+        return () => {
+            cancelled = true
+            resizeObserver?.disconnect()
+            window.removeEventListener('resize', fitPlaceholder)
+            fonts?.removeEventListener?.('loadingdone', fitPlaceholder)
+        }
+    }, [domIsEmpty, placeholder])
+
     const handleKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
         if (e.nativeEvent.isComposing || composingRef.current) {
             return
@@ -994,8 +1112,10 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, Props>(func
         <div className="relative min-w-0 flex-1">
             {domIsEmpty && placeholder ? (
                 <div
+                    ref={placeholderRef}
                     aria-hidden
-                    className="pointer-events-none absolute inset-0 text-base leading-snug text-[var(--app-hint)]"
+                    data-testid="rich-composer-placeholder"
+                    className="pointer-events-none absolute inset-0 overflow-hidden whitespace-nowrap text-base leading-[1.375rem] text-[var(--app-hint)]"
                 >
                     {placeholder}
                 </div>
@@ -1013,6 +1133,7 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, Props>(func
                 data-testid="rich-composer-input"
                 className={`${className ?? ''}${disabled ? ' cursor-not-allowed opacity-50' : ''}`}
                 onInput={handleInput}
+                onFocus={onFocus}
                 onKeyDown={handleKeyDown}
                 onPointerOver={handlePointerOver}
                 onPointerLeave={handlePointerLeave}

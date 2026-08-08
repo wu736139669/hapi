@@ -3,6 +3,10 @@ import type { PropsWithChildren } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 
+vi.mock('@/hooks/queries/useMachines', () => ({
+    useMachines: () => ({ machines: [] })
+}))
+
 vi.mock('@assistant-ui/react', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@assistant-ui/react')>()
     return {
@@ -28,7 +32,7 @@ import type { Session } from '@/types/api'
 const originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo')
 
 function renderThread(onViewModeChange = vi.fn()) {
-    const result = render(
+    const renderHappyThread = (forceScrollToken: number) => (
         <I18nProvider>
             <HappyThread
                 api={{} as ApiClient}
@@ -49,13 +53,14 @@ function renderThread(onViewModeChange = vi.fn()) {
                 normalizedMessagesCount={1}
                 messagesVersion={1}
                 historyVersion={0}
-                forceScrollToken={0}
+                forceScrollToken={forceScrollToken}
                 outlineOpen={false}
                 outlineItems={[]}
                 onOutlineOpenChange={vi.fn()}
             />
         </I18nProvider>
     )
+    const result = render(renderHappyThread(0))
     const viewport = result.container.querySelector<HTMLElement>('.chat-scroll-y')
     if (!viewport) {
         throw new Error('Chat viewport was not rendered')
@@ -67,7 +72,12 @@ function renderThread(onViewModeChange = vi.fn()) {
     act(() => {
         vi.advanceTimersByTime(0)
     })
-    return { ...result, viewport, onViewModeChange }
+    return {
+        ...result,
+        viewport,
+        onViewModeChange,
+        rerenderThread: (forceScrollToken: number) => result.rerender(renderHappyThread(forceScrollToken))
+    }
 }
 
 beforeEach(() => {
@@ -119,11 +129,8 @@ describe('mobile initial scroll settling', () => {
         expect(onViewModeChange).toHaveBeenLastCalledWith('history')
     })
 
-    it('ignores pointer cancellation that did not start in the chat viewport', () => {
+    it('keeps settling for non-explicit non-zero layout movement', () => {
         const { viewport, onViewModeChange } = renderThread()
-        const pointerCancel = new Event('pointercancel', { bubbles: true })
-        Object.defineProperty(pointerCancel, 'pointerType', { value: 'touch' })
-        fireEvent(window, pointerCancel)
 
         viewport.scrollTop = 520
         fireEvent.scroll(viewport)
@@ -132,6 +139,94 @@ describe('mobile initial scroll settling', () => {
         })
 
         expect(viewport.scrollTop).toBe(702)
+        expect(onViewModeChange).not.toHaveBeenCalledWith('history')
+    })
+
+    it('does not snap back after a window-captured native scrollbar drag', () => {
+        const { viewport, onViewModeChange } = renderThread()
+        vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({
+            left: 0,
+            top: 0,
+            right: 320,
+            bottom: 600
+        } as DOMRect)
+
+        fireEvent.mouseDown(window, { button: 0, clientX: 319, clientY: 200 })
+        viewport.scrollTop = 520
+        fireEvent.scroll(viewport)
+        fireEvent.mouseUp(window)
+        act(() => {
+            vi.advanceTimersByTime(1_800)
+        })
+
+        expect(viewport.scrollTop).toBe(520)
+        expect(onViewModeChange).toHaveBeenLastCalledWith('history')
+    })
+
+    it('ignores captured mouse input outside the chat viewport', () => {
+        const { viewport, onViewModeChange } = renderThread()
+        vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue({
+            left: 0,
+            top: 0,
+            right: 320,
+            bottom: 600
+        } as DOMRect)
+
+        fireEvent.mouseDown(window, { button: 0, clientX: 400, clientY: 200 })
+        viewport.scrollTop = 520
+        fireEvent.scroll(viewport)
+        fireEvent.mouseUp(window)
+        act(() => {
+            vi.advanceTimersByTime(1_800)
+        })
+
+        expect(viewport.scrollTop).toBe(702)
+        expect(onViewModeChange).not.toHaveBeenCalledWith('history')
+    })
+
+    it('keeps settling after the runtime resets the viewport to the exact top', () => {
+        const { viewport, onViewModeChange } = renderThread()
+
+        viewport.scrollTop = 0
+        fireEvent.scroll(viewport)
+        act(() => {
+            vi.advanceTimersByTime(1_800)
+        })
+
+        expect(viewport.scrollTop).toBe(702)
+        expect(onViewModeChange).not.toHaveBeenCalledWith('history')
+    })
+})
+
+describe('explicit tail scrolling', () => {
+    it('stays in tail mode through smooth-scroll progress and content growth', () => {
+        const { viewport, onViewModeChange, rerenderThread } = renderThread()
+        act(() => {
+            vi.advanceTimersByTime(1_800)
+        })
+
+        viewport.scrollTop = 400
+        fireEvent.scroll(viewport)
+        expect(onViewModeChange).toHaveBeenLastCalledWith('history')
+
+        Object.defineProperty(viewport, 'scrollTo', {
+            configurable: true,
+            value: vi.fn()
+        })
+        onViewModeChange.mockClear()
+        rerenderThread(1)
+        expect(onViewModeChange).toHaveBeenLastCalledWith('tail')
+
+        viewport.scrollTop = 500
+        fireEvent.scroll(viewport)
+        Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 1_400 })
+        viewport.scrollTop = 650
+        fireEvent.scroll(viewport)
+
+        expect(onViewModeChange).not.toHaveBeenCalledWith('history')
+
+        viewport.scrollTop = 870
+        fireEvent.scroll(viewport)
         expect(onViewModeChange).not.toHaveBeenCalledWith('history')
     })
 })

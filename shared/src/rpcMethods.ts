@@ -33,6 +33,7 @@ export const RPC_METHODS = {
     ArchiveCodexSession: 'archiveCodexSession',
     ListCursorModels: 'listCursorModels',
     ListPiModels: 'listPiModels',
+    ListPiSessions: 'listPiSessions',
     ListOpencodeModels: 'listOpencodeModels',
     ListOpencodeModelsForCwd: 'listOpencodeModelsForCwd',
     ListGrokModelsForCwd: 'listGrokModelsForCwd',
@@ -41,6 +42,7 @@ export const RPC_METHODS = {
     ListCopilotModelsForCwd: 'listCopilotModelsForCwd',
     ListCopilotModels: 'listCopilotModels',
     ListOpencodeReasoningEffortOptions: 'listOpencodeReasoningEffortOptions',
+    ListAgyModels: 'listAgyModels',
     ForkConversation: 'fork-conversation',
     RewindConversation: 'rewind-conversation',
 } as const

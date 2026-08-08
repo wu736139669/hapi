@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
+import type { ComposerSendIntent } from '@/lib/messageDelivery'
 import { HappyComposer, type ComposerSendError } from './HappyComposer'
 
 /**
@@ -13,6 +14,7 @@ import { HappyComposer, type ComposerSendError } from './HappyComposer'
  */
 type FakeAttachment = { id: string; status: { type: 'complete' } }
 type MockComposerInputProps = TextareaHTMLAttributes<HTMLTextAreaElement> & {
+    asChild?: boolean
     maxRows?: number
     submitOnEnter?: boolean
     cancelOnEscape?: boolean
@@ -28,6 +30,8 @@ const runtime = vi.hoisted(() => ({
         thread: { isRunning: false, isDisabled: false },
     } as FakeRuntimeState,
     setSnapshot: null as null | ((updater: (current: FakeRuntimeState) => FakeRuntimeState) => void),
+    pendingSendIntentRef: null as null | { current: ComposerSendIntent },
+    sentIntents: [] as ComposerSendIntent[],
 }))
 
 vi.mock('@assistant-ui/react', async () => {
@@ -42,6 +46,9 @@ vi.mock('@assistant-ui/react', async () => {
                     }))
                 },
                 send: () => {
+                    const intent = runtime.pendingSendIntentRef?.current ?? 'default'
+                    runtime.sentIntents.push(intent)
+                    if (runtime.pendingSendIntentRef) runtime.pendingSendIntentRef.current = 'default'
                     runtime.setSnapshot!((current) => ({
                         ...current,
                         composer: { text: '', attachments: [] },
@@ -57,7 +64,14 @@ vi.mock('@assistant-ui/react', async () => {
                 <form onSubmit={onSubmit}>{children}</form>
             ),
             Input: React.forwardRef<HTMLTextAreaElement, MockComposerInputProps>(
-                ({ onChange, maxRows: _maxRows, submitOnEnter: _submitOnEnter, cancelOnEscape: _cancelOnEscape, ...props }, ref) => (
+                ({
+                    asChild: _asChild,
+                    onChange,
+                    maxRows: _maxRows,
+                    submitOnEnter: _submitOnEnter,
+                    cancelOnEscape: _cancelOnEscape,
+                    ...props
+                }, ref) => (
                     <textarea
                         {...props}
                         ref={ref}
@@ -77,7 +91,11 @@ vi.mock('@assistant-ui/react', async () => {
     }
 })
 
-vi.mock('@/lib/composerSegments', () => ({ isRichComposerMentionsEnabled: () => false }))
+vi.mock('@/lib/composerSegments', () => ({
+    isRichComposerMentionsEnabled: () => false,
+    resolveComposerPlaceholderKey: ({ showContinueHint }: { showContinueHint: boolean }) =>
+        showContinueHint ? 'misc.typeMessage' : 'misc.typeAMessage',
+}))
 vi.mock('@/hooks/useComposerDraft', () => ({
     useComposerDraft: (sessionId: string | undefined) => ({ sessionId, complete: true, restoredAny: false }),
 }))
@@ -97,9 +115,14 @@ vi.mock('@/components/AssistantChat/ComposerButtons', () => ({
         onSchedule: (pending: PendingSchedule) => void
         onClearSchedule: () => void
         pendingSchedule: PendingSchedule | null
+        expanded: boolean
+        onExpandedToggle: () => void
     }) => (
         <div>
             <button type="button" onClick={props.onSend}>send</button>
+            <button type="button" onClick={props.onExpandedToggle}>
+                {props.expanded ? 'collapse' : 'expand'}
+            </button>
             <button type="button" onClick={() => props.onSchedule({ type: 'absolute', ms: 9000 })}>select schedule</button>
             <button type="button" onClick={props.onClearSchedule}>clear schedule</button>
             <output data-testid="pending-schedule">{JSON.stringify(props.pendingSchedule)}</output>
@@ -114,21 +137,37 @@ type HarnessControls = {
     acceptAndClearSchedule: () => void
     remount: () => void
     programmaticSetText: (text: string) => void
+    acceptSend: () => void
+    settleSend: (error?: ComposerSendError) => void
+    settleAttachmentSendFailure: () => void
     getClearErrorCalls: () => number
 }
 
-function ComposerHarness(props: { initialText: string; initialSchedule?: PendingSchedule | null; controls: { current: HarnessControls | null } }) {
+function ComposerHarness(props: {
+    initialText: string
+    initialSchedule?: PendingSchedule | null
+    piRunning?: boolean
+    controls: { current: HarnessControls | null }
+}) {
     const [snapshot, setSnapshot] = useState<FakeRuntimeState>(() => ({
         composer: { text: props.initialText, attachments: [] },
-        thread: { isRunning: false, isDisabled: false },
+        thread: { isRunning: props.piRunning ?? false, isDisabled: false },
     }))
     const [schedule, setSchedule] = useState<PendingSchedule | null>(props.initialSchedule ?? null)
     const [sendError, setSendError] = useState<ComposerSendError | null>(null)
+    const [isSending, setIsSending] = useState(false)
     const [composerKey, setComposerKey] = useState('composer-a')
+    const [sendAcceptance, setSendAcceptance] = useState<{ attemptId: string | null } | null>(null)
+    const [sendSettlement, setSendSettlement] = useState<{
+        attemptId: string
+        status: 'success' | 'error'
+    } | null>(null)
     const clearErrorCallsRef = useRef(0)
+    const pendingSendIntentRef = useRef<ComposerSendIntent>('default')
 
     runtime.snapshot = snapshot
     runtime.setSnapshot = setSnapshot
+    runtime.pendingSendIntentRef = pendingSendIntentRef
     props.controls.current = {
         setError: sendError => setSendError(sendError),
         addAttachment: () => setSnapshot((current) => ({
@@ -148,6 +187,20 @@ function ComposerHarness(props: { initialText: string; initialSchedule?: Pending
             ...current,
             composer: { ...current.composer, text },
         })),
+        acceptSend: () => {
+            setIsSending(true)
+            setSendSettlement(null)
+            setSendAcceptance({ attemptId: 'attempt-1' })
+        },
+        settleSend: (error) => {
+            if (error) setSendError(error)
+            setSendSettlement({ attemptId: 'attempt-1', status: error ? 'error' : 'success' })
+            setIsSending(false)
+        },
+        settleAttachmentSendFailure: () => {
+            setSendSettlement({ attemptId: 'attempt-1', status: 'error' })
+            setIsSending(false)
+        },
         getClearErrorCalls: () => clearErrorCallsRef.current,
     }
 
@@ -156,7 +209,10 @@ function ComposerHarness(props: { initialText: string; initialSchedule?: Pending
             <HappyComposer
                 key={composerKey}
                 sessionId={composerKey}
+                disabled={isSending}
                 pendingSchedule={schedule}
+                sendAcceptance={sendAcceptance}
+                sendSettlement={sendSettlement}
                 onSchedule={setSchedule}
                 onClearSchedule={() => setSchedule(null)}
                 sendError={sendError}
@@ -169,14 +225,22 @@ function ComposerHarness(props: { initialText: string; initialSchedule?: Pending
                         ? { ...current, restoreSuppressed: true }
                         : current
                 )}
+                agentFlavor="pi"
+                thinking={props.piRunning}
+                pendingSendIntentRef={pendingSendIntentRef}
             />
         </I18nProvider>
     )
 }
 
-function renderComposer(initialText = 'failed text', initialSchedule: PendingSchedule | null = { type: 'absolute', ms: 1234 }) {
+function renderComposer(
+    initialText = 'failed text',
+    initialSchedule: PendingSchedule | null = { type: 'absolute', ms: 1234 },
+    piRunning = false,
+) {
     const controls: { current: HarnessControls | null } = { current: null }
-    render(<ComposerHarness initialText={initialText} initialSchedule={initialSchedule} controls={controls} />)
+    runtime.sentIntents = []
+    render(<ComposerHarness initialText={initialText} initialSchedule={initialSchedule} piRunning={piRunning} controls={controls} />)
     return controls
 }
 
@@ -209,6 +273,46 @@ describe('HappyComposer send-error atomic restore', () => {
     afterEach(() => {
         cleanup()
         runtime.setSnapshot = null
+    })
+
+    it('collapses an expanded composer only after an accepted send succeeds', async () => {
+        const controls = renderComposer('message', null)
+        fireEvent.click(screen.getByRole('button', { name: 'expand' }))
+        expect(screen.getByTestId('composer-shell')).toHaveAttribute('data-expanded', 'true')
+
+        send()
+        expect(screen.getByTestId('composer-shell')).toHaveAttribute('data-expanded', 'true')
+
+        act(() => controls.current!.acceptSend())
+        expect(screen.getByTestId('composer-shell')).toHaveAttribute('data-expanded', 'true')
+
+        act(() => controls.current!.settleSend())
+        await waitFor(() => expect(screen.getByTestId('composer-shell')).not.toHaveAttribute('data-expanded'))
+    })
+
+    it('keeps the composer expanded when an accepted send later fails', async () => {
+        const controls = renderComposer('message', null)
+        fireEvent.click(screen.getByRole('button', { name: 'expand' }))
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.settleSend(fail(1, 'message', null)))
+
+        await waitFor(() => expect(input()).toHaveValue('message'))
+        expect(screen.getByTestId('composer-shell')).toHaveAttribute('data-expanded', 'true')
+    })
+
+    it('keeps the composer expanded when an attachment send later fails', () => {
+        const controls = renderComposer('', null)
+        act(() => controls.current!.addAttachment())
+        fireEvent.click(screen.getByRole('button', { name: 'expand' }))
+        send()
+
+        act(() => controls.current!.acceptSend())
+        act(() => controls.current!.settleAttachmentSendFailure())
+
+        expect(screen.getByTestId('composer-shell')).toHaveAttribute('data-expanded', 'true')
+        expect(screen.queryByTestId('composer-send-error')).toBeNull()
     })
 
     it('restores untouched text and its absolute schedule after accepted-send clear', async () => {
@@ -409,5 +513,54 @@ describe('HappyComposer send-error atomic restore', () => {
 
         await waitFor(() => expect(input()).toHaveValue('immediate'))
         expect(screen.getByTestId('pending-schedule')).toHaveTextContent('null')
+    })
+})
+
+describe('HappyComposer send intent gestures', () => {
+    afterEach(() => {
+        cleanup()
+        runtime.pendingSendIntentRef = null
+        runtime.sentIntents = []
+    })
+
+    it('uses queue for Alt/Option+Enter only while the Pi main thread is running', () => {
+        renderComposer('follow-up', null, true)
+
+        fireEvent.keyDown(input(), { key: 'Enter', altKey: true })
+
+        expect(runtime.sentIntents).toEqual(['queue'])
+        expect(runtime.pendingSendIntentRef?.current).toBe('default')
+    })
+
+    it('uses default intent for the configured normal Enter send', () => {
+        renderComposer('ordinary send', null, true)
+
+        fireEvent.keyDown(input(), { key: 'Enter' })
+
+        expect(runtime.sentIntents).toEqual(['default'])
+        expect(runtime.pendingSendIntentRef?.current).toBe('default')
+    })
+
+    it('consumes a restored queue retry mark before resetting the shared ref', () => {
+        renderComposer('retry queue', null, true)
+        runtime.pendingSendIntentRef!.current = 'queue'
+
+        fireEvent.keyDown(input(), { key: 'Enter' })
+
+        expect(runtime.sentIntents).toEqual(['queue'])
+        expect(runtime.pendingSendIntentRef?.current).toBe('default')
+    })
+
+    it('does not turn Alt/Option+Enter into queue when Pi is idle or a schedule is active', () => {
+        const idle = renderComposer('idle', null, false)
+        fireEvent.keyDown(input(), { key: 'Enter', altKey: true })
+        expect(runtime.sentIntents).toEqual([])
+        expect(idle.current).not.toBeNull()
+
+        cleanup()
+        renderComposer('scheduled', { type: 'absolute', ms: 1234 }, true)
+        fireEvent.keyDown(input(), { key: 'Enter', altKey: true })
+        expect(runtime.sentIntents).toEqual([])
+        expect(runtime.pendingSendIntentRef?.current).toBe('default')
     })
 })

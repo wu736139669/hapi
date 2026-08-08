@@ -6,7 +6,9 @@
  */
 
 import { trimIdent } from '@/utils/trimIdent';
+import { buildSessionCitationSteerInstruction } from '@hapi/protocol/sessionCitation';
 import { SKILL_LOOKUP_INSTRUCTION } from '@/modules/common/skillLookupInstruction';
+import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryInstruction';
 
 /**
  * Title instruction for OpenCode to call the hapi MCP tool.
@@ -14,9 +16,17 @@ import { SKILL_LOOKUP_INSTRUCTION } from '@/modules/common/skillLookupInstructio
 export const TITLE_INSTRUCTION = trimIdent(`
     Use the title tool sparingly. For a new chat, call the tool "hapi_change_title" once after the user's initial request is clear, and set a concise task title. Do not rename the chat for routine progress, substeps, implementation details, or a slightly better wording. Rename only when the user's primary objective changes substantially and the existing title would be misleading.
     When you create or find a local image file that the user should see, call the tool "hapi_display_image" with the image path so HAPI can show it inline.
-    When the user cites another HAPI session as [title](/sessions/<id>) (or a bare /sessions/<id>), extract that <id>. Call "hapi_inspect_peer" with sessionIdPrefix=<id> to read metadata and recent messages; call "hapi_ping_peer" with sessionIdPrefix=<id> and a message to nudge or hand off. Prefer these over JWT+curl. Shell fallbacks: hapi inspect-peer <id> / hapi ping-peer <id> <message>.
+    ${buildSessionCitationSteerInstruction({
+        inspectTool: 'hapi_inspect_peer',
+        pingTool: 'hapi_ping_peer',
+        listPeersTool: 'hapi_list_peers',
+    })}
     ${SKILL_LOOKUP_INSTRUCTION}
 `);
+
+export function getTitleInstruction(env: NodeJS.ProcessEnv = process.env): string {
+    return withSessionSummaryInstruction(TITLE_INSTRUCTION, env)
+}
 
 /**
  * Tool instructions for native ACP sessions. Title updates come from ACP, so
@@ -24,9 +34,17 @@ export const TITLE_INSTRUCTION = trimIdent(`
  */
 export const OPENCODE_NATIVE_TOOL_INSTRUCTION = trimIdent(`
     When you create or find a local image file that the user should see, call the tool "hapi_display_image" with the image path so HAPI can show it inline.
-    When the user cites another HAPI session as [title](/sessions/<id>) (or a bare /sessions/<id>), extract that <id>. Call "hapi_inspect_peer" with sessionIdPrefix=<id> to read metadata and recent messages; call "hapi_ping_peer" with sessionIdPrefix=<id> and a message to nudge or hand off. Prefer these over JWT+curl. Shell fallbacks: hapi inspect-peer <id> / hapi ping-peer <id> <message>.
+    ${buildSessionCitationSteerInstruction({
+        inspectTool: 'hapi_inspect_peer',
+        pingTool: 'hapi_ping_peer',
+        listPeersTool: 'hapi_list_peers',
+    })}
     ${SKILL_LOOKUP_INSTRUCTION}
 `);
+
+export function getOpencodeNativeToolInstruction(env: NodeJS.ProcessEnv = process.env): string {
+    return withSessionSummaryInstruction(OPENCODE_NATIVE_TOOL_INSTRUCTION, env)
+}
 
 /**
  * The system prompt to inject for OpenCode sessions.

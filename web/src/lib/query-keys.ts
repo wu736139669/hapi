@@ -4,6 +4,7 @@ export const queryKeys = {
     messages: (sessionId: string) => ['messages', sessionId] as const,
     machines: ['machines'] as const,
     sqliteStorage: ['sqlite-storage'] as const,
+    hubSettings: ['hub-settings'] as const,
     usageSummary: (range: string, timeZone: string) => ['usage-summary', range, timeZone] as const,
     machineCodexModels: (machineId: string) => ['machine-codex-models', machineId] as const,
     gitStatus: (sessionId: string) => ['git-status', sessionId] as const,
@@ -29,6 +30,7 @@ export const queryKeys = {
     sessionCopilotModels: (sessionId: string) => ['session-copilot-models', sessionId] as const,
     machineCopilotModelsForCwd: (machineId: string, cwd: string) => ['machine-copilot-models', machineId, cwd] as const,
     sessionGrokReasoningEffortOptions: (sessionId: string) => ['session-grok-reasoning-effort-options', sessionId] as const,
+    machineAgyModels: (machineId: string) => ['machine-agy-models', machineId] as const,
     skills: (sessionId: string) => ['skills', sessionId] as const,
     scratchlist: (sessionId: string) => ['scratchlist', sessionId] as const,
 }
