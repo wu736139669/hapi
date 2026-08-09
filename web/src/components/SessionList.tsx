@@ -25,6 +25,7 @@ import { DEFAULT_SESSION_PREVIEW_LIMIT, useSessionPreviewLimit } from '@/hooks/u
 import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
 import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
+import { usePinActiveSessions } from '@/hooks/usePinActiveSessions'
 import { classifySessionAttention, sessionIsUnread } from '@/lib/sessionAttention'
 import { getSessionLastSeenAt, getSessionLastSeenSnapshot } from '@/lib/sessionLastSeen'
 import { useSessionRowTooltipIds } from '@/components/HoverTooltip'
@@ -60,6 +61,7 @@ type SessionGroup = {
 const RUNNING_BUCKETS = [
     { key: 'working', labelKey: 'session.item.running', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
     { key: 'pending', labelKey: 'session.item.pending', colorClass: 'text-[var(--app-badge-warning-text)]', pulse: true },
+    { key: 'active', labelKey: 'session.item.active', colorClass: 'text-[var(--app-hint)]', pulse: false },
 ] as const
 
 /** Active sessions that warrant the optional pinned In progress section. Quiet actives stay in directory groups. */
@@ -1191,6 +1193,7 @@ export function SessionList(props: {
     // Transient unread lens — not a Settings preference. Cleared on reload; rows drop as they're seen.
     const [showUnreadOnly, setShowUnreadOnly] = useState(false)
     const { pinInProgressSessions } = usePinInProgressSessions()
+    const { pinActiveSessions } = usePinActiveSessions()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
     const [searchQuery, setSearchQuery] = useState('')
@@ -1301,11 +1304,12 @@ export function SessionList(props: {
             .sort((a, b) => b.updatedAt - a.updatedAt)
     }, [machineFilteredSessions])
     const runningSessions = useMemo(() => {
-        const buckets: Record<'working' | 'pending', SessionSummary[]> = {
+        const buckets: Record<'working' | 'pending' | 'active', SessionSummary[]> = {
             working: [],
             pending: [],
+            active: [],
         }
-        if (!pinInProgressSessions) {
+        if (!pinInProgressSessions && !pinActiveSessions) {
             return buckets
         }
         for (const session of machineFilteredSessions) {
@@ -1319,26 +1323,31 @@ export function SessionList(props: {
                 buckets.working.push(session)
             } else if ((session.pendingRequestsCount ?? 0) > 0) {
                 buckets.pending.push(session)
+            } else if (pinActiveSessions) {
+                buckets.active.push(session)
             }
-            // Quiet active sessions stay in directory groups (no Idle pin bucket).
         }
         const byRecent = (a: SessionSummary, b: SessionSummary) => b.updatedAt - a.updatedAt
         for (const key of Object.keys(buckets) as Array<keyof typeof buckets>) {
             buckets[key].sort(byRecent)
         }
         return buckets
-    }, [machineFilteredSessions, pinInProgressSessions])
+    }, [machineFilteredSessions, pinActiveSessions, pinInProgressSessions])
     const runningSessionTotal = runningSessions.working.length
         + runningSessions.pending.length
+        + runningSessions.active.length
     const groups = useMemo(
         () => groupSessionsByDirectory(
             machineFilteredSessions.filter((session) => {
                 if (session.globalPinned) return false
-                if (pinInProgressSessions && !session.pinned && isPinnedInProgressSession(session)) return false
+                if (!session.pinned && (
+                    (pinActiveSessions && session.active)
+                    || (pinInProgressSessions && isPinnedInProgressSession(session))
+                )) return false
                 return true
             })
         ),
-        [machineFilteredSessions, pinInProgressSessions]
+        [machineFilteredSessions, pinActiveSessions, pinInProgressSessions]
     )
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
@@ -1884,14 +1893,14 @@ export function SessionList(props: {
                                     setRunningSectionCollapsed((value) => !value)
                                 }
                             }}
-                            title={t('sessions.runningSection')}
+                            title={t(pinActiveSessions ? 'sessions.activeSection' : 'sessions.runningSection')}
                         >
                             <ChevronIcon className="h-3.5 w-3.5 text-[var(--app-hint)] shrink-0" collapsed={runningSectionCollapsed && !isFiltering} />
                             <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center" aria-hidden="true">
                                 <span className="h-1.5 w-1.5 rounded-full bg-[var(--app-badge-success-text)] animate-pulse" />
                             </span>
                             <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                                {t('sessions.runningSection')}
+                                {t(pinActiveSessions ? 'sessions.activeSection' : 'sessions.runningSection')}
                             </span>
                             <span className="shrink-0 text-[11px] tabular-nums text-[var(--app-hint)]">
                                 ({runningSessionTotal})
