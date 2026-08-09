@@ -212,6 +212,7 @@ export function QueuedMessagesBar({
     api,
     sessionMetadata,
     steeringActive,
+    isThinking,
     pendingSchedule,
     pendingScheduleRevision,
     onEdit,
@@ -227,6 +228,8 @@ export function QueuedMessagesBar({
     } | null
     /** True only while the launcher has an active steerable turn. */
     steeringActive?: boolean
+    /** Compatibility fallback while the launcher's steering state is propagating. */
+    isThinking?: boolean
     /** Current composer schedule, used only to guard an asynchronous edit restore. */
     pendingSchedule: PendingSchedule | null
     /** Monotonic per-session revision; schedule selections win over an async edit restore. */
@@ -382,7 +385,7 @@ export function QueuedMessagesBar({
                         const isScheduled = msg.scheduledAt != null
                         const isFutureScheduled = isScheduled && msg.scheduledAt! > Date.now()
                         const canSteer = steeringSupported
-                            && Boolean(steeringActive || legacyCanSteer)
+                            && Boolean(steeringActive || isThinking || legacyCanSteer)
                             && !isScheduled
                             && canCancel
 
