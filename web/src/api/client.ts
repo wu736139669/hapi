@@ -564,12 +564,16 @@ export class ApiClient {
         return response as CancelMessageResponse
     }
 
-    async steerMessage(sessionId: string, messageId: string): Promise<SteerQueuedMessageResponse> {
+    async steerQueuedMessage(sessionId: string, messageId: string): Promise<SteerQueuedMessageResponse> {
         const response = await this.request(
             `/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/steer`,
-            { method: 'POST' }
+            { method: 'POST', body: JSON.stringify({}) }
         )
         return response as SteerQueuedMessageResponse
+    }
+
+    async steerMessage(sessionId: string, messageId: string): Promise<SteerQueuedMessageResponse> {
+        return this.steerQueuedMessage(sessionId, messageId)
     }
 
     async abortSession(sessionId: string): Promise<void> {

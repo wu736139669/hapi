@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
     composerSetText: vi.fn(),
     addToast: vi.fn(),
     mutateAsync: vi.fn(),
+    steerMutateAsync: vi.fn(),
     resolveCancel: null as ((result: DeferredCancelResult) => void) | null,
     rejectCancel: null as ((reason?: unknown) => void) | null,
     steerMessage: vi.fn(),
@@ -57,12 +58,26 @@ vi.mock('@/hooks/mutations/useCancelQueuedMessage', () => ({
     }),
 }))
 
+vi.mock('@/hooks/mutations/useSteerQueuedMessage', () => ({
+    useSteerQueuedMessage: () => ({
+        isPending: false,
+        variables: undefined,
+        mutateAsync: mocks.steerMutateAsync,
+    }),
+}))
+
 vi.mock('@/lib/composer-drafts', () => ({
     saveDraft: mocks.saveDraft,
 }))
 
 vi.mock('@/lib/use-translation', () => ({
-    useTranslation: () => ({ t: (key: string) => key }),
+    useTranslation: () => ({
+        t: (key: string) => ({
+            'queuedMessages.edit': 'Edit queued message',
+            'queuedMessages.cancel': 'Cancel queued message',
+            'queuedMessages.steerNow': 'Steer now',
+        })[key] ?? key,
+    }),
 }))
 
 vi.mock('@/lib/toast-context', () => ({
@@ -138,6 +153,7 @@ beforeEach(() => {
     mocks.composerSetText.mockReset()
     mocks.addToast.mockReset()
     mocks.mutateAsync.mockReset()
+    mocks.steerMutateAsync.mockReset()
     mocks.resolveCancel = null
     mocks.rejectCancel = null
     mocks.steerMessage.mockReset()
@@ -150,6 +166,7 @@ beforeEach(() => {
         mocks.resolveCancel = resolve
         mocks.rejectCancel = reject
     }))
+    mocks.steerMutateAsync.mockResolvedValue({ status: 'steered', localId: 'local-server-message-id' })
 })
 
 async function resolveCancel(result: DeferredCancelResult): Promise<void> {
@@ -203,6 +220,29 @@ describe('QueuedMessagesBar layout', () => {
         expect(bar).not.toHaveClass('mb-1')
         expect(content).toHaveClass('pt-2', 'pb-0')
         expect(content).not.toHaveClass('py-2')
+    })
+})
+
+describe('QueuedMessagesBar steer', () => {
+    it('starts only one steer operation for synchronous double clicks', async () => {
+        mocks.messageWindowState = { messages: [makeQueuedMessage()] }
+        render(
+            <QueuedMessagesBar
+                sessionId="session-1"
+                api={null}
+                sessionMetadata={{ flavor: 'codex' }}
+                steeringActive
+                pendingSchedule={null}
+                pendingScheduleRevision={0}
+            />
+        )
+
+        const steerButton = screen.getByRole('button', { name: 'Steer now' })
+        fireEvent.click(steerButton)
+        fireEvent.click(steerButton)
+
+        expect(mocks.steerMutateAsync).toHaveBeenCalledTimes(1)
+        await waitFor(() => expect(steerButton).not.toBeDisabled())
     })
 })
 
