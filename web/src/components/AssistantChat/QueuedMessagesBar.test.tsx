@@ -224,6 +224,28 @@ describe('QueuedMessagesBar layout', () => {
 })
 
 describe('QueuedMessagesBar steer', () => {
+    it('keeps steer available while a supported remote session is thinking', async () => {
+        mocks.messageWindowState = { messages: [makeQueuedMessage()] }
+        render(
+            <QueuedMessagesBar
+                sessionId="session-1"
+                api={null}
+                sessionMetadata={{ flavor: 'codex' }}
+                steeringActive={false}
+                isThinking
+                pendingSchedule={null}
+                pendingScheduleRevision={0}
+            />
+        )
+
+        const steerButton = screen.getByRole('button', { name: 'Steer now' })
+        expect(steerButton).not.toBeDisabled()
+        fireEvent.click(steerButton)
+
+        expect(mocks.steerMutateAsync).toHaveBeenCalledTimes(1)
+        await waitFor(() => expect(steerButton).not.toBeDisabled())
+    })
+
     it('starts only one steer operation for synchronous double clicks', async () => {
         mocks.messageWindowState = { messages: [makeQueuedMessage()] }
         render(

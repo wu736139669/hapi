@@ -1724,7 +1724,16 @@ function SessionChatInner(props: SessionChatProps) {
                                 sessionId={props.session.id}
                                 api={props.api}
                                 sessionMetadata={props.session.metadata}
-                                steeringActive={props.session.agentState?.steeringActive === true}
+                                steeringActive={
+                                    props.session.active
+                                    && !controlledByUser
+                                    && props.session.agentState?.steeringActive === true
+                                }
+                                isThinking={
+                                    props.session.active
+                                    && !controlledByUser
+                                    && props.session.thinking
+                                }
                                 pendingSchedule={pendingSchedule}
                                 pendingScheduleRevision={pendingScheduleRevision}
                                 onEdit={({ pendingSchedule: restored }) => {
