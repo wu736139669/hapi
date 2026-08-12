@@ -83,6 +83,7 @@ import { SessionStatusPanel } from '@/components/SessionStatusPanel'
 import { buildSessionStatusData } from '@/chat/sessionStatus'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
+import { useClaudeCustomModels } from '@/hooks/queries/useClaudeCustomModels'
 import { useCodexModels } from '@/hooks/queries/useCodexModels'
 import { useCursorModels } from '@/hooks/queries/useCursorModels'
 import { useCursorModelsForMachine } from '@/hooks/queries/useCursorModelsForMachine'
@@ -744,6 +745,15 @@ function SessionChatInner(props: SessionChatProps) {
     const agentFlavor = props.session.metadata?.flavor ?? null
     const controlledByUser = props.session.agentState?.controlledByUser === true
     const codexCollaborationModeSupported = agentFlavor === 'codex' && !controlledByUser
+    const claudeCustomModelsState = useClaudeCustomModels({
+        api: props.api,
+        enabled: agentFlavor === 'claude'
+    })
+    const claudeModelOptions = useMemo(() => (
+        agentFlavor === 'claude'
+            ? claudeCustomModelsState.models.map((model) => ({ value: model, label: model }))
+            : undefined
+    ), [agentFlavor, claudeCustomModelsState.models])
     const codexModelsState = useCodexModels({
         api: props.api,
         sessionId: props.session.id,
@@ -1764,7 +1774,9 @@ function SessionChatInner(props: SessionChatProps) {
                         effort={props.session.effort}
                         agentFlavor={agentFlavor}
                         availableModelOptions={
-                            agentFlavor === 'codex'
+                            agentFlavor === 'claude'
+                                ? claudeModelOptions
+                                : agentFlavor === 'codex'
                                 ? codexModelOptions
                                 : agentFlavor === 'cursor'
                                     ? (
