@@ -61,6 +61,19 @@ describe('getModelOptionsForFlavor', () => {
         ])
     })
 
+    it('offers configured DeepSeek models in existing Claude sessions', () => {
+        const options = getModelOptionsForFlavor('claude', 'deepseek-v4-flash[1m]', [
+            { value: 'deepseek-v4-flash[1m]', label: 'deepseek-v4-flash[1m]' },
+            { value: 'deepseek-v4-pro[1m]', label: 'deepseek-v4-pro[1m]' }
+        ])
+
+        expect(options.slice(0, 3)).toEqual([
+            { value: null, label: 'Default' },
+            { value: 'deepseek-v4-pro[1m]', label: 'deepseek-v4-pro[1m]' },
+            { value: 'deepseek-v4-flash[1m]', label: 'deepseek-v4-flash[1m]' }
+        ])
+    })
+
     it('includes custom Gemini model from env/config in options', () => {
         const options = getModelOptionsForFlavor('gemini', 'gemini-custom-experiment')
         expect(options.some((o) => o.value === 'gemini-custom-experiment')).toBe(true)
