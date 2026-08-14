@@ -658,7 +658,6 @@ export default {
   'queuedMessages.steeredBadgeTitle': 'Steered into the active turn',
   'queuedMessages.editCurrentDraftKept': 'Queued message cancelled — current draft and schedule were kept.',
   'queuedMessages.steer': 'Deliver into the running turn now',
-  'queuedMessages.steerFailed': 'Steer failed — message stays queued',
 
   // Scratchlist (per-session workbench, issue #11)
   'scratchlist.title': 'Scratchlist',

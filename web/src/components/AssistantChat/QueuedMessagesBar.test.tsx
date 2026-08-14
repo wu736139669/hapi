@@ -22,12 +22,12 @@ const mocks = vi.hoisted(() => ({
     composerSetText: vi.fn(),
     addToast: vi.fn(),
     mutateAsync: vi.fn(),
-    steerMutateAsync: vi.fn(),
     resolveCancel: null as ((result: DeferredCancelResult) => void) | null,
     rejectCancel: null as ((reason?: unknown) => void) | null,
     steerMessage: vi.fn(),
     resolveSteer: null as ((result: unknown) => void) | null,
     markMessagesConsumed: vi.fn(),
+    appendOptimisticMessage: vi.fn(),
     saveDraft: vi.fn(),
     messageWindowState: { messages: [] as unknown[] },
 }))
@@ -48,6 +48,7 @@ vi.mock('@/lib/message-window-store', () => ({
     getMessageWindowState: () => mocks.messageWindowState,
     subscribeMessageWindow: () => () => {},
     markMessagesConsumed: mocks.markMessagesConsumed,
+    appendOptimisticMessage: mocks.appendOptimisticMessage,
 }))
 
 vi.mock('@/hooks/mutations/useCancelQueuedMessage', () => ({
@@ -55,14 +56,6 @@ vi.mock('@/hooks/mutations/useCancelQueuedMessage', () => ({
         isPending: false,
         variables: undefined,
         mutateAsync: mocks.mutateAsync,
-    }),
-}))
-
-vi.mock('@/hooks/mutations/useSteerQueuedMessage', () => ({
-    useSteerQueuedMessage: () => ({
-        isPending: false,
-        variables: undefined,
-        mutateAsync: mocks.steerMutateAsync,
     }),
 }))
 
@@ -123,6 +116,8 @@ function renderQueuedMessage(
                 pendingSchedule={pendingSchedule}
                 pendingScheduleRevision={currentPendingScheduleRevision}
                 onEdit={onEdit}
+                sessionMetadata={canSteer ? { flavor: 'pi' } : null}
+                steeringActive={canSteer}
                 canSteer={canSteer}
             />
         </QueryClientProvider>
@@ -140,6 +135,8 @@ function renderQueuedMessage(
                         pendingSchedule={nextPendingSchedule}
                         pendingScheduleRevision={currentPendingScheduleRevision}
                         onEdit={onEdit}
+                        sessionMetadata={canSteer ? { flavor: 'pi' } : null}
+                        steeringActive={canSteer}
                         canSteer={canSteer}
                     />
                 </QueryClientProvider>
@@ -153,12 +150,12 @@ beforeEach(() => {
     mocks.composerSetText.mockReset()
     mocks.addToast.mockReset()
     mocks.mutateAsync.mockReset()
-    mocks.steerMutateAsync.mockReset()
     mocks.resolveCancel = null
     mocks.rejectCancel = null
     mocks.steerMessage.mockReset()
     mocks.resolveSteer = null
     mocks.markMessagesConsumed.mockReset()
+    mocks.appendOptimisticMessage.mockReset()
     mocks.saveDraft.mockReset()
     mocks.messageWindowState = { messages: [] }
     clearQueuedEditRecovery('session-1')
@@ -166,7 +163,6 @@ beforeEach(() => {
         mocks.resolveCancel = resolve
         mocks.rejectCancel = reject
     }))
-    mocks.steerMutateAsync.mockResolvedValue({ status: 'steered', localId: 'local-server-message-id' })
 })
 
 async function resolveCancel(result: DeferredCancelResult): Promise<void> {
@@ -224,46 +220,51 @@ describe('QueuedMessagesBar layout', () => {
 })
 
 describe('QueuedMessagesBar steer', () => {
-    it('keeps steer available while a supported remote session is thinking', async () => {
+    function renderSupportedSteer(options: { steeringActive?: boolean; isThinking?: boolean }) {
+        const steerQueuedMessage = vi.fn().mockResolvedValue({
+            status: 'steered',
+            localId: 'local-server-message-id',
+        })
+        const api = { steerQueuedMessage } as unknown as ApiClient
+        const queryClient = new QueryClient({
+            defaultOptions: { mutations: { retry: false } },
+        })
         mocks.messageWindowState = { messages: [makeQueuedMessage()] }
         render(
-            <QueuedMessagesBar
-                sessionId="session-1"
-                api={null}
-                sessionMetadata={{ flavor: 'codex' }}
-                steeringActive={false}
-                isThinking
-                pendingSchedule={null}
-                pendingScheduleRevision={0}
-            />
+            <QueryClientProvider client={queryClient}>
+                <QueuedMessagesBar
+                    sessionId="session-1"
+                    api={api}
+                    sessionMetadata={{ flavor: 'codex' }}
+                    steeringActive={options.steeringActive}
+                    isThinking={options.isThinking}
+                    pendingSchedule={null}
+                    pendingScheduleRevision={0}
+                />
+            </QueryClientProvider>
         )
+        return steerQueuedMessage
+    }
+
+    it('keeps steer available while a supported remote session is thinking', async () => {
+        const steerQueuedMessage = renderSupportedSteer({ steeringActive: false, isThinking: true })
 
         const steerButton = screen.getByRole('button', { name: 'Steer now' })
         expect(steerButton).not.toBeDisabled()
         fireEvent.click(steerButton)
 
-        expect(mocks.steerMutateAsync).toHaveBeenCalledTimes(1)
+        await waitFor(() => expect(steerQueuedMessage).toHaveBeenCalledTimes(1))
         await waitFor(() => expect(steerButton).not.toBeDisabled())
     })
 
     it('starts only one steer operation for synchronous double clicks', async () => {
-        mocks.messageWindowState = { messages: [makeQueuedMessage()] }
-        render(
-            <QueuedMessagesBar
-                sessionId="session-1"
-                api={null}
-                sessionMetadata={{ flavor: 'codex' }}
-                steeringActive
-                pendingSchedule={null}
-                pendingScheduleRevision={0}
-            />
-        )
+        const steerQueuedMessage = renderSupportedSteer({ steeringActive: true })
 
         const steerButton = screen.getByRole('button', { name: 'Steer now' })
         fireEvent.click(steerButton)
         fireEvent.click(steerButton)
 
-        expect(mocks.steerMutateAsync).toHaveBeenCalledTimes(1)
+        await waitFor(() => expect(steerQueuedMessage).toHaveBeenCalledTimes(1))
         await waitFor(() => expect(steerButton).not.toBeDisabled())
     })
 })
@@ -788,35 +789,35 @@ describe('formatScheduledTime', () => {
 
 describe('QueuedMessagesBar steer action', () => {
     // The real useSteerQueuedMessage hook runs here (only the cancel hook is
-    // module-mocked); pass a fake api whose steerMessage resolves on demand.
+    // module-mocked); pass a fake API whose steer request resolves on demand.
     function renderSteerable(canSteer = true) {
         mocks.steerMessage.mockImplementation(() => new Promise((resolve) => {
             mocks.resolveSteer = resolve
         }))
-        const api = { steerMessage: mocks.steerMessage } as unknown as ApiClient
+        const api = { steerQueuedMessage: mocks.steerMessage } as unknown as ApiClient
         const view = renderQueuedMessage(null, null, 0, canSteer, api)
         return { unmount: view.unmount }
     }
 
     it('shows the Steer button only when canSteer is set and the row is immediate', () => {
         const immediate = renderSteerable(true)
-        expect(screen.getByRole('button', { name: 'Steer queued message' })).toBeTruthy()
+        expect(screen.getByRole('button', { name: 'Steer now' })).toBeTruthy()
         immediate.unmount()
 
         renderSteerable(false)
-        expect(screen.queryByRole('button', { name: 'Steer queued message' })).toBeNull()
+        expect(screen.queryByRole('button', { name: 'Steer now' })).toBeNull()
     })
 
-    it('hides the Steer button on future-scheduled rows', () => {
-        const api = { steerMessage: mocks.steerMessage } as unknown as ApiClient
+    it('disables the Steer button on future-scheduled rows', () => {
+        const api = { steerQueuedMessage: mocks.steerMessage } as unknown as ApiClient
         renderQueuedMessage(Date.now() + 60_000, null, 0, true, api)
-        expect(screen.queryByRole('button', { name: 'Steer queued message' })).toBeNull()
+        expect(screen.getByRole('button', { name: 'Steer now' })).toBeDisabled()
     })
 
     it('calls the steer api with the session and message id', async () => {
         renderSteerable(true)
 
-        fireEvent.click(screen.getByRole('button', { name: 'Steer queued message' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Steer now' }))
 
         await waitFor(() => expect(mocks.steerMessage).toHaveBeenCalledWith('session-1', 'server-message-id'))
         // Settle the pending mutation so the queued-operation token releases;
@@ -830,7 +831,7 @@ describe('QueuedMessagesBar steer action', () => {
     it('toasts when the steer fails and leaves the row queued', async () => {
         renderSteerable(true)
 
-        fireEvent.click(screen.getByRole('button', { name: 'Steer queued message' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Steer now' }))
         await waitFor(() => expect(mocks.steerMessage).toHaveBeenCalled())
         await act(async () => {
             mocks.resolveSteer?.({ status: 'failed', error: 'Session is not streaming', localId: 'local-server-message-id' })
@@ -848,7 +849,7 @@ describe('QueuedMessagesBar steer action', () => {
     it('does not toast on a successful steer (the consumed event clears the row)', async () => {
         renderSteerable(true)
 
-        fireEvent.click(screen.getByRole('button', { name: 'Steer queued message' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Steer now' }))
         await waitFor(() => expect(mocks.steerMessage).toHaveBeenCalled())
         await act(async () => {
             mocks.resolveSteer?.({ status: 'steered', localId: 'local-server-message-id' })
@@ -861,7 +862,7 @@ describe('QueuedMessagesBar steer action', () => {
     it('reconciles a stale queued row when the steer returns invoked (missed consumption SSE)', async () => {
         renderSteerable(true)
 
-        fireEvent.click(screen.getByRole('button', { name: 'Steer queued message' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Steer now' }))
         await waitFor(() => expect(mocks.steerMessage).toHaveBeenCalled())
         await act(async () => {
             mocks.resolveSteer?.({
@@ -871,11 +872,19 @@ describe('QueuedMessagesBar steer action', () => {
             await Promise.resolve()
         })
 
-        expect(mocks.markMessagesConsumed).toHaveBeenCalledWith(
+        expect(mocks.appendOptimisticMessage).toHaveBeenCalledWith(
             'session-1',
-            ['local-server-message-id'],
-            5_000,
+            expect.objectContaining({
+                localId: 'local-server-message-id',
+                invokedAt: 5_000,
+                status: 'sent',
+            })
         )
-        expect(mocks.addToast).not.toHaveBeenCalled()
+        expect(mocks.addToast).toHaveBeenCalledWith({
+            title: 'queuedMessages.steerAlreadyInvoked',
+            body: '',
+            sessionId: 'session-1',
+            url: window.location.href,
+        })
     })
 })

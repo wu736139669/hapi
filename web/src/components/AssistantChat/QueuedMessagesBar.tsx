@@ -254,7 +254,7 @@ export function QueuedMessagesBar({
     const steerMutation = useSteerQueuedMessage(api)
     const { t } = useTranslation()
     const { addToast } = useToast()
-    const steeringSupported = isSteeringSupportedForSession(sessionMetadata)
+    const steeringSupported = Boolean(legacyCanSteer) || isSteeringSupportedForSession(sessionMetadata)
     const pendingScheduleRef = useRef(pendingSchedule)
     const pendingScheduleRevisionRef = useRef(pendingScheduleRevision)
     const composerTextRef = useRef(composerText)
