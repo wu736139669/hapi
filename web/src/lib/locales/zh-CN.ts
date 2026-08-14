@@ -668,7 +668,6 @@ export default {
   'queuedMessages.steeredBadgeTitle': '已介入当前进行中的回合',
   'queuedMessages.editCurrentDraftKept': '队列消息已取消，已保留当前草稿和定时设置。',
   'queuedMessages.steer': '立即插入当前回合',
-  'queuedMessages.steerFailed': '插入失败，消息仍在队列中',
 
   // Scratchlist (per-session workbench, issue #11)
   'scratchlist.title': '草稿夹',
