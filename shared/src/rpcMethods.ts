@@ -34,6 +34,8 @@ export const RPC_METHODS = {
     ListCursorModels: 'listCursorModels',
     ListPiModels: 'listPiModels',
     ListPiSessions: 'listPiSessions',
+    ListDshModels: 'listDshModels',
+    ListDshSessions: 'listDshSessions',
     ListOpencodeModels: 'listOpencodeModels',
     ListOpencodeModelsForCwd: 'listOpencodeModelsForCwd',
     ListGrokModelsForCwd: 'listGrokModelsForCwd',

@@ -28,6 +28,7 @@ import { createCliRoutes } from './routes/cli'
 import { createCodexDesktopRoutes } from './routes/codexDesktop'
 import { createClaudeSessionRoutes } from './routes/claudeSessions'
 import { createPiSessionRoutes } from './routes/piSessions'
+import { createDshSessionRoutes } from './routes/dshSessions'
 import { createPushRoutes } from './routes/push'
 import { createDevicesRoutes } from './routes/devices'
 import { createVoiceRoutes } from './routes/voice'
@@ -307,6 +308,10 @@ function createWebApp(options: {
         getSyncEngine: options.getSyncEngine
     }))
     app.route('/api', createPiSessionRoutes({
+        store: options.store,
+        getSyncEngine: options.getSyncEngine
+    }))
+    app.route('/api', createDshSessionRoutes({
         store: options.store,
         getSyncEngine: options.getSyncEngine
     }))

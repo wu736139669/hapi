@@ -31,6 +31,15 @@ describe('Gemini CLI sunset (read-only, not creatable)', () => {
 })
 
 describe('getPermissionModesForFlavor', () => {
+    test('returns DeepSeek Harness native permission presets', () => {
+        expect(getPermissionModesForFlavor('dsh')).toEqual([
+            'default',
+            'read-only',
+            'workspace-write',
+            'danger-full-access'
+        ])
+    })
+
     test("returns the conservative Grok modes", () => {
         expect(getPermissionModesForFlavor('grok')).toEqual([
             'default',
@@ -133,18 +142,24 @@ describe('claude auto permission mode', () => {
 })
 
 describe('isSteeringSupportedForFlavor', () => {
-    it('supports codex and cursor only', () => {
+    it('supports native steer flavors', () => {
+        expect(isSteeringSupportedForFlavor('pi')).toBe(true)
         expect(isSteeringSupportedForFlavor('codex')).toBe(true)
         expect(isSteeringSupportedForFlavor('cursor')).toBe(true)
+        expect(isSteeringSupportedForFlavor('dsh')).toBe(true)
         expect(isSteeringSupportedForFlavor('claude')).toBe(false)
         expect(isSteeringSupportedForFlavor('opencode')).toBe(false)
-        expect(isSteeringSupportedForFlavor('pi')).toBe(false)
         expect(isSteeringSupportedForFlavor(undefined)).toBe(false)
         expect(isSteeringSupportedForFlavor(null)).toBe(false)
     })
 })
 
 describe('isSteeringSupportedForSession', () => {
+    it('supports Pi and DeepSeek Harness sessions', () => {
+        expect(isSteeringSupportedForSession({ flavor: 'pi' })).toBe(true)
+        expect(isSteeringSupportedForSession({ flavor: 'dsh' })).toBe(true)
+    })
+
     it('supports codex sessions', () => {
         expect(isSteeringSupportedForSession({ flavor: 'codex' })).toBe(true)
     })
