@@ -15,7 +15,7 @@ function spaFallback(): Plugin {
                     next()
                     return
                 }
-                req.url = '/index.html'
+                req.url = url.startsWith('/studio/') ? '/studio.html' : '/index.html'
                 next()
             })
         }
@@ -194,6 +194,10 @@ export default defineConfig({
         outDir: 'dist',
         emptyOutDir: true,
         rollupOptions: {
+            input: {
+                app: resolve(__dirname, 'index.html'),
+                studio: resolve(__dirname, 'studio.html')
+            },
             output: {
                 manualChunks(id) {
                     return getVendorChunkName(id)
