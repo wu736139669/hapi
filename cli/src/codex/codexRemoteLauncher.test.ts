@@ -35,6 +35,7 @@ const harness = vi.hoisted(() => ({
     startTurnThreadIds: [] as string[],
     startTurnParams: [] as Array<Record<string, unknown>>,
     startTurnErrors: [] as Error[],
+    startTurnNotificationTurnId: null as string | null,
     steerTurnParams: [] as Array<Record<string, unknown>>,
     steerTurnErrors: [] as Error[],
     deferSteerTurn: false,
@@ -224,7 +225,7 @@ vi.mock('./codexAppServerClient', () => {
             harness.startTurnThreadIds.push(threadId);
             harness.startTurnMessages.push(params?.input?.[0]?.text ?? params?.message ?? params?.userMessage ?? '');
             const turnId = `turn-${harness.startTurnThreadIds.length}`;
-            const started = { turn: { id: turnId } };
+            const started = { turn: { id: harness.startTurnNotificationTurnId ?? turnId } };
             harness.notifications.push({ method: 'turn/started', params: started });
             this.notificationHandler?.('turn/started', started);
 
@@ -1259,6 +1260,7 @@ describe('codexRemoteLauncher', () => {
         harness.startTurnThreadIds = [];
         harness.startTurnParams = [];
         harness.startTurnErrors = [];
+        harness.startTurnNotificationTurnId = null;
         harness.steerTurnParams = [];
         harness.steerTurnErrors = [];
         harness.deferSteerTurn = false;
@@ -1363,6 +1365,44 @@ describe('codexRemoteLauncher', () => {
         )).resolves.toEqual({ steered: false, error: 'Active turn is not steerable' });
         expect(session.queue.queue.map((item) => item.localId)).toEqual(['local-fallback']);
         expect(consumedCalls).toEqual([]);
+
+        await rpcHandlers.get(RPC_METHODS.Switch)?.({});
+        await running;
+    });
+
+    it('retries steering with the active turn reported by the app-server', async () => {
+        harness.suppressTurnCompletion = true;
+        harness.steerTurnErrors.push(new Error('expected active turn id `turn-1` but found `turn-live`'));
+        const mode = createMode();
+        const { session, rpcHandlers } = createSessionStub(['first'], mode, false, false);
+        const running = codexRemoteLauncher(session as never);
+
+        await vi.waitFor(() => expect(session.thinking).toBe(true));
+        session.queue.push('updated direction', mode, 'local-reconciled');
+
+        await expect(Promise.resolve(
+            rpcHandlers.get(RPC_METHODS.SteerQueuedMessage)?.({ localId: 'local-reconciled' })
+        )).resolves.toEqual({ steered: true });
+        expect(harness.steerTurnParams.map((params) => params.expectedTurnId)).toEqual(['turn-1', 'turn-live']);
+
+        await rpcHandlers.get(RPC_METHODS.Switch)?.({});
+        await running;
+    });
+
+    it('keeps the turn/started event id when it races the turn/start response', async () => {
+        harness.suppressTurnCompletion = true;
+        harness.startTurnNotificationTurnId = 'turn-from-event';
+        const mode = createMode();
+        const { session, rpcHandlers } = createSessionStub(['first'], mode, false, false);
+        const running = codexRemoteLauncher(session as never);
+
+        await vi.waitFor(() => expect(session.thinking).toBe(true));
+        session.queue.push('updated direction', mode, 'local-event-turn');
+
+        await expect(Promise.resolve(
+            rpcHandlers.get(RPC_METHODS.SteerQueuedMessage)?.({ localId: 'local-event-turn' })
+        )).resolves.toEqual({ steered: true });
+        expect(harness.steerTurnParams.at(-1)?.expectedTurnId).toBe('turn-from-event');
 
         await rpcHandlers.get(RPC_METHODS.Switch)?.({});
         await running;

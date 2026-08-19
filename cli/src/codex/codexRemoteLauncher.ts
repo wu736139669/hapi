@@ -208,6 +208,12 @@ function stripAnsi(value: string): string {
     return value.replace(/\u001b\[[0-9;]*m/g, '');
 }
 
+function extractActiveTurnId(error: unknown): string | null {
+    const message = error instanceof Error ? error.message : String(error);
+    const match = /found `([^`]+)`/u.exec(message);
+    return match?.[1] ?? null;
+}
+
 export function isCurrentSteerHandler(
     currentEpoch: number,
     handlerEpoch: number,
@@ -678,6 +684,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         let scheduleReadyAfterTurn: (() => void) | null = null;
         let clearReadyAfterTurnTimer: (() => void) | null = null;
         let turnInFlight = false;
+        // `turn/started` can arrive before the `turn/start` response. Keep the
+        // event ID so the response cannot overwrite the authoritative active turn.
+        let turnStartedEventId: string | null = null;
         const setTurnInFlight = (value: boolean) => {
             turnInFlight = value;
             session.client.updateAgentState((state) => ({ ...state, steeringActive: value }));
@@ -1924,6 +1933,32 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 return true;
             } catch (error) {
                 const detail = error instanceof Error ? error.message : String(error);
+                const activeTurnId = extractActiveTurnId(error);
+                if (
+                    activeTurnId
+                    && activeTurnId !== turnId
+                    && this.currentThreadId === threadId
+                    && turnInFlight
+                ) {
+                    // The app-server reports its authoritative active turn in
+                    // the mismatch error. This happens when turn/start's
+                    // response raced ahead of turn/started, or after a resume.
+                    this.currentTurnId = activeTurnId;
+                    try {
+                        await appServerClient.steerTurn({
+                            threadId,
+                            input: [{ type: 'text', text: batch.message }],
+                            expectedTurnId: activeTurnId
+                        });
+                        messageBuffer.addMessage(batch.message, 'user');
+                        logger.debug(`[Codex] Steered reconciled active turn ${activeTurnId}`);
+                        return true;
+                    } catch (retryError) {
+                        const retryDetail = retryError instanceof Error ? retryError.message : String(retryError);
+                        logger.debug(`[Codex] turn/steer retry failed (${retryDetail})`);
+                        return false;
+                    }
+                }
                 logger.debug(`[Codex] turn/steer failed (${detail})`);
                 return false;
             }
@@ -2563,6 +2598,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 agentMessageStartedForTurn = false;
                 dismissedSafetyBufferingKeys.clear();
                 if (turnId) {
+                    turnStartedEventId = turnId;
                     this.currentTurnId = turnId;
                     allowAnonymousTerminalEvent = false;
                 } else if (!this.currentTurnId) {
@@ -3915,6 +3951,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     throw new Error(PLAN_MODE_NOT_SUPPORTED_MESSAGE);
                 }
                 let turnResponse: unknown;
+                turnStartedEventId = null;
+                this.currentTurnId = null;
                 try {
                     turnResponse = await appServerClient.startTurn(buildParams(!shouldSendCollaborationMode), {
                         signal: this.abortController.signal
@@ -3936,10 +3974,16 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 const turn = turnRecord ? asRecord(turnRecord.turn) : null;
                 const turnId = asString(turn?.id);
                 if (turnInFlight) {
-                    if (turnId) {
-                        this.currentTurnId = turnId;
+                    const resolvedTurnId = turnStartedEventId ?? turnId;
+                    if (turnStartedEventId && turnId && turnId !== turnStartedEventId) {
+                        logger.debug(
+                            `[Codex] Preserving turn/started ID ${turnStartedEventId} over turn/start response ${turnId}`
+                        );
+                    }
+                    if (resolvedTurnId) {
+                        this.currentTurnId = resolvedTurnId;
                         if (clientUserMessageId) {
-                            this.conversationHistory.rememberLocalIdTurn(clientUserMessageId, turnId);
+                            this.conversationHistory.rememberLocalIdTurn(clientUserMessageId, resolvedTurnId);
                             session.client.updateMetadata((metadata) => ({
                                 ...metadata,
                                 path: metadata?.path ?? session.path,
@@ -3950,7 +3994,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                                 },
                                 conversationHistoryTurns: {
                                     ...metadata?.conversationHistoryTurns,
-                                    [clientUserMessageId]: turnId
+                                    [clientUserMessageId]: resolvedTurnId
                                 }
                             }))
                         }
