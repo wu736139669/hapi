@@ -5,7 +5,7 @@ import {
 } from '@hapi/protocol'
 import { Hono } from 'hono'
 import { z } from 'zod'
-import type { Store, StoredMessage, StoredStudioRoom } from '../../store'
+import type { Store, StoredMessage, StoredStudioPost, StoredStudioRoom } from '../../store'
 import type { Session, SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSession, requireSyncEngine } from './guards'
@@ -34,12 +34,30 @@ const decidePostSchema = z.object({
     text: z.string().trim().min(1).max(4000).optional()
 })
 
+const suggestionPageQuerySchema = z.object({
+    beforeAt: z.coerce.number().int().nonnegative().optional(),
+    beforeId: z.string().min(1).optional()
+}).refine((value) => (value.beforeAt === undefined) === (value.beforeId === undefined))
+
 type PublicStudioMessage = {
     id: string
     role: 'user' | 'assistant'
     text: string
     createdAt: number
     seq: number
+}
+
+type PublicStudioPost = Pick<StoredStudioPost, 'id' | 'roomId' | 'authorName' | 'kind' | 'text' | 'createdAt'>
+
+function projectPublicPost(post: StoredStudioPost): PublicStudioPost {
+    return {
+        id: post.id,
+        roomId: post.roomId,
+        authorName: post.authorName,
+        kind: post.kind,
+        text: post.text,
+        createdAt: post.createdAt
+    }
 }
 
 function sessionTitle(session: Session): string {
@@ -76,6 +94,11 @@ function extractUserText(content: unknown): string | null {
 function projectMessage(message: StoredMessage): PublicStudioMessage | null {
     const record = unwrapRoleWrappedRecordEnvelope(message.content)
     if (!record) return null
+    if (record.role === 'user' && message.invokedAt === null) return null
+    if (isObject(record.content)) {
+        const data = isObject(record.content.data) ? record.content.data : null
+        if (data?.isMeta === true || data?.isCompactSummary === true) return null
+    }
     if (record.role === 'user') {
         const text = extractUserText(record.content)
         return text ? { id: message.id, role: 'user', text, createdAt: message.createdAt, seq: message.seq } : null
@@ -85,6 +108,23 @@ function projectMessage(message: StoredMessage): PublicStudioMessage | null {
         return text ? { id: message.id, role: 'assistant', text, createdAt: message.createdAt, seq: message.seq } : null
     }
     return null
+}
+
+function ownerRoomPayload(store: Store, roomId: string) {
+    const openSuggestionsNewestFirst = store.studios.listOpenSuggestionsPage(roomId, 200)
+    const posts = [
+        ...store.studios.listPostsByKind(roomId, 'discussion', 200),
+        ...[...openSuggestionsNewestFirst].reverse(),
+        ...store.studios.listResolvedSuggestions(roomId, 50)
+    ].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+    const oldest = openSuggestionsNewestFirst.at(-1)
+    return {
+        posts,
+        openSuggestionCount: store.studios.countOpenSuggestions(roomId),
+        nextSuggestionCursor: openSuggestionsNewestFirst.length === 200 && oldest
+            ? { beforeAt: oldest.createdAt, beforeId: oldest.id }
+            : null
+    }
 }
 
 function publicRoom(room: StoredStudioRoom, session: Session) {
@@ -100,18 +140,36 @@ function publicRoom(room: StoredStudioRoom, session: Session) {
     }
 }
 
+const POST_RATE_WINDOW_MS = 60_000
+const POST_RATE_LIMIT_PER_ROOM = 60
+const MAX_POST_RATE_BUCKETS = 1_000
+const MAX_STUDIO_POSTS_PER_ROOM = 2_000
 const postRateBuckets = new Map<string, number[]>()
 
 function allowPost(key: string, now = Date.now()): boolean {
-    const windowStart = now - 60_000
+    const windowStart = now - POST_RATE_WINDOW_MS
+    for (const [bucketKey, times] of postRateBuckets) {
+        const recent = times.filter((time) => time >= windowStart)
+        if (recent.length === 0) postRateBuckets.delete(bucketKey)
+        else if (recent.length !== times.length) postRateBuckets.set(bucketKey, recent)
+    }
+    while (postRateBuckets.size >= MAX_POST_RATE_BUCKETS && !postRateBuckets.has(key)) {
+        const oldestKey = postRateBuckets.keys().next().value as string | undefined
+        if (!oldestKey) break
+        postRateBuckets.delete(oldestKey)
+    }
     const recent = (postRateBuckets.get(key) ?? []).filter((time) => time >= windowStart)
-    if (recent.length >= 12) {
+    if (recent.length >= POST_RATE_LIMIT_PER_ROOM) {
         postRateBuckets.set(key, recent)
         return false
     }
     recent.push(now)
     postRateBuckets.set(key, recent)
     return true
+}
+
+export function resetStudioPostRateLimitForTests(): void {
+    postRateBuckets.clear()
 }
 
 export function createPublicStudioRoutes(options: {
@@ -129,14 +187,27 @@ export function createPublicStudioRoutes(options: {
         const session = engine?.resolveSessionAccess(room.sessionId, room.namespace)
         if (!engine || !session?.ok) return c.json({ error: 'Studio session unavailable' }, 503)
 
-        const messages = options.store.messages.getMessages(room.sessionId, 200)
-            .map(projectMessage)
-            .filter((message): message is PublicStudioMessage => message !== null)
-        const publicPosts = options.store.studios.listPosts(room.id)
-            .filter((post) => post.kind === 'discussion')
+        const messages: PublicStudioMessage[] = []
+        let before: { at: number; seq: number } | undefined
+        while (messages.length < 200) {
+            const page = options.store.messages.getMessagesByPosition(room.sessionId, 200, before)
+            if (page.length === 0) break
+            const projectedPage = page
+                .map(projectMessage)
+                .filter((message): message is PublicStudioMessage => message !== null)
+            messages.unshift(...projectedPage)
+            const first = page[0]
+            before = first ? { at: first.invokedAt ?? first.createdAt, seq: first.seq } : undefined
+            if (page.length < 200) break
+        }
+        const publicMessages = messages.slice(-200)
+        const publicPosts = options.store.studios
+            .listPostsByKind(room.id, 'discussion', 200)
+            .filter((post) => post.status === 'open')
+            .map(projectPublicPost)
         return c.json({
             room: publicRoom(room, session.session),
-            messages,
+            messages: publicMessages,
             posts: publicPosts
         })
     })
@@ -151,13 +222,14 @@ export function createPublicStudioRoutes(options: {
         const parsed = postSchema.safeParse(body)
         if (!parsed.success) return c.json({ error: 'Invalid post' }, 400)
 
-        const remote = c.req.header('x-forwarded-for')?.split(',')[0]?.trim()
-            ?? c.req.header('x-real-ip')
-            ?? 'unknown'
-        if (!allowPost(`${room.id}:${remote}:${parsed.data.guestId}`)) {
+        if (!allowPost(`room:${room.id}`)) {
             return c.json({ error: 'Too many posts; try again shortly' }, 429)
         }
-        const post = options.store.studios.createPost({ roomId: room.id, ...parsed.data })
+        const post = options.store.studios.createPostWithinLimit(
+            { roomId: room.id, ...parsed.data },
+            MAX_STUDIO_POSTS_PER_ROOM
+        )
+        if (!post) return c.json({ error: 'This studio has reached its post limit' }, 429)
         return c.json({ post }, 201)
     })
 
@@ -194,13 +266,31 @@ export function createStudioRoutes(options: {
         const sessionResult = requireSession(c, engine, c.req.param('sessionId'))
         if (sessionResult instanceof Response) return sessionResult
         const room = options.store.studios.getRoomBySession(sessionResult.sessionId, c.get('namespace'))
-        return room ? c.json({ room, posts: options.store.studios.listPosts(room.id) }) : c.json({ room: null, posts: [] })
+        return room ? c.json({ room, ...ownerRoomPayload(options.store, room.id) }) : c.json({ room: null, posts: [], openSuggestionCount: 0, nextSuggestionCursor: null })
+    })
+
+    app.get('/studios/:id/suggestions', (c) => {
+        const room = options.store.studios.getRoomById(c.req.param('id'), c.get('namespace'))
+        if (!room) return c.json({ error: 'Studio not found' }, 404)
+        const parsed = suggestionPageQuerySchema.safeParse(c.req.query())
+        if (!parsed.success) return c.json({ error: 'Invalid query' }, 400)
+        const before = parsed.data.beforeAt !== undefined && parsed.data.beforeId !== undefined
+            ? { createdAt: parsed.data.beforeAt, id: parsed.data.beforeId }
+            : undefined
+        const items = options.store.studios.listOpenSuggestionsPage(room.id, 200, before)
+        const oldest = items.at(-1)
+        return c.json({
+            items,
+            nextCursor: items.length === 200 && oldest
+                ? { beforeAt: oldest.createdAt, beforeId: oldest.id }
+                : null
+        })
     })
 
     app.get('/studios/:id', (c) => {
         const room = options.store.studios.getRoomById(c.req.param('id'), c.get('namespace'))
         if (!room) return c.json({ error: 'Studio not found' }, 404)
-        return c.json({ room, posts: options.store.studios.listPosts(room.id) })
+        return c.json({ room, ...ownerRoomPayload(options.store, room.id) })
     })
 
     app.patch('/studios/:id', async (c) => {
@@ -222,14 +312,18 @@ export function createStudioRoutes(options: {
         const body = await c.req.json().catch(() => null)
         const parsed = decidePostSchema.safeParse(body)
         if (!parsed.success) return c.json({ error: 'Invalid body' }, 400)
+        if (parsed.data.action === 'dismiss') {
+            const post = options.store.studios.getPost(c.req.param('postId'), room.id)
+            if (!post || post.status !== 'open') {
+                return c.json({ error: 'Open post not found' }, 404)
+            }
+            const updated = options.store.studios.decidePost(post.id, room.id, 'dismissed')
+            return c.json({ post: updated })
+        }
+
         const post = options.store.studios.getPost(c.req.param('postId'), room.id)
         if (!post || post.kind !== 'suggestion' || post.status !== 'open') {
             return c.json({ error: 'Open suggestion not found' }, 404)
-        }
-
-        if (parsed.data.action === 'dismiss') {
-            const updated = options.store.studios.decidePost(post.id, room.id, 'dismissed')
-            return c.json({ post: updated })
         }
 
         const engine = requireSyncEngine(c, options.getSyncEngine)

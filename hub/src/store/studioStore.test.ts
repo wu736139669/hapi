@@ -39,4 +39,50 @@ describe('StudioStore', () => {
         expect(store.studios.decidePost(post.id, room.id, 'submitted', 'Edited')?.status).toBe('submitted')
         expect(store.studios.decidePost(post.id, room.id, 'submitted', 'Again')).toBeNull()
     })
+
+    it('returns the newest posts when the room has more than the page limit', () => {
+        const store = new Store(':memory:')
+        stores.push(store)
+        store.sessions.getOrCreateSession('tag-a', {}, null, 'alpha', undefined, undefined, undefined, 'session-a')
+        const room = store.studios.createOrActivateRoom('session-a', 'alpha', 'Room', 'contribute')
+        for (let index = 0; index < 205; index += 1) {
+            store.studios.createPost({
+                roomId: room.id,
+                guestId: 'guest-12345678',
+                authorName: 'Guest',
+                kind: 'discussion',
+                text: `post-${index}`,
+                createdAt: index
+            })
+        }
+        const posts = store.studios.listPosts(room.id)
+        expect(posts).toHaveLength(200)
+        expect(posts[0]?.text).toBe('post-5')
+        expect(posts.at(-1)?.text).toBe('post-204')
+    })
+
+    it('limits kinds independently', () => {
+        const store = new Store(':memory:')
+        stores.push(store)
+        store.sessions.getOrCreateSession('tag-a', {}, null, 'alpha', undefined, undefined, undefined, 'session-a')
+        const room = store.studios.createOrActivateRoom('session-a', 'alpha', 'Room', 'contribute')
+        store.studios.createPost({ roomId: room.id, guestId: 'guest-12345678', authorName: 'Guest', kind: 'discussion', text: 'discussion', createdAt: 0 })
+        for (let index = 1; index <= 205; index += 1) {
+            store.studios.createPost({ roomId: room.id, guestId: 'guest-12345678', authorName: 'Guest', kind: 'suggestion', text: `suggestion-${index}`, createdAt: index })
+        }
+        expect(store.studios.listPostsByKind(room.id, 'discussion')).toHaveLength(1)
+        expect(store.studios.listPostsByKind(room.id, 'suggestion', null)).toHaveLength(205)
+    })
+
+    it('enforces a durable lifetime post limit atomically', () => {
+        const store = new Store(':memory:')
+        stores.push(store)
+        store.sessions.getOrCreateSession('tag-a', {}, null, 'alpha', undefined, undefined, undefined, 'session-a')
+        const room = store.studios.createOrActivateRoom('session-a', 'alpha', 'Room', 'contribute')
+        const input = { roomId: room.id, guestId: 'guest-12345678', authorName: 'Guest', kind: 'discussion' as const, text: 'Post' }
+
+        expect(store.studios.createPostWithinLimit(input, 1)).not.toBeNull()
+        expect(store.studios.createPostWithinLimit(input, 1)).toBeNull()
+        expect(store.studios.listPosts(room.id, 10)).toHaveLength(1)
+    })
 })

@@ -65,6 +65,25 @@ function mapPost(row: StudioPostRow): StoredStudioPost {
 export class StudioStore {
     constructor(private readonly db: Database) {}
 
+    private insertPost(input: {
+        roomId: string
+        guestId: string
+        authorName: string
+        kind: StudioPostKind
+        text: string
+        createdAt?: number
+    }): StoredStudioPost {
+        const id = randomUUID()
+        const now = input.createdAt ?? Date.now()
+        this.db.prepare(`
+            INSERT INTO studio_posts (
+                id, room_id, guest_id, author_name, kind, text,
+                status, created_at, decided_at, submitted_text
+            ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, NULL, NULL)
+        `).run(id, input.roomId, input.guestId, input.authorName, input.kind, input.text, now)
+        return this.getPost(id, input.roomId)!
+    }
+
     createOrActivateRoom(
         sessionId: string,
         namespace: string,
@@ -152,12 +171,80 @@ export class StudioStore {
 
     listPosts(roomId: string, limit = 200): StoredStudioPost[] {
         const rows = this.db.prepare(`
-            SELECT * FROM studio_posts
-            WHERE room_id = ?
+            SELECT * FROM (
+                SELECT * FROM studio_posts
+                WHERE room_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+            )
             ORDER BY created_at ASC, id ASC
-            LIMIT ?
         `).all(roomId, limit) as StudioPostRow[]
         return rows.map(mapPost)
+    }
+
+    listPostsByKind(
+        roomId: string,
+        kind: StudioPostKind,
+        limit: number | null = 200
+    ): StoredStudioPost[] {
+        const limitClause = limit === null ? '' : 'LIMIT ?'
+        const params = limit === null ? [roomId, kind] : [roomId, kind, limit]
+        const rows = this.db.prepare(`
+            SELECT * FROM studio_posts
+            WHERE room_id = ? AND kind = ?
+            ORDER BY created_at DESC, id DESC
+            ${limitClause}
+        `).all(...params) as StudioPostRow[]
+        return rows.reverse().map(mapPost)
+    }
+
+    listOpenSuggestions(roomId: string, limit: number | null = null): StoredStudioPost[] {
+        const limitClause = limit === null ? '' : 'LIMIT ?'
+        const params = limit === null ? [roomId] : [roomId, limit]
+        const rows = this.db.prepare(`
+            SELECT * FROM studio_posts
+            WHERE room_id = ? AND kind = 'suggestion' AND status = 'open'
+            ORDER BY created_at DESC, id DESC
+            ${limitClause}
+        `).all(...params) as StudioPostRow[]
+        return rows.reverse().map(mapPost)
+    }
+
+    listOpenSuggestionsPage(
+        roomId: string,
+        limit = 200,
+        before?: { createdAt: number; id: string }
+    ): StoredStudioPost[] {
+        const beforeClause = before
+            ? 'AND (created_at < ? OR (created_at = ? AND id < ?))'
+            : ''
+        const params = before
+            ? [roomId, before.createdAt, before.createdAt, before.id, limit]
+            : [roomId, limit]
+        return (this.db.prepare(`
+            SELECT * FROM studio_posts
+            WHERE room_id = ? AND kind = 'suggestion' AND status = 'open'
+            ${beforeClause}
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+        `).all(...params) as StudioPostRow[]).map(mapPost)
+    }
+
+    countOpenSuggestions(roomId: string): number {
+        const row = this.db.prepare(
+            "SELECT COUNT(*) AS count FROM studio_posts WHERE room_id = ? AND kind = 'suggestion' AND status = 'open'"
+        ).get(roomId) as { count: number }
+        return row.count
+    }
+
+    listResolvedSuggestions(roomId: string, limit = 50): StoredStudioPost[] {
+        const rows = this.db.prepare(`
+            SELECT * FROM studio_posts
+            WHERE room_id = ? AND kind = 'suggestion' AND status != 'open'
+            ORDER BY decided_at DESC, created_at DESC, id DESC
+            LIMIT ?
+        `).all(roomId, limit) as StudioPostRow[]
+        return rows.reverse().map(mapPost)
     }
 
     createPost(input: {
@@ -166,16 +253,35 @@ export class StudioStore {
         authorName: string
         kind: StudioPostKind
         text: string
+        createdAt?: number
     }): StoredStudioPost {
-        const id = randomUUID()
-        const now = Date.now()
-        this.db.prepare(`
-            INSERT INTO studio_posts (
-                id, room_id, guest_id, author_name, kind, text,
-                status, created_at, decided_at, submitted_text
-            ) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, NULL, NULL)
-        `).run(id, input.roomId, input.guestId, input.authorName, input.kind, input.text, now)
-        return this.getPost(id, input.roomId)!
+        return this.insertPost(input)
+    }
+
+    /**
+     * Atomically enforce a lifetime post cap for public rooms. The in-memory
+     * rate limiter protects bursts, while this durable cap protects the hub's
+     * SQLite file across restarts and rotating guest identities.
+     */
+    createPostWithinLimit(
+        input: {
+            roomId: string
+            guestId: string
+            authorName: string
+            kind: StudioPostKind
+            text: string
+            createdAt?: number
+        },
+        maxPosts: number
+    ): StoredStudioPost | null {
+        const limit = Math.max(1, Math.floor(maxPosts))
+        return this.db.transaction(() => {
+            const row = this.db.prepare(
+                'SELECT COUNT(*) AS count FROM studio_posts WHERE room_id = ?'
+            ).get(input.roomId) as { count: number }
+            if (row.count >= limit) return null
+            return this.insertPost(input)
+        })()
     }
 
     getPost(id: string, roomId: string): StoredStudioPost | null {
