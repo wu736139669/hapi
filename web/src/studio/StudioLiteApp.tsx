@@ -5,8 +5,10 @@ import type { PublicStudioMessage, PublicStudioResponse, StudioPostKind } from '
 import {
     countNewStudioMessages,
     isStudioNearBottom,
-    shouldCollapseStudioMessage
+    shouldCollapseStudioMessage,
+    shouldAutoJumpOnTabOpen
 } from './studioBehavior'
+import { resolveStudioApiOrigin } from './studioUrl'
 
 type Locale = 'en' | 'zh-CN'
 type Copy = {
@@ -66,14 +68,13 @@ function getGuestId(): string {
 }
 
 function getToken(): string {
-    const match = window.location.pathname.match(/^\/studio\/([^/]+)/)
-    return match?.[1] ?? ''
+    const match = window.location.pathname.match(/\/studio\/([^/]+)/)
+    return match?.[1] ?? new URLSearchParams(window.location.search).get('token') ?? ''
 }
 
-async function loadStudio(token: string): Promise<PublicStudioResponse> {
-    const response = await fetch(`/api/public/studios/${encodeURIComponent(token)}`, {
-        cache: 'no-store',
-        headers: { 'cache-control': 'no-cache' }
+async function loadStudio(token: string, apiOrigin: string): Promise<PublicStudioResponse> {
+    const response = await fetch(new URL(`/api/public/studios/${encodeURIComponent(token)}`, apiOrigin), {
+        cache: 'no-store'
     })
     if (!response.ok) throw new Error('not-found')
     return await response.json() as PublicStudioResponse
@@ -110,6 +111,7 @@ function StudioPage() {
     const [locale] = useState<Locale>(getLocale)
     const copy = COPY[locale]
     const token = getToken()
+    const apiOrigin = resolveStudioApiOrigin(new URLSearchParams(window.location.search).get('hub'), window.location.origin)
     const [data, setData] = useState<PublicStudioResponse | null>(null)
     const [loadError, setLoadError] = useState(false)
     const [tab, setTab] = useState<'conversation' | 'discussion'>('conversation')
@@ -125,12 +127,13 @@ function StudioPage() {
     const previousLastMessageIdRef = useRef<string | null>(null)
     const initialScrollDoneRef = useRef(false)
     const initialScrollTimersRef = useRef<number[]>([])
+    const previousTabRef = useRef(tab)
 
     useEffect(() => {
         let stopped = false
         const fetchData = async () => {
             try {
-                const next = await loadStudio(token)
+                const next = await loadStudio(token, apiOrigin)
                 if (!stopped) {
                     setData(next)
                     setLoadError(false)
@@ -147,7 +150,7 @@ function StudioPage() {
             stopped = true
             window.clearInterval(interval)
         }
-    }, [token])
+    }, [apiOrigin, token])
 
     const discussions = useMemo(
         () => data?.posts.filter((post) => post.roomId === data.room.id && post.kind === 'discussion') ?? [],
@@ -200,7 +203,9 @@ function StudioPage() {
     }, [data?.messages, nearBottom, scrollToLatest])
 
     useEffect(() => {
-        if (tab === 'conversation' && unreadCount > 0) scrollToLatest('smooth')
+        const openedConversation = shouldAutoJumpOnTabOpen(previousTabRef.current, tab, unreadCount)
+        previousTabRef.current = tab
+        if (openedConversation) scrollToLatest('smooth')
     }, [scrollToLatest, tab, unreadCount])
 
     const submitPost = async () => {
@@ -208,7 +213,7 @@ function StudioPage() {
         setSending(true)
         setPostError(null)
         try {
-            const response = await fetch(`/api/public/studios/${encodeURIComponent(token)}/posts`, {
+            const response = await fetch(new URL(`/api/public/studios/${encodeURIComponent(token)}/posts`, apiOrigin), {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ guestId, authorName: authorName.trim(), kind, text: text.trim() })
@@ -216,7 +221,7 @@ function StudioPage() {
             if (!response.ok) throw new Error((await response.json().catch(() => null) as { error?: string } | null)?.error ?? copy.postFailed)
             localStorage.setItem(GUEST_NAME_KEY, authorName.trim())
             setText('')
-            const next = await loadStudio(token)
+            const next = await loadStudio(token, apiOrigin)
             setData(next)
         } catch (error) {
             setPostError(error instanceof Error ? error.message : copy.postFailed)

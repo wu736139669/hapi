@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useAppContext } from '@/lib/app-context'
@@ -7,6 +7,7 @@ import { safeCopyToClipboard } from '@/lib/clipboard'
 import { useTranslation } from '@/lib/use-translation'
 import { LoadingState } from '@/components/LoadingState'
 import type { StudioPost } from '@/types/api'
+import { buildStudioShareUrl } from '@/studio/studioUrl'
 
 function SuggestionRow(props: {
     post: StudioPost
@@ -69,11 +70,14 @@ export default function StudioOwnerPage() {
 
 function StudioOwnerRoom(props: { studioId: string }) {
     const { studioId } = props
-    const { api } = useAppContext()
+    const { api, baseUrl } = useAppContext()
     const { t } = useTranslation()
     const navigate = useNavigate()
     const queryClient = useQueryClient()
     const [copied, setCopied] = useState(false)
+    const [olderSuggestions, setOlderSuggestions] = useState<StudioPost[]>([])
+    const [suggestionCursor, setSuggestionCursor] = useState<{ beforeAt: number; beforeId: string } | null>(null)
+    const [loadingOlderSuggestions, setLoadingOlderSuggestions] = useState(false)
 
     const query = useQuery({
         queryKey: queryKeys.studio(studioId),
@@ -81,7 +85,7 @@ function StudioOwnerRoom(props: { studioId: string }) {
         refetchInterval: 2_000
     })
     const room = query.data?.room
-    const posts = query.data?.posts ?? []
+    const posts = [...(query.data?.posts ?? []), ...olderSuggestions]
     const suggestions = useMemo(
         () => posts.filter((post) => post.roomId === room?.id && post.kind === 'suggestion'),
         [posts, room?.id]
@@ -90,7 +94,27 @@ function StudioOwnerRoom(props: { studioId: string }) {
         () => posts.filter((post) => post.roomId === room?.id && post.kind === 'discussion'),
         [posts, room?.id]
     )
-    const shareUrl = room ? `${window.location.origin}/studio/${room.shareToken}` : ''
+    const shareUrl = room ? buildStudioShareUrl(window.location.origin, room.shareToken, baseUrl, import.meta.env.BASE_URL) : ''
+
+    const loadOlderSuggestions = async () => {
+        if (!suggestionCursor || loadingOlderSuggestions) return
+        setLoadingOlderSuggestions(true)
+        try {
+            const page = await api.getStudioSuggestions(studioId, suggestionCursor)
+            setOlderSuggestions((current) => [...current, ...page.items])
+            setSuggestionCursor(page.nextCursor)
+        } finally {
+            setLoadingOlderSuggestions(false)
+        }
+    }
+
+    const suggestionCursorKey = query.data?.nextSuggestionCursor
+        ? `${query.data.nextSuggestionCursor.beforeAt}:${query.data.nextSuggestionCursor.beforeId}`
+        : ''
+    useEffect(() => {
+        setSuggestionCursor(query.data?.nextSuggestionCursor ?? null)
+        setOlderSuggestions([])
+    }, [suggestionCursorKey])
 
     const refresh = () => queryClient.invalidateQueries({ queryKey: queryKeys.studio(studioId) })
     const updateMutation = useMutation({
@@ -102,8 +126,15 @@ function StudioOwnerRoom(props: { studioId: string }) {
             api.decideStudioPost(studioId, input.postId, input),
         onSuccess: (result) => {
             if (result.post) {
-                setOlderSuggestions((current) => current.map((post) => post.id === result.post!.id ? result.post! : post))
+                setOlderSuggestions((current) => current.filter((post) => post.id !== result.post!.id))
             }
+            refresh()
+        }
+    })
+    const clearPostsMutation = useMutation({
+        mutationFn: () => api.clearStudioPosts(studioId),
+        onSuccess: () => {
+            setOlderSuggestions([])
             refresh()
         }
     })
@@ -188,6 +219,16 @@ function StudioOwnerRoom(props: { studioId: string }) {
                             >
                                 {t('studio.owner.revoke')}
                             </button>
+                            <button
+                                type="button"
+                                disabled={clearPostsMutation.isPending}
+                                onClick={() => {
+                                    if (window.confirm(t('studio.owner.clearPostsConfirm'))) clearPostsMutation.mutate()
+                                }}
+                                className="rounded-md px-3 py-1.5 text-sm text-red-500 hover:bg-red-500/10 disabled:opacity-50"
+                            >
+                                {t('studio.owner.clearPosts')}
+                            </button>
                         </div>
                     </section>
 
@@ -209,6 +250,16 @@ function StudioOwnerRoom(props: { studioId: string }) {
                                 />
                             ))}
                         </div>
+                        {suggestionCursor ? (
+                            <button
+                                type="button"
+                                disabled={loadingOlderSuggestions}
+                                onClick={() => void loadOlderSuggestions()}
+                                className="mt-2 w-full rounded-md border border-[var(--app-border)] px-3 py-2 text-sm text-[var(--app-link)] hover:bg-[var(--app-secondary-bg)] disabled:opacity-50"
+                            >
+                                {loadingOlderSuggestions ? t('studio.owner.loadingOlder') : t('studio.owner.loadOlder')}
+                            </button>
+                        ) : null}
                     </section>
 
                     <section>

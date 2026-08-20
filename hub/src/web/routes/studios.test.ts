@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
 import { Store } from '../../store'
 import type { WebAppEnv } from '../middleware/auth'
-import { createPublicStudioRoutes, createStudioRoutes } from './studios'
+import { createPublicStudioRoutes, createStudioRoutes, resetStudioPostRateLimitForTests } from './studios'
 
 function createSession(store: Store, namespace = 'default', sessionId = 'session-1') {
     store.sessions.getOrCreateSession(
@@ -30,6 +30,27 @@ function createApp(store: Store, engine: unknown) {
 }
 
 describe('studio routes', () => {
+    it('limits a room even when guests rotate their client ids', async () => {
+        resetStudioPostRateLimitForTests()
+        const store = new Store(':memory:')
+        createSession(store)
+        const room = store.studios.createOrActivateRoom('session-1', 'default', 'Room', 'contribute')
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true, sessionId: 'session-1', session: { id: 'session-1', namespace: 'default', active: true, metadata: {} } })
+        }
+        const app = createApp(store, engine)
+        const statuses: number[] = []
+        for (let index = 0; index < 61; index += 1) {
+            const response = await app.request(`/api/public/studios/${room.shareToken}/posts`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ guestId: `guest-${String(index).padStart(8, '0')}`, authorName: 'Guest', kind: 'discussion', text: `post-${index}` })
+            })
+            statuses.push(response.status)
+        }
+        expect(statuses.at(-1)).toBe(429)
+    })
+
     it('creates an isolated room and exposes a redacted public transcript', async () => {
         const store = new Store(':memory:')
         createSession(store)
@@ -47,8 +68,12 @@ describe('studio routes', () => {
             }),
             sendMessage: async () => undefined
         }
-        store.messages.addMessage('session-1', { role: 'user', content: { type: 'text', text: 'Review this' } })
+        store.messages.addMessage('session-1', { role: 'user', content: { type: 'text', text: 'Review this' } }, 'visible-user')
+        store.messages.markMessagesInvoked('session-1', ['visible-user'], Date.now())
+        store.messages.addMessage('session-1', { role: 'user', content: { type: 'text', text: 'Queued secret' } }, 'queued-user')
         store.messages.addMessage('session-1', { role: 'agent', content: { type: 'codex', data: { type: 'message', message: 'Looks good.' } } })
+        store.messages.addMessage('session-1', { role: 'agent', content: { type: 'output', data: { type: 'assistant', isMeta: true, message: { content: [{ type: 'text', text: 'Hidden meta' }] } } } })
+        store.messages.addMessage('session-1', { role: 'agent', content: { type: 'output', data: { type: 'assistant', isCompactSummary: true, message: { content: [{ type: 'text', text: 'Hidden compact summary' }] } } } })
         const app = createApp(store, engine)
 
         const created = await app.request('/api/studios', {
@@ -66,6 +91,24 @@ describe('studio routes', () => {
         expect(body.messages.map((message) => message.text)).toEqual(['Review this', 'Looks good.'])
         expect(body.room).not.toHaveProperty('shareToken')
         expect(body.room).not.toHaveProperty('sessionId')
+    })
+
+    it('pages past tool-only raw rows to retain older visible conversation', async () => {
+        const store = new Store(':memory:')
+        createSession(store)
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true, sessionId: 'session-1', session: { id: 'session-1', namespace: 'default', active: true, metadata: {} } })
+        }
+        store.messages.addMessage('session-1', { role: 'agent', content: { type: 'codex', data: { type: 'message', message: 'Older visible answer' } } })
+        for (let index = 0; index < 210; index += 1) {
+            store.messages.addMessage('session-1', { role: 'agent', content: { type: 'codex', data: { type: 'tool-call', name: 'exec', input: `${index}` } } })
+        }
+        const room = store.studios.createOrActivateRoom('session-1', 'default', 'Room', 'contribute')
+        const app = createApp(store, engine)
+
+        const response = await app.request(`/api/public/studios/${room.shareToken}`)
+        const body = await response.json() as { messages: Array<{ text: string }> }
+        expect(body.messages.map((message) => message.text)).toEqual(['Older visible answer'])
     })
 
     it('keeps guest suggestions out of the public room response', async () => {
@@ -109,6 +152,41 @@ describe('studio routes', () => {
         expect(decision.status).toBe(200)
         const publicResponse = await app.request(`/api/public/studios/${room.shareToken}`)
         expect((await publicResponse.json() as { posts: unknown[] }).posts).toHaveLength(0)
+    })
+
+    it('allows the owner to clear all room posts', async () => {
+        const store = new Store(':memory:')
+        createSession(store)
+        const room = store.studios.createOrActivateRoom('session-1', 'default', 'Room', 'contribute')
+        store.studios.createPost({ roomId: room.id, guestId: 'guest-a-12345678', authorName: 'A', kind: 'discussion', text: 'Remove me' })
+        const app = createApp(store, { resolveSessionAccess: () => ({ ok: true, sessionId: 'session-1', session: { id: 'session-1', namespace: 'default', active: true, metadata: {} } }) })
+
+        const response = await app.request(`/api/studios/${room.id}/posts`, { method: 'DELETE' })
+        expect(response.status).toBe(200)
+        expect(await response.json()).toMatchObject({ ok: true, deleted: 1 })
+        expect(store.studios.listPosts(room.id)).toHaveLength(0)
+    })
+
+    it('keeps recent discussions and all suggestions independently beyond 200 mixed posts', async () => {
+        const store = new Store(':memory:')
+        createSession(store)
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true, sessionId: 'session-1', session: { id: 'session-1', namespace: 'default', active: true, metadata: {} } })
+        }
+        const room = store.studios.createOrActivateRoom('session-1', 'default', 'Room', 'contribute')
+        store.studios.createPost({ roomId: room.id, guestId: 'guest-a-12345678', authorName: 'A', kind: 'discussion', text: 'Discussion survives', createdAt: 0 })
+        for (let index = 1; index <= 205; index += 1) {
+            store.studios.createPost({ roomId: room.id, guestId: 'guest-b-12345678', authorName: 'B', kind: 'suggestion', text: `suggestion-${index}`, createdAt: index })
+        }
+        const app = createApp(store, engine)
+
+        const publicResponse = await app.request(`/api/public/studios/${room.shareToken}`)
+        const publicBody = await publicResponse.json() as { posts: Array<{ text: string }> }
+        expect(publicBody.posts.map((post) => post.text)).toEqual(['Discussion survives'])
+
+        const ownerResponse = await app.request(`/api/studios/${room.id}`)
+        const ownerBody = await ownerResponse.json() as { posts: Array<{ kind: string }> }
+        expect(ownerBody.posts.filter((post) => post.kind === 'suggestion')).toHaveLength(200)
     })
 
     it('queues a guest suggestion and submits it only through the owner decision endpoint', async () => {
