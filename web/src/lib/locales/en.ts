@@ -1207,7 +1207,7 @@ export default {
   'studio.guest.send': 'Post',
   'studio.guest.sending': 'Posting…',
   'studio.guest.postFailed': 'Could not post',
-  'studio.guest.owner': 'Owner',
+  'studio.guest.owner': 'Host',
   'studio.guest.agent': 'Agent',
   'studio.guest.tab.conversation': 'Conversation',
   'studio.guest.tab.discussion': 'Discussion',
