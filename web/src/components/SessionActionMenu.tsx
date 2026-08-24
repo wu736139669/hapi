@@ -24,6 +24,8 @@ type SessionActionMenuProps = {
     sessionPinned?: boolean
     sessionGlobalPinned?: boolean
     onSetPinMode?: (mode: 'none' | 'project' | 'global') => void
+    sessionPersonalPinned?: boolean
+    onSetPersonalPinned?: (pinned: boolean) => void
     onExport?: () => void
     onStudio?: () => void
     onSyncCodex?: () => void
@@ -196,6 +198,8 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         sessionPinned = false,
         sessionGlobalPinned = false,
         onSetPinMode,
+        sessionPersonalPinned = false,
+        onSetPersonalPinned,
         onExport,
         onStudio,
         onSyncCodex,
@@ -232,6 +236,11 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
     const handleSetPinMode = (mode: 'none' | 'project' | 'global') => {
         onClose()
         onSetPinMode?.(mode)
+    }
+
+    const handleSetPersonalPinned = (pinned: boolean) => {
+        onClose()
+        onSetPersonalPinned?.(pinned)
     }
 
     const handleArchive = () => {
@@ -409,6 +418,18 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     <CopyIcon className="h-[18px] w-[18px] text-[var(--app-hint)]" />
                     {t('session.action.copyReference')}
                 </button>
+
+                {onSetPersonalPinned ? (
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                        onClick={() => handleSetPersonalPinned(!sessionPersonalPinned)}
+                    >
+                        <PinIcon filled={sessionPersonalPinned} className="text-[var(--app-hint)]" />
+                        {t(sessionPersonalPinned ? 'session.action.unpinPersonal' : 'session.action.pinPersonal')}
+                    </button>
+                ) : null}
 
                 {onSetPinMode ? (
                     <>

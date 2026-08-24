@@ -26,6 +26,7 @@ import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
 import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
 import { usePinActiveSessions } from '@/hooks/usePinActiveSessions'
+import { usePersonalPinnedSessions } from '@/hooks/usePersonalPinnedSessions'
 import { classifySessionAttention, sessionIsUnread } from '@/lib/sessionAttention'
 import { getSessionLastSeenAt, getSessionLastSeenSnapshot } from '@/lib/sessionLastSeen'
 import { useSessionRowTooltipIds } from '@/components/HoverTooltip'
@@ -186,7 +187,11 @@ export function getSessionDedupKey(session: SessionSummary): string | null {
     return `${session.metadata?.flavor ?? 'unknown'}:${agentId}`
 }
 
-export function deduplicateSessionsByAgentId(sessions: SessionSummary[], selectedSessionId?: string | null): SessionSummary[] {
+export function deduplicateSessionsByAgentId(
+    sessions: SessionSummary[],
+    selectedSessionId?: string | null,
+    personalPinnedSessionIds?: ReadonlySet<string>
+): SessionSummary[] {
     const byAgentId = new Map<string, SessionSummary[]>()
     const result: SessionSummary[] = []
 
@@ -211,6 +216,11 @@ export function deduplicateSessionsByAgentId(sessions: SessionSummary[], selecte
             // Among inactive duplicates, keep the selected one visible
             if (a.id === selectedSessionId) return -1
             if (b.id === selectedSessionId) return 1
+            // A client-private pin should survive deduplication without
+            // changing shared session metadata.
+            const aPersonalPinned = personalPinnedSessionIds?.has(a.id) ?? false
+            const bPersonalPinned = personalPinnedSessionIds?.has(b.id) ?? false
+            if (aPersonalPinned !== bPersonalPinned) return aPersonalPinned ? -1 : 1
             // Preserve an explicit pin when otherwise choosing by recency
             if (Boolean(a.globalPinned) !== Boolean(b.globalPinned)) return a.globalPinned ? -1 : 1
             if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1
@@ -231,15 +241,23 @@ export function isSidebarEmptySessionStub(session: SessionSummary): boolean {
     return true
 }
 
-export function shouldShowSessionInSidebar(session: SessionSummary, selectedSessionId?: string | null): boolean {
+export function shouldShowSessionInSidebar(
+    session: SessionSummary,
+    selectedSessionId?: string | null,
+    personalPinnedSessionIds?: ReadonlySet<string>
+): boolean {
     if (session.id === selectedSessionId) return true
-    if (session.active || session.pinned || session.globalPinned) return true
+    if (session.active || session.pinned || session.globalPinned || personalPinnedSessionIds?.has(session.id)) return true
     return !isSidebarEmptySessionStub(session)
 }
 
-export function prepareSidebarSessions(sessions: SessionSummary[], selectedSessionId?: string | null): SessionSummary[] {
-    return deduplicateSessionsByAgentId(sessions, selectedSessionId)
-        .filter(session => shouldShowSessionInSidebar(session, selectedSessionId))
+export function prepareSidebarSessions(
+    sessions: SessionSummary[],
+    selectedSessionId?: string | null,
+    personalPinnedSessionIds?: ReadonlySet<string>
+): SessionSummary[] {
+    return deduplicateSessionsByAgentId(sessions, selectedSessionId, personalPinnedSessionIds)
+        .filter(session => shouldShowSessionInSidebar(session, selectedSessionId, personalPinnedSessionIds))
 }
 
 // "Active sessions only" view: hide inactive sessions, but never hide the one the
@@ -900,6 +918,9 @@ function SessionItem(props: {
     selected?: boolean
     showDetailedStatus?: boolean
     inRunningSection?: boolean
+    personalPinned?: boolean
+    onSetPersonalPinned?: (pinned: boolean) => void
+    onTransferPersonalPinned?: (fromSessionId: string, toSessionId: string) => void
     projectLabel?: string
     machineLabel?: string
 }) {
@@ -914,6 +935,9 @@ function SessionItem(props: {
         selected = false,
         showDetailedStatus = false,
         inRunningSection = false,
+        personalPinned = false,
+        onSetPersonalPinned,
+        onTransferPersonalPinned,
         projectLabel,
         machineLabel
     } = props
@@ -976,6 +1000,9 @@ function SessionItem(props: {
             // resumeSession may merge the row into a freshly-spawned sessionId.
             // Follow it so the operator lands on the live session.
             if (result.sessionId && result.sessionId !== s.id) {
+                if (personalPinned) {
+                    onTransferPersonalPinned?.(s.id, result.sessionId)
+                }
                 retargetSharePendingTransfer(s.id, result.sessionId)
                 await transferComposerDraftThenNavigate(
                     s.id,
@@ -1050,6 +1077,8 @@ function SessionItem(props: {
                 sessionPinned={Boolean(s.pinned)}
                 sessionGlobalPinned={Boolean(s.globalPinned)}
                 onSetPinMode={(mode) => void handleSetPinMode(mode)}
+                sessionPersonalPinned={personalPinned}
+                onSetPersonalPinned={onSetPersonalPinned}
                 onRename={() => setRenameOpen(true)}
                 onExport={() => setExportOpen(true)}
                 onArchive={() => setArchiveOpen(true)}
@@ -1194,6 +1223,7 @@ export function SessionList(props: {
     const [showUnreadOnly, setShowUnreadOnly] = useState(false)
     const { pinInProgressSessions } = usePinInProgressSessions()
     const { pinActiveSessions } = usePinActiveSessions()
+    const { personalPinnedSessionIds, setPersonalPinned, transferPersonalPinned } = usePersonalPinnedSessions()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
     const [searchQuery, setSearchQuery] = useState('')
@@ -1224,12 +1254,12 @@ export function SessionList(props: {
 
     const allSessions = useMemo(
         () => {
-            const prepared = prepareSidebarSessions(props.sessions, selectedSessionId)
+            const prepared = prepareSidebarSessions(props.sessions, selectedSessionId, personalPinnedSessionIds)
             return showActiveSessionsOnly
                 ? filterActiveSessionsOnly(prepared, selectedSessionId)
                 : prepared
         },
-        [props.sessions, selectedSessionId, showActiveSessionsOnly]
+        [props.sessions, selectedSessionId, showActiveSessionsOnly, personalPinnedSessionIds]
     )
     const sessionActivityDates = useMemo(
         () => new Set(allSessions.map(session => formatDateValue(new Date(session.updatedAt)))),
@@ -1300,9 +1330,14 @@ export function SessionList(props: {
     )
     const globalPinnedSessions = useMemo(() => {
         return machineFilteredSessions
-            .filter((session) => Boolean(session.globalPinned))
+            .filter((session) => Boolean(session.globalPinned) && !personalPinnedSessionIds.has(session.id))
             .sort((a, b) => b.updatedAt - a.updatedAt)
-    }, [machineFilteredSessions])
+    }, [machineFilteredSessions, personalPinnedSessionIds])
+    const personalPinnedSessions = useMemo(() => {
+        return machineFilteredSessions
+            .filter((session) => personalPinnedSessionIds.has(session.id))
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+    }, [machineFilteredSessions, personalPinnedSessionIds])
     const runningSessions = useMemo(() => {
         const buckets: Record<'working' | 'pending' | 'active', SessionSummary[]> = {
             working: [],
@@ -1313,7 +1348,7 @@ export function SessionList(props: {
             return buckets
         }
         for (const session of machineFilteredSessions) {
-            if (session.globalPinned || session.pinned) {
+            if (session.globalPinned || session.pinned || personalPinnedSessionIds.has(session.id)) {
                 continue
             }
             if (!session.active) {
@@ -1332,14 +1367,14 @@ export function SessionList(props: {
             buckets[key].sort(byRecent)
         }
         return buckets
-    }, [machineFilteredSessions, pinActiveSessions, pinInProgressSessions])
+    }, [machineFilteredSessions, pinActiveSessions, pinInProgressSessions, personalPinnedSessionIds])
     const runningSessionTotal = runningSessions.working.length
         + runningSessions.pending.length
         + runningSessions.active.length
     const groups = useMemo(
         () => groupSessionsByDirectory(
             machineFilteredSessions.filter((session) => {
-                if (session.globalPinned) return false
+                if (session.globalPinned || personalPinnedSessionIds.has(session.id)) return false
                 if (!session.pinned && (
                     (pinActiveSessions && session.active)
                     || (pinInProgressSessions && isPinnedInProgressSession(session))
@@ -1347,12 +1382,13 @@ export function SessionList(props: {
                 return true
             })
         ),
-        [machineFilteredSessions, pinActiveSessions, pinInProgressSessions]
+        [machineFilteredSessions, pinActiveSessions, pinInProgressSessions, personalPinnedSessionIds]
     )
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
     )
     const [runningSectionCollapsed, setRunningSectionCollapsed] = useState(false)
+    const [personalSectionCollapsed, setPersonalSectionCollapsed] = useState(false)
     const [pinnedSectionCollapsed, setPinnedSectionCollapsed] = useState(false)
     const autoExpandedSelectedSessionKeyRef = useRef<string | null>(null)
     const isGroupCollapsed = (group: SessionGroup): boolean => {
@@ -1506,6 +1542,8 @@ export function SessionList(props: {
                                     titleSuggestionAvailable={titleSuggestionAvailable}
                                     selected={s.id === selectedSessionId}
                                     showDetailedStatus={showDetailedStatus}
+                                    onSetPersonalPinned={(pinned) => setPersonalPinned(s.id, pinned)}
+                                    onTransferPersonalPinned={transferPersonalPinned}
                                 />
                             </div>
                         ))}
@@ -1821,9 +1859,64 @@ export function SessionList(props: {
                     />
                 ) : null}
 
-                {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null || showUnreadOnly) && groups.length === 0 && runningSessionTotal === 0 && globalPinnedSessions.length === 0 ? (
+                {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null || showUnreadOnly) && groups.length === 0 && runningSessionTotal === 0 && personalPinnedSessions.length === 0 && globalPinnedSessions.length === 0 ? (
                     <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
                         {t('sessions.search.noResults')}
+                    </div>
+                ) : null}
+
+                {personalPinnedSessions.length > 0 ? (
+                    <div key="personal-pinned-section">
+                        <div
+                            className="group/personal-pinned flex min-w-0 w-full select-none cursor-pointer items-center gap-2 rounded-lg py-1.5 pl-2 pr-2 transition-colors hover:bg-[var(--app-secondary-bg)]"
+                            role="button"
+                            tabIndex={0}
+                            aria-expanded={!personalSectionCollapsed || isFiltering}
+                            onClick={() => setPersonalSectionCollapsed((value) => !value)}
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault()
+                                    setPersonalSectionCollapsed((value) => !value)
+                                }
+                            }}
+                            title={t('sessions.personalPinnedSection')}
+                        >
+                            <ChevronIcon className="h-3.5 w-3.5 text-[var(--app-hint)] shrink-0" collapsed={personalSectionCollapsed && !isFiltering} />
+                            <span className="inline-flex min-w-0 items-center gap-1">
+                                <span className="min-w-0 truncate text-sm font-medium">
+                                    {t('sessions.personalPinnedSection')}
+                                </span>
+                                <PinnedSectionIcon className="h-3.5 w-3.5 shrink-0 -translate-y-px text-[var(--app-hint)]" />
+                            </span>
+                            <span className="min-w-0 flex-1" aria-hidden="true" />
+                            <span className="shrink-0 text-[11px] tabular-nums text-[var(--app-hint)]">
+                                ({personalPinnedSessions.length})
+                            </span>
+                        </div>
+                        <div className="collapsible-panel" data-open={(!personalSectionCollapsed || isFiltering) || undefined}>
+                            <div className="collapsible-inner">
+                                <div className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
+                                    {personalPinnedSessions.map((s) => (
+                                        <SessionItem
+                                            key={s.id}
+                                            session={s}
+                                            onSelect={props.onSelect}
+                                            showPath={false}
+                                            api={api}
+                                            titleSuggestionAvailable={titleSuggestionAvailable}
+                                            selected={s.id === selectedSessionId}
+                                            showDetailedStatus={showDetailedStatus}
+                                            inRunningSection
+                                            personalPinned
+                                            onSetPersonalPinned={(pinned) => setPersonalPinned(s.id, pinned)}
+                                            onTransferPersonalPinned={transferPersonalPinned}
+                                            projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
+                                            machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 ) : null}
 
@@ -1869,6 +1962,8 @@ export function SessionList(props: {
                                             selected={s.id === selectedSessionId}
                                             showDetailedStatus={showDetailedStatus}
                                             inRunningSection
+                                            onSetPersonalPinned={(pinned) => setPersonalPinned(s.id, pinned)}
+                                            onTransferPersonalPinned={transferPersonalPinned}
                                             projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
                                         />
@@ -1931,6 +2026,8 @@ export function SessionList(props: {
                                                     selected={s.id === selectedSessionId}
                                                     showDetailedStatus={showDetailedStatus}
                                                     inRunningSection
+                                                    onSetPersonalPinned={(pinned) => setPersonalPinned(s.id, pinned)}
+                                                    onTransferPersonalPinned={transferPersonalPinned}
                                                     projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                                     machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
                                                 />
