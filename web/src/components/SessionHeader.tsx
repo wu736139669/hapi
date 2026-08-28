@@ -186,6 +186,9 @@ export function SessionHeader(props: {
     const piSessionId = session.metadata?.flavor === 'pi'
         ? session.metadata.piSessionId?.trim() || null
         : null
+    const dshSessionId = session.metadata?.flavor === 'dsh'
+        ? session.metadata.dshSessionId?.trim() || null
+        : null
     const { machines } = useMachines(api, Boolean(api))
     const machineLabelsById = useMachineLabels(machines)
     const machineLabel = useMemo(
@@ -223,6 +226,7 @@ export function SessionHeader(props: {
     const [deleteOpen, setDeleteOpen] = useState(false)
     const [isSyncingCodex, setIsSyncingCodex] = useState(false)
     const [isSyncingPi, setIsSyncingPi] = useState(false)
+    const [isSyncingDsh, setIsSyncingDsh] = useState(false)
     const [isCreatingStudio, setIsCreatingStudio] = useState(false)
 
     const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, setPinMode, deleteSession, isPending } = useSessionActions(
@@ -352,6 +356,52 @@ export function SessionHeader(props: {
             })
         } finally {
             setIsSyncingPi(false)
+        }
+    }
+
+    const handleSyncDsh = async () => {
+        if (!api || !dshSessionId || session.active || isSyncingDsh) return
+
+        setIsSyncingDsh(true)
+        try {
+            const result = await api.importDshSessions({
+                sessionIds: [dshSessionId],
+                cwd: typeof session.metadata?.path === 'string' ? session.metadata.path : undefined,
+                machineId: typeof session.metadata?.machineId === 'string' ? session.metadata.machineId : undefined
+            })
+            const imported = result.results.find((item) => item.dshSessionId === dshSessionId)
+            if (imported?.error) {
+                const message = imported.error.code === 'transcript_diverged'
+                    ? t('dshImport.error.diverged')
+                    : imported.error.code === 'session_active'
+                        ? t('dshImport.error.active')
+                        : imported.error.message
+                throw new Error(message)
+            }
+            if (!imported) throw new Error(result.error || t('dshImport.failed.body'))
+
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: queryKeys.session(session.id) }),
+                queryClient.invalidateQueries({ queryKey: queryKeys.messages(session.id) }),
+                queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
+            ])
+            addToast({
+                title: t('dshImport.manual.success.title'),
+                body: (imported.appended ?? 0) === 0
+                    ? t('dshImport.manual.success.noNewMessages')
+                    : t('dshImport.manual.success.body', { n: imported.appended ?? 0 }),
+                sessionId: session.id,
+                url: `/sessions/${session.id}`
+            })
+        } catch (error) {
+            addToast({
+                title: t('dshImport.manual.failed.title'),
+                body: error instanceof Error ? error.message : t('dshImport.failed.body'),
+                sessionId: session.id,
+                url: `/sessions/${session.id}`
+            })
+        } finally {
+            setIsSyncingDsh(false)
         }
     }
 
@@ -544,6 +594,7 @@ export function SessionHeader(props: {
                 onStudio={api ? () => void handleCreateStudio() : undefined}
                 onSyncCodex={api && codexSessionId ? handleSyncCodex : undefined}
                 onSyncPi={api && piSessionId && !session.active ? handleSyncPi : undefined}
+                onSyncDsh={api && dshSessionId && !session.active ? handleSyncDsh : undefined}
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={props.canReopen === false ? undefined : handleReopen}
                 reopenDisabledReason={props.reopenDisabledReason}

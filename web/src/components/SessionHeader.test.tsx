@@ -181,6 +181,83 @@ describe('SessionHeader', () => {
         expect(screen.queryByRole('menuitem', { name: /Sync Pi history/ })).toBeNull()
     })
 
+    it('manually syncs an inactive DSH session through its owning machine', async () => {
+        const importDshSessions = vi.fn().mockResolvedValue({
+            success: true,
+            results: [{ dshSessionId: 'dsh-native-1', hapiSessionId: 'session-1', action: 'updated', appended: 3 }]
+        })
+        const api = {
+            getMachines: vi.fn().mockResolvedValue({ machines: [] }),
+            importDshSessions
+        } as unknown as import('@/api/client').ApiClient
+        const queryClient = new QueryClient()
+        const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined)
+        render(
+            <QueryClientProvider client={queryClient}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader
+                            session={baseSession({
+                                active: false,
+                                metadata: {
+                                    flavor: 'dsh',
+                                    path: '/repo',
+                                    host: 'machine',
+                                    machineId: 'machine-1',
+                                    dshSessionId: 'dsh-native-1'
+                                }
+                            })}
+                            onBack={vi.fn()}
+                            api={api}
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: /More/ }))
+        fireEvent.click(screen.getByRole('menuitem', { name: /Sync DSH history/ }))
+
+        await waitFor(() => expect(importDshSessions).toHaveBeenCalledWith({
+            sessionIds: ['dsh-native-1'],
+            cwd: '/repo',
+            machineId: 'machine-1'
+        }))
+        expect(invalidateQueries).toHaveBeenCalledTimes(3)
+    })
+
+    it('does not offer manual DSH sync while the HAPI session is active', () => {
+        const api = {
+            getMachines: vi.fn().mockResolvedValue({ machines: [] }),
+            importDshSessions: vi.fn()
+        } as unknown as import('@/api/client').ApiClient
+        render(
+            <QueryClientProvider client={new QueryClient()}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader
+                            session={baseSession({
+                                active: true,
+                                metadata: {
+                                    flavor: 'dsh',
+                                    path: '/repo',
+                                    host: 'machine',
+                                    machineId: 'machine-1',
+                                    dshSessionId: 'dsh-native-1'
+                                }
+                            })}
+                            onBack={vi.fn()}
+                            api={api}
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: /More/ }))
+        expect(screen.queryByRole('menuitem', { name: /Sync DSH history/ })).toBeNull()
+    })
+
     it('renders and toggles the agent terminal control', () => {
         const onToggleTerminal = vi.fn()
         render(

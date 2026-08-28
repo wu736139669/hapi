@@ -174,6 +174,10 @@ export default {
   'dshImport.failed.partial': '{failed} 个会话导入失败：{reason}',
   'dshImport.error.diverged': 'DSH 事件历史在上次导入后发生变化，请先检查会话再继续。',
   'dshImport.error.active': '请先停止正在运行的 HAPI DSH 会话，再导入新增的原生历史。',
+  'dshImport.manual.success.title': 'DSH 历史同步完成',
+  'dshImport.manual.success.body': '已同步 {n} 条新的 DSH 历史记录。',
+  'dshImport.manual.success.noNewMessages': 'DSH 历史已经是最新状态。',
+  'dshImport.manual.failed.title': 'DSH 历史同步失败',
   // 中文注释：以下文案支撑导入弹窗的多选列表、加载态，以及右上角重启 Codex 客户端按钮提示。
   'codexSync.confirm.selectAll': '全选',
   'codexSync.confirm.clearAll': '全取消',
@@ -294,6 +298,7 @@ export default {
   'session.action.export': '导出对话',
   'session.action.syncCodex': '同步 Codex',
   'session.action.syncPi': '同步 Pi 历史',
+  'session.action.syncDsh': '同步 DSH 历史',
   'session.action.archive': '归档',
   'session.action.reopen': '重新打开',
   'session.action.reopenCursorChecking': '正在检查记录设备上的 Cursor 聊天数据是否仍然可用。',

@@ -174,6 +174,10 @@ export default {
   'dshImport.failed.partial': '{failed} sessions failed: {reason}',
   'dshImport.error.diverged': 'The DSH event history changed after the previous import. Review the session before continuing.',
   'dshImport.error.active': 'Stop the active HAPI DSH session before importing newer native history.',
+  'dshImport.manual.success.title': 'DSH history sync complete',
+  'dshImport.manual.success.body': 'Synced {n} new DSH history items.',
+  'dshImport.manual.success.noNewMessages': 'DSH history is already up to date.',
+  'dshImport.manual.failed.title': 'DSH history sync failed',
   // 中文注释：以下文案支撑导入弹窗的多选列表、加载态，以及右上角重启 Codex 客户端按钮提示。
   'codexSync.confirm.selectAll': 'Select all',
   'codexSync.confirm.clearAll': 'Clear all',
@@ -294,6 +298,7 @@ export default {
   'session.action.export': 'Export conversation',
   'session.action.syncCodex': 'Sync Codex',
   'session.action.syncPi': 'Sync Pi history',
+  'session.action.syncDsh': 'Sync DSH history',
   'session.action.archive': 'Archive',
   'session.action.reopen': 'Reopen',
   'session.action.reopenCursorChecking': 'Checking whether Cursor chat data is still available on the recorded machine.',

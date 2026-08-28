@@ -268,6 +268,24 @@ describe('SessionActionMenu - Pi sync action', () => {
     })
 })
 
+describe('SessionActionMenu - DSH sync action', () => {
+    it('renders, fires, and closes Sync DSH history when a handler is provided', () => {
+        const onSyncDsh = vi.fn()
+        const onClose = vi.fn()
+        renderMenu({ onSyncDsh, onClose })
+
+        fireEvent.click(screen.getByRole('menuitem', { name: /Sync DSH history/ }))
+
+        expect(onSyncDsh).toHaveBeenCalledOnce()
+        expect(onClose).toHaveBeenCalledOnce()
+    })
+
+    it('hides Sync DSH history when no handler is provided', () => {
+        renderMenu({ onSyncDsh: undefined })
+        expect(screen.queryByRole('menuitem', { name: /Sync DSH history/ })).toBeNull()
+    })
+})
+
 describe('SessionActionMenu - Copy reference action', () => {
     it('renders the Copy reference item', () => {
         renderMenu()
