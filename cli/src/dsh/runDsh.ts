@@ -65,6 +65,15 @@ function summaryPermissionPreset(value: unknown): DshNativePermissionMode | null
         : null
 }
 
+export function shouldApplyDshPermissionPreset(
+    requested: DshPermissionMode | undefined,
+    nativeCurrent: DshNativePermissionMode | null
+): requested is DshNativePermissionMode {
+    return requested !== undefined
+        && requested !== 'default'
+        && requested !== nativeCurrent
+}
+
 function resolveRequestedModel(
     requested: string,
     models: readonly DshModelSummary[],
@@ -388,7 +397,7 @@ export async function runDsh(opts: {
             currentReasoningEffort = currentSelection.reasoningEffort ?? null
         }
 
-        if (opts.permissionMode && opts.permissionMode !== 'default') {
+        if (shouldApplyDshPermissionPreset(opts.permissionMode, projectedPermission)) {
             await client.setPermissionPreset(nativeSessionId, opts.permissionMode)
             currentPermissionMode = opts.permissionMode
         }
@@ -406,7 +415,9 @@ export async function runDsh(opts: {
                     if (!targetPermissionMode) {
                         throw new Error('DeepSeek Harness default permission preset is unavailable')
                     }
-                    await client.setPermissionPreset(nativeSessionId!, targetPermissionMode)
+                    if (targetPermissionMode !== currentPermissionMode) {
+                        await client.setPermissionPreset(nativeSessionId!, targetPermissionMode)
+                    }
                     currentPermissionMode = targetPermissionMode
                 }
                 if (config.model !== undefined || config.modelReasoningEffort !== undefined) {
