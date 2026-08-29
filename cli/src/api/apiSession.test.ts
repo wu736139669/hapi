@@ -290,6 +290,41 @@ describe('ApiSessionClient lazy materialization', () => {
         client.close()
     })
 
+    it('keeps an api-error retry event when the pending droppable queue overflows', async () => {
+        socketHarness.sockets.length = 0
+        const pendingMaterialization = deferred<Session>()
+        const client = new ApiSessionClient('token', createSession(), {
+            materialize: async () => await pendingMaterialization.promise
+        })
+
+        client.notifyUserActivity()
+        client.sendSessionEvent({
+            type: 'api-error',
+            retryAttempt: 5,
+            maxRetries: 5,
+            error: { message: 'Too many requests', status: 429 },
+            retryScheduled: true
+        })
+        for (let index = 0; index < 300; index += 1) {
+            client.sendSessionEvent({ type: 'ready' })
+        }
+
+        pendingMaterialization.resolve(createSession({ namespace: 'default' }))
+        expect(await client.materialize()).toBe(true)
+
+        const events = socketHarness.sockets[0]?.emitted
+            .filter((entry) => entry.event === 'message')
+            .map((entry) => (entry.args[0] as { message: { content: { data: { type: string } } } }).message.content.data)
+        expect(events).toContainEqual({
+            type: 'api-error',
+            retryAttempt: 5,
+            maxRetries: 5,
+            error: { message: 'Too many requests', status: 429 },
+            retryScheduled: true
+        })
+        client.close()
+    })
+
     it('drains in-flight materialization and initial socket delivery before closing', async () => {
         socketHarness.sockets.length = 0
         const pendingMaterialization = deferred<Session>()

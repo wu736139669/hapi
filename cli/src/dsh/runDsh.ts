@@ -38,6 +38,22 @@ type PermissionResponseMessage = {
     id: string
     approved: boolean
     decision?: 'approved' | 'approved_for_session' | 'denied' | 'abort'
+    answers?: Record<string, string[]> | Record<string, { answers: string[] }>
+}
+
+export type DshQuestion = {
+    id: string
+    question: string
+    header?: string
+    detail?: string
+    options?: Array<{ label: string; description?: string }>
+    multiSelect?: boolean
+}
+
+type PendingQuestion = {
+    rpcId: string
+    questions: DshQuestion[]
+    createdAt: number
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -63,6 +79,110 @@ function summaryPermissionPreset(value: unknown): DshNativePermissionMode | null
     return preset === 'read-only' || preset === 'workspace-write' || preset === 'danger-full-access'
         ? preset
         : null
+}
+
+export function parseDshQuestions(value: unknown): DshQuestion[] {
+    if (!Array.isArray(value)) return []
+    return value.flatMap((raw) => {
+        if (!isRecord(raw) || typeof raw.id !== 'string' || typeof raw.question !== 'string') return []
+        const options = Array.isArray(raw.options)
+            ? raw.options.flatMap((option) => {
+                if (!isRecord(option) || typeof option.label !== 'string') return []
+                return [{
+                    label: option.label,
+                    ...(typeof option.description === 'string' ? { description: option.description } : {})
+                }]
+            })
+            : undefined
+        return [{
+            id: raw.id,
+            question: raw.question,
+            ...(typeof raw.header === 'string' ? { header: raw.header } : {}),
+            ...(typeof raw.detail === 'string' ? { detail: raw.detail } : {}),
+            ...(options ? { options } : {}),
+            ...(typeof raw.multiSelect === 'boolean'
+                ? { multiSelect: raw.multiSelect }
+                : typeof raw.multi_select === 'boolean'
+                    ? { multiSelect: raw.multi_select }
+                    : {})
+        }]
+    })
+}
+
+function parseDshToolArguments(value: unknown): unknown {
+    if (typeof value !== 'string') return value
+    try {
+        return JSON.parse(value) as unknown
+    } catch {
+        return null
+    }
+}
+
+export function questionFingerprint(questions: DshQuestion[]): string {
+    return JSON.stringify(questions.map((question) => ({
+        id: question.id,
+        question: question.question,
+        header: question.header ?? null,
+        detail: question.detail ?? null,
+        options: question.options ?? [],
+        multiSelect: question.multiSelect === true
+    })))
+}
+
+export function toHapiQuestionInput(questions: DshQuestion[]): Record<string, unknown> {
+    return {
+        questions: questions.map((question) => ({
+            id: question.id,
+            question: question.question,
+            ...(question.header ? { header: question.header } : {}),
+            ...(question.detail ? { detail: question.detail } : {}),
+            ...(question.options ? {
+                options: question.options.map((option) => ({
+                    label: option.label,
+                    ...(option.description ? { description: option.description } : {})
+                }))
+            } : {}),
+            ...(question.multiSelect === true ? { multiSelect: true } : {})
+        }))
+    }
+}
+
+export function dshAnswerFromHapi(
+    questions: DshQuestion[],
+    answers: PermissionResponseMessage['answers']
+): { answers: Array<{ id: string; selected: string[]; custom?: string }> } {
+    return {
+        answers: questions.map((question, index) => {
+            const rawValue = answers?.[question.id] ?? answers?.[String(index)] ?? []
+            const raw = Array.isArray(rawValue) ? rawValue : rawValue.answers
+            const allowed = new Set(question.options?.map((option) => option.label) ?? [])
+            const selected = raw.filter((value) => allowed.has(value))
+            const customValues = raw.filter((value) => !allowed.has(value) && value.trim().length > 0)
+            return {
+                id: question.id,
+                selected,
+                ...(customValues.length > 0 ? { custom: customValues.join(', ') } : {})
+            }
+        })
+    }
+}
+
+export function resolveDshQuestionRequest(
+    questions: DshQuestion[],
+    rpcId: string,
+    questionToolCalls: Map<string, string>,
+    resumableRequests: Map<string, { id: string; createdAt: number }>,
+    now: number
+): { requestId: string; createdAt: number } {
+    const fingerprint = questionFingerprint(questions)
+    const toolCallId = questionToolCalls.get(fingerprint)
+    const resumed = resumableRequests.get(fingerprint)
+    questionToolCalls.delete(fingerprint)
+    resumableRequests.delete(fingerprint)
+    return {
+        requestId: resumed?.id ?? toolCallId ?? rpcId,
+        createdAt: resumed?.createdAt ?? now
+    }
 }
 
 export function shouldApplyDshPermissionPreset(
@@ -134,8 +254,21 @@ export async function runDsh(opts: {
     const loopAbort = new AbortController()
     const queue = new MessageQueue2<DshQueueMode>((mode) => hashObject(mode))
     const pendingTurns = new Map<string, PendingTurn>()
+    const pendingQuestions = new Map<string, PendingQuestion>()
+    const questionToolCalls = new Map<string, string>()
+    const resumableQuestionRequests = new Map<string, { id: string; createdAt: number }>()
     const ownedRpcIds = new Set<string>()
     const pendingApprovals = new Map<string, { rpcId: string; toolName: string; arguments: unknown; createdAt: number }>()
+
+    for (const [id, request] of Object.entries(sessionInfo.agentState?.requests ?? {})) {
+        if (request.tool !== 'ask_user_question' || !isRecord(request.arguments)) continue
+        const questions = parseDshQuestions(request.arguments.questions)
+        if (questions.length === 0) continue
+        resumableQuestionRequests.set(questionFingerprint(questions), {
+            id,
+            createdAt: request.createdAt ?? Date.now()
+        })
+    }
 
     let nativeSessionId = opts.resumeSessionId ?? sessionInfo.metadata?.dshSessionId ?? null
     let thinking = false
@@ -179,6 +312,34 @@ export async function runDsh(opts: {
         pendingApprovals.clear()
     }
 
+    const finishPendingQuestions = (reason: string) => {
+        const now = Date.now()
+        for (const pending of pendingQuestions.values()) {
+            void client.cancelResponse(pending.rpcId).catch((error) => {
+                logger.debug('[dsh] Failed to cancel pending user question:', error)
+            })
+        }
+        session.updateAgentState((state) => {
+            const completedRequests = { ...state.completedRequests }
+            const requests = { ...state.requests }
+            for (const [id, pending] of pendingQuestions) {
+                delete requests[id]
+                completedRequests[id] = {
+                    tool: 'ask_user_question',
+                    arguments: toHapiQuestionInput(pending.questions),
+                    createdAt: pending.createdAt,
+                    completedAt: now,
+                    status: 'canceled',
+                    reason,
+                    decision: 'abort'
+                }
+            }
+            return { ...state, requests, completedRequests }
+        })
+        pendingQuestions.clear()
+        questionToolCalls.clear()
+    }
+
     const failPendingTurns = (error: Error) => {
         for (const pending of pendingTurns.values()) pending.reject(error)
         pendingTurns.clear()
@@ -198,6 +359,7 @@ export async function runDsh(opts: {
             muxAbort.abort()
             failPendingTurns(new Error('DeepSeek Harness session stopped'))
             finishPendingApprovals('Session stopped')
+            finishPendingQuestions('Session stopped')
             if (thinking && nativeSessionId) {
                 try {
                     await client.cancel(nativeSessionId)
@@ -268,18 +430,82 @@ export async function runDsh(opts: {
         }
 
         if (frame.type === 'question/requested') {
-            session.sendSessionEvent({
-                type: 'error',
-                message: 'DeepSeek Harness requested structured user input, which this HAPI client cannot answer yet.'
-            })
-            void client.cancelResponse(request.rpcId).catch((error) => {
-                logger.debug('[dsh] Failed to cancel unsupported user question:', error)
-            })
+            const questions = parseDshQuestions(frame.questions)
+            if (questions.length === 0) {
+                session.sendSessionEvent({ type: 'error', message: 'DeepSeek Harness sent an invalid user question.' })
+                void client.cancelResponse(request.rpcId).catch((error) => {
+                    logger.debug('[dsh] Failed to cancel invalid user question:', error)
+                })
+                return
+            }
+            const { requestId, createdAt } = resolveDshQuestionRequest(
+                questions,
+                request.rpcId,
+                questionToolCalls,
+                resumableQuestionRequests,
+                Date.now()
+            )
+            thinking = false
+            session.updateAgentState((state) => ({
+                ...state,
+                requests: {
+                    ...state.requests,
+                    [requestId]: {
+                        tool: 'ask_user_question',
+                        arguments: toHapiQuestionInput(questions),
+                        createdAt
+                    }
+                }
+            }))
+            pendingQuestions.set(requestId, { rpcId: request.rpcId, questions, createdAt })
+            syncKeepAlive()
+            return
+        }
+
+        if (frame.type === 'question/resolved') {
+            const questionRpcId = typeof frame.questionRpcId === 'string' ? frame.questionRpcId : null
+            if (questionRpcId) {
+                const match = Array.from(pendingQuestions.entries())
+                    .find(([, pending]) => pending.rpcId === questionRpcId)
+                if (match) {
+                    const [requestId, pending] = match
+                    pendingQuestions.delete(requestId)
+                    thinking = true
+                    session.updateAgentState((state) => {
+                        const { [requestId]: _, ...requests } = state.requests ?? {}
+                        return {
+                            ...state,
+                            requests,
+                            completedRequests: {
+                                ...state.completedRequests,
+                                [requestId]: {
+                                    tool: 'ask_user_question',
+                                    arguments: toHapiQuestionInput(pending.questions),
+                                    createdAt: pending.createdAt,
+                                    completedAt: Date.now(),
+                                    status: frame.outcome === 'answered' ? 'approved' : 'canceled',
+                                    decision: frame.outcome === 'answered' ? 'approved' : 'abort'
+                                }
+                            }
+                        }
+                    })
+                    syncKeepAlive()
+                }
+            }
             return
         }
 
         if (frame.type !== 'session/event' || !frame.event) return
         const event = frame.event
+        if (event.type === 'tool/call' && isRecord(event.data)
+            && event.data.name === 'ask_user_question'
+            && typeof event.data.callId === 'string') {
+            const input = parseDshToolArguments(event.data.arguments)
+            const questions = isRecord(input) ? parseDshQuestions(input.questions) : []
+            if (questions.length > 0) {
+                questionToolCalls.set(questionFingerprint(questions), event.data.callId)
+            }
+        }
         latestEventSeq = Math.max(latestEventSeq, event.seq)
         const sourceRpcId = eventSourceRpcId(event)
         if (sourceRpcId) {
@@ -299,6 +525,8 @@ export async function runDsh(opts: {
         } else if (event.type === 'turn/end') {
             nativeTurnStateObserved = true
             thinking = false
+            questionToolCalls.clear()
+            resumableQuestionRequests.clear()
             session.updateMetadata((metadata) => ({
                 ...metadata,
                 dshHistoryLastEventSeq: latestEventSeq,
@@ -328,6 +556,9 @@ export async function runDsh(opts: {
         for (const message of converted.messages) {
             const body = convertAgentMessage(message, converted.model ?? currentModel ?? undefined)
             if (body) session.sendAgentMessage(body)
+        }
+        for (const eventData of converted.events ?? []) {
+            session.sendSessionEvent(eventData)
         }
         syncKeepAlive()
     }
@@ -451,6 +682,61 @@ export async function runDsh(opts: {
         session.rpcHandlerManager.registerHandler<PermissionResponseMessage, void>(
             RPC_METHODS.Permission,
             async (response) => {
+                const question = pendingQuestions.get(response.id)
+                if (question) {
+                    pendingQuestions.delete(response.id)
+                    const answers = response.answers
+                    thinking = true
+                    syncKeepAlive()
+                    try {
+                        await client.respond(question.rpcId, {
+                            sessionId: nativeSessionId,
+                            answer: dshAnswerFromHapi(question.questions, answers)
+                        })
+                        session.updateAgentState((state) => {
+                            const { [response.id]: _, ...requests } = state.requests ?? {}
+                            return {
+                                ...state,
+                                requests,
+                                completedRequests: {
+                                    ...state.completedRequests,
+                                    [response.id]: {
+                                        tool: 'ask_user_question',
+                                        arguments: toHapiQuestionInput(question.questions),
+                                        createdAt: question.createdAt,
+                                        completedAt: Date.now(),
+                                        status: 'approved',
+                                        decision: 'approved',
+                                        answers
+                                    }
+                                }
+                            }
+                        })
+                    } catch (error) {
+                        session.updateAgentState((state) => {
+                            const { [response.id]: _, ...requests } = state.requests ?? {}
+                            return {
+                                ...state,
+                                requests,
+                                completedRequests: {
+                                    ...state.completedRequests,
+                                    [response.id]: {
+                                        tool: 'ask_user_question',
+                                        arguments: toHapiQuestionInput(question.questions),
+                                        createdAt: question.createdAt,
+                                        completedAt: Date.now(),
+                                        status: 'canceled',
+                                        reason: error instanceof Error ? error.message : String(error),
+                                        decision: 'abort',
+                                        answers
+                                    }
+                                }
+                            }
+                        })
+                        throw error
+                    }
+                    return
+                }
                 const pending = pendingApprovals.get(response.id)
                 if (!pending) return
                 const outcome = response.approved ? 'allowed-once' : 'rejected'

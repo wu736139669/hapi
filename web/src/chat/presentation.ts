@@ -189,7 +189,19 @@ function apiErrorDetail(error: unknown): string | null {
 
 export function getEventPresentation(event: AgentEvent): EventPresentation {
     if (event.type === 'api-error') {
-        const { retryAttempt, maxRetries } = event as { retryAttempt: number; maxRetries: number }
+        const { retryAttempt, maxRetries, retryScheduled } = event as {
+            retryAttempt: number
+            maxRetries: number
+            retryScheduled?: boolean
+        }
+        if (retryScheduled === true) {
+            const detail = apiErrorDetail((event as { error?: unknown }).error)
+            const progress = maxRetries > 0 ? ` (${retryAttempt}/${maxRetries})` : '...'
+            return {
+                icon: '⏳',
+                text: `API error: Retrying${progress}${detail ? ` — ${detail}` : ''}`
+            }
+        }
         if (maxRetries > 0 && retryAttempt >= maxRetries) {
             return { icon: '⚠️', text: 'API error: Max retries reached' }
         }

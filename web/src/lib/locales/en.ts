@@ -606,6 +606,7 @@ export default {
   'tool.semanticTitle.query': 'Query',
   'tool.questionsAnswers': 'Questions & Answers',
   'tool.submit': 'Submit',
+  'tool.skipQuestion': 'Skip question',
   'tool.submitting': 'Submitting…',
   'tool.prev': '← Prev',
   'tool.next': 'Next →',

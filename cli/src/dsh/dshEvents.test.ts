@@ -68,4 +68,62 @@ describe('DeepSeek Harness event conversion', () => {
             content: { role: 'user' }
         })
     })
+
+    it('surfaces native retry failures as api-error events', () => {
+        const converted = convertDshEvent(event('llm/retry', {
+            retryId: 'retry-1',
+            retry: 2,
+            maxRetries: 3,
+            failure: { code: 'RATE_LIMIT', status: 429, message: 'Too many requests' }
+        }))
+
+        expect(converted).toEqual({
+            messages: [],
+            events: [{
+                type: 'api-error',
+                retryAttempt: 2,
+                maxRetries: 3,
+                error: {
+                    code: 'RATE_LIMIT',
+                    status: 429,
+                    message: 'Too many requests (RATE_LIMIT, HTTP 429)'
+                },
+                retryScheduled: true
+            }]
+        })
+    })
+
+    it('surfaces terminal turn errors instead of silently ending the turn', () => {
+        const converted = convertDshEvent(event('turn/end', {
+            turn: 1,
+            reason: { kind: 'error', error: { code: 'RATE_LIMIT', status: 429, message: 'Rate limited' } }
+        }))
+
+        expect(converted.messages).toEqual([{
+            type: 'error',
+            message: 'Rate limited (RATE_LIMIT, HTTP 429)'
+        }])
+    })
+
+    it('imports retry events into the persisted event stream', () => {
+        const imported = convertDshHistoryEntry('session-1', {
+            event: event('llm/retry', {
+                retry: 1,
+                maxRetries: 2,
+                failure: { code: 'RATE_LIMIT', message: 'Too many requests' }
+            }, 9)
+        })
+
+        expect(imported).toMatchObject([{
+            localId: 'dsh:session-1:9:event:0',
+            eventSeq: 9,
+            content: {
+                role: 'agent',
+                content: {
+                    type: 'event',
+                    data: { type: 'api-error', retryAttempt: 1, maxRetries: 2, retryScheduled: true }
+                }
+            }
+        }])
+    })
 })

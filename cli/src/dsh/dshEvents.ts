@@ -6,6 +6,17 @@ import type { DshHistoryEntry, DshSessionEvent } from './dshWebClient'
 
 type JsonRecord = Record<string, unknown>
 
+type DshEventMessage = {
+    type: 'api-error'
+    retryAttempt: number
+    maxRetries: number
+    error: unknown
+    retryScheduled: true
+} | {
+    type: 'error'
+    message: string
+}
+
 function isRecord(value: unknown): value is JsonRecord {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -16,6 +27,17 @@ function asString(value: unknown): string | null {
 
 function asNumber(value: unknown): number | null {
     return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function formatDshError(error: JsonRecord | null, fallback: string): string {
+    const message = asString(error?.message) ?? fallback
+    const code = asString(error?.code)
+    const status = asNumber(error?.status)
+    const details = [
+        code && !message.includes(code) ? code : null,
+        status !== null && !message.includes(String(status)) ? `HTTP ${status}` : null
+    ].filter((value): value is string => value !== null)
+    return details.length > 0 ? `${message} (${details.join(', ')})` : message
 }
 
 function extractTextBlocks(value: unknown, type = 'text'): string {
@@ -56,7 +78,7 @@ function toolView(entry: DshHistoryEntry | undefined): { title?: string; kind?: 
 export function convertDshEvent(
     event: DshSessionEvent,
     entry?: DshHistoryEntry
-): { messages: AgentMessage[]; model?: string; reasoningEffort?: string; humanText?: string } {
+): { messages: AgentMessage[]; events?: DshEventMessage[]; model?: string; reasoningEffort?: string; humanText?: string } {
     const data = isRecord(event.data) ? event.data : null
     if (!data) return { messages: [] }
 
@@ -146,6 +168,34 @@ export function convertDshEvent(
         }
     }
 
+    if (event.type === 'llm/retry') {
+        const retry = asNumber(data.retry) ?? 0
+        const maxRetries = asNumber(data.maxRetries) ?? 0
+        const rawFailure = isRecord(data.failure) ? data.failure : null
+        const failure = rawFailure
+            ? { ...rawFailure, message: formatDshError(rawFailure, 'DeepSeek Harness API request failed') }
+            : data.failure ?? data
+        return {
+            messages: [],
+            events: [{
+                type: 'api-error',
+                retryAttempt: retry,
+                maxRetries,
+                error: failure,
+                retryScheduled: true
+            }]
+        }
+    }
+
+    if (event.type === 'turn/end') {
+        const reason = isRecord(data.reason) ? data.reason : null
+        if (reason?.kind === 'error') {
+            const error = isRecord(reason.error) ? reason.error : null
+            const message = formatDshError(error, 'DeepSeek Harness turn failed')
+            return { messages: [{ type: 'error', message }] }
+        }
+    }
+
     return { messages: [] }
 }
 
@@ -177,6 +227,18 @@ export function convertDshHistoryEntry(
             content: {
                 role: 'agent',
                 content: { type: AGENT_MESSAGE_PAYLOAD_TYPE, data: body },
+                meta: { sentFrom: 'cli' }
+            }
+        })
+    })
+    converted.events?.forEach((event, index) => {
+        result.push({
+            localId: `dsh:${sessionId}:${entry.event.seq}:event:${index}`,
+            eventSeq: entry.event.seq,
+            createdAt: entry.event.time,
+            content: {
+                role: 'agent',
+                content: { type: 'event', data: event },
                 meta: { sentFrom: 'cli' }
             }
         })

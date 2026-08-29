@@ -614,6 +614,7 @@ function ToolCardInner(props: ToolCardProps) {
                             sessionId={props.sessionId}
                             tool={props.block.tool}
                             disabled={props.disabled}
+                            allowSkip={props.metadata?.flavor === 'dsh'}
                             onDone={props.onDone}
                         />
                     ) : isRequestUserInput && permission?.status === 'pending' ? (

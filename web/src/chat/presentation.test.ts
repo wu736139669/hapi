@@ -105,6 +105,19 @@ describe('getEventPresentation — api-error', () => {
         expect(getEventPresentation({ type: 'api-error', retryAttempt: 0, maxRetries: 0, error }))
             .toEqual({ icon: '⚠️', text: 'API error' })
     })
+
+    it('keeps a scheduled final DSH retry in retrying state and includes its reason', () => {
+        expect(getEventPresentation({
+            type: 'api-error',
+            retryAttempt: 5,
+            maxRetries: 5,
+            retryScheduled: true,
+            error: { message: 'Too many requests (RATE_LIMIT, HTTP 429)' }
+        })).toEqual({
+            icon: '⏳',
+            text: 'API error: Retrying (5/5) — Too many requests (RATE_LIMIT, HTTP 429)'
+        })
+    })
 })
 
 describe('getEventPresentation — limit-warning', () => {

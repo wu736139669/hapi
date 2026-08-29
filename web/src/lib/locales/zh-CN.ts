@@ -605,6 +605,7 @@ export default {
   'tool.semanticTitle.query': '查询',
   'tool.questionsAnswers': '问答',
   'tool.submit': '提交',
+  'tool.skipQuestion': '跳过本题',
   'tool.submitting': '提交中…',
   'tool.prev': '← 上一个',
   'tool.next': '下一个 →',

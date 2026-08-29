@@ -975,6 +975,12 @@ export class ApiSessionClient extends EventEmitter {
         type: 'error'
         message: string
     } | {
+        type: 'api-error'
+        retryAttempt: number
+        maxRetries: number
+        error: unknown
+        retryScheduled?: boolean
+    } | {
         type: 'permission-mode-changed'
         mode: SessionPermissionMode
     } | {
@@ -1006,7 +1012,7 @@ export class ApiSessionClient extends EventEmitter {
                 sid: this.sessionId,
                 message: content
             })
-        }, event.type === 'message' || event.type === 'error' || event.type === 'compact-summary' ? 'lossless' : 'droppable')
+        }, event.type === 'message' || event.type === 'error' || event.type === 'api-error' || event.type === 'compact-summary' ? 'lossless' : 'droppable')
     }
 
     emitAgentTerminalOutput(data: string): void {

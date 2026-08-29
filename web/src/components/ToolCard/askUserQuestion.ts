@@ -12,6 +12,7 @@ export type AskUserQuestionQuestion = {
     id?: string
     header: string | null
     question: string
+    detail?: string | null
     options: AskUserQuestionOption[]
     multiSelect: boolean
 }
@@ -38,8 +39,14 @@ export function parseAskUserQuestionInput(input: unknown): { questions: AskUserQ
         if (!isObject(raw)) continue
 
         const question = typeof raw.question === 'string' ? raw.question.trim() : ''
+        const detail = typeof raw.detail === 'string' ? raw.detail.trim() : ''
         const header = typeof raw.header === 'string' ? raw.header.trim() : ''
-        const multiSelect = typeof raw.multiSelect === 'boolean' ? raw.multiSelect : false
+        const questionId = typeof raw.id === 'string' && raw.id.trim().length > 0
+            ? raw.id.trim()
+            : undefined
+        const multiSelect = typeof raw.multiSelect === 'boolean'
+            ? raw.multiSelect
+            : raw.multi_select === true
 
         const rawOptions = Array.isArray(raw.options) ? raw.options : []
         const options: AskUserQuestionOption[] = []
@@ -54,8 +61,10 @@ export function parseAskUserQuestionInput(input: unknown): { questions: AskUserQ
         if (!question && options.length === 0) continue
 
         questions.push({
+            ...(questionId ? { id: questionId } : {}),
             header: header.length > 0 ? header : null,
             question,
+            detail: detail.length > 0 ? detail : null,
             options,
             multiSelect
         })
