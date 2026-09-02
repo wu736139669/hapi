@@ -40,12 +40,13 @@ describe('ExecutionProcessPanel', () => {
 
     it('keeps process modules in a fixed-height nested scroll surface', () => {
         const view = renderPanel()
-        const panel = view.container.querySelector('[data-hapi-execution-process]')
+        const panel = view.container.querySelector<HTMLElement>('[data-hapi-execution-process]')
         const scrollSurface = view.container.querySelector('[data-hapi-nested-scroll="true"]')
 
         expect(screen.getByRole('heading', { name: 'Execution process' })).toBeInTheDocument()
         expect(panel).toHaveAttribute('data-expanded', 'false')
         expect(panel).toHaveStyle({ height: '22rem' })
+        expect(panel?.style.maxHeight).toBe('calc(var(--tg-viewport-stable-height, var(--app-viewport-height, 100dvh)) - 9rem)')
         expect(scrollSurface).toHaveClass('overflow-y-auto')
         expect(screen.getByText('Terminal')).toBeInTheDocument()
     })
