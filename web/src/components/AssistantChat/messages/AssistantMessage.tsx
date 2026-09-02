@@ -8,6 +8,10 @@ import { getConversationMessageAnchorId } from '@/chat/outline'
 import { CodexReviewCard } from '@/components/AssistantChat/messages/CodexReviewCard'
 import { MessageActions } from '@/components/AssistantChat/messages/MessageActions'
 import { useHappyChatContext } from '@/components/AssistantChat/context'
+import {
+    ExecutionProcessPanel,
+    shouldRenderExecutionProcessPanel
+} from '@/components/AssistantChat/messages/ExecutionProcessPanel'
 import { NotifySummaryText } from '@/components/AssistantChat/messages/NotifySummaryText'
 import { useSessionSummaryInChat } from '@/hooks/useSessionSummaryInChat'
 
@@ -45,6 +49,10 @@ export function HappyAssistantMessage() {
         const parts = s.message.content
         return parts.length > 0 && parts.every((part) => part.type === 'tool-call')
     })
+    const executionProcessOnly = useAuiState((s) => {
+        if (s.message.role !== 'assistant') return false
+        return shouldRenderExecutionProcessPanel(s.message.content)
+    })
     const copyText = useAuiState((s) => {
         if (s.message.role !== 'assistant') return ''
         return getAssistantCopyText(s.message.content, {
@@ -81,7 +89,13 @@ export function HappyAssistantMessage() {
                 ? <CliOutputBlock text={cliText} />
                 : codexReview
                     ? <CodexReviewCard review={codexReview} />
-                    : <MessagePrimitive.Content components={MESSAGE_PART_COMPONENTS} />}
+                    : executionProcessOnly
+                        ? (
+                            <ExecutionProcessPanel>
+                                <MessagePrimitive.Content components={MESSAGE_PART_COMPONENTS} />
+                            </ExecutionProcessPanel>
+                        )
+                        : <MessagePrimitive.Content components={MESSAGE_PART_COMPONENTS} />}
             <MessageActions
                 align="start"
                 copyText={copyText || undefined}
