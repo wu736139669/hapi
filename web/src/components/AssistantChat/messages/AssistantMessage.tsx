@@ -1,4 +1,5 @@
 import { MessagePrimitive, useAuiState, type TextMessagePart } from '@assistant-ui/react'
+import type { ReactNode } from 'react'
 import { Reasoning, ReasoningGroup } from '@/components/assistant-ui/reasoning'
 import { HappyToolMessage } from '@/components/AssistantChat/messages/ToolMessage'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
@@ -19,10 +20,24 @@ const TOOL_COMPONENTS = {
     Fallback: HappyToolMessage
 } as const
 
+function ExecutionProcessToolGroup(props: {
+    children?: ReactNode
+    startIndex: number
+    endIndex: number
+}) {
+    const shouldWrap = useAuiState((s) => shouldRenderExecutionProcessPanel(
+        s.message.content.slice(props.startIndex, props.endIndex + 1)
+    ))
+
+    if (!shouldWrap) return <>{props.children}</>
+    return <ExecutionProcessPanel>{props.children}</ExecutionProcessPanel>
+}
+
 const MESSAGE_PART_COMPONENTS = {
     Text: NotifySummaryText,
     Reasoning: Reasoning,
     ReasoningGroup: ReasoningGroup,
+    ToolGroup: ExecutionProcessToolGroup,
     tools: TOOL_COMPONENTS
 } as const
 
@@ -48,10 +63,6 @@ export function HappyAssistantMessage() {
         if (s.message.role !== 'assistant') return false
         const parts = s.message.content
         return parts.length > 0 && parts.every((part) => part.type === 'tool-call')
-    })
-    const executionProcessOnly = useAuiState((s) => {
-        if (s.message.role !== 'assistant') return false
-        return shouldRenderExecutionProcessPanel(s.message.content)
     })
     const copyText = useAuiState((s) => {
         if (s.message.role !== 'assistant') return ''
@@ -89,13 +100,7 @@ export function HappyAssistantMessage() {
                 ? <CliOutputBlock text={cliText} />
                 : codexReview
                     ? <CodexReviewCard review={codexReview} />
-                    : executionProcessOnly
-                        ? (
-                            <ExecutionProcessPanel>
-                                <MessagePrimitive.Content components={MESSAGE_PART_COMPONENTS} />
-                            </ExecutionProcessPanel>
-                        )
-                        : <MessagePrimitive.Content components={MESSAGE_PART_COMPONENTS} />}
+                    : <MessagePrimitive.Content components={MESSAGE_PART_COMPONENTS} />}
             <MessageActions
                 align="start"
                 copyText={copyText || undefined}

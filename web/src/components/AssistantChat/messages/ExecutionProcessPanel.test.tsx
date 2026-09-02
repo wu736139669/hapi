@@ -30,6 +30,11 @@ describe('ExecutionProcessPanel', () => {
         ])).toBe(true)
         expect(shouldRenderExecutionProcessPanel([
             { type: 'tool-call', toolName: 'Bash' },
+            { type: 'tool-call', toolName: 'Read' },
+            { type: 'text' }
+        ])).toBe(false)
+        expect(shouldRenderExecutionProcessPanel([
+            { type: 'tool-call', toolName: 'Bash' },
             { type: 'tool-call', toolName: 'request_user_input' }
         ])).toBe(false)
         expect(shouldRenderExecutionProcessPanel([
