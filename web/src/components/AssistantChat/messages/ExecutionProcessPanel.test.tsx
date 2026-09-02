@@ -1,7 +1,11 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
-import { ExecutionProcessPanel, shouldRenderExecutionProcessPanel } from './ExecutionProcessPanel'
+import {
+    ExecutionProcessPanel,
+    getExecutionProcessGroupPaths,
+    shouldRenderExecutionProcessPanel
+} from './ExecutionProcessPanel'
 
 function renderPanel() {
     return render(
@@ -20,10 +24,16 @@ describe('ExecutionProcessPanel', () => {
         localStorage.clear()
     })
 
-    it('only groups multiple non-interactive tool modules', () => {
+    it('opens for a single reasoning or non-interactive tool module', () => {
         expect(shouldRenderExecutionProcessPanel([
             { type: 'tool-call', toolName: 'Bash' }
-        ])).toBe(false)
+        ])).toBe(true)
+        expect(getExecutionProcessGroupPaths([
+            { type: 'tool-call', toolName: 'Bash' }
+        ])).toEqual([['group-execution-process']])
+        expect(shouldRenderExecutionProcessPanel([
+            { type: 'reasoning' }
+        ])).toBe(true)
         expect(shouldRenderExecutionProcessPanel([
             { type: 'tool-call', toolName: 'Bash' },
             { type: 'tool-call', toolName: 'Read' }
@@ -32,15 +42,49 @@ describe('ExecutionProcessPanel', () => {
             { type: 'tool-call', toolName: 'Bash' },
             { type: 'tool-call', toolName: 'Read' },
             { type: 'text' }
-        ])).toBe(false)
+        ])).toBe(true)
         expect(shouldRenderExecutionProcessPanel([
-            { type: 'tool-call', toolName: 'Bash' },
             { type: 'tool-call', toolName: 'request_user_input' }
         ])).toBe(false)
         expect(shouldRenderExecutionProcessPanel([
-            { type: 'tool-call', toolName: 'GeneratedImage' },
-            { type: 'tool-call', toolName: 'Read' }
+            { type: 'tool-call', toolName: 'GeneratedImage' }
         ])).toBe(false)
+        expect(shouldRenderExecutionProcessPanel([
+            {
+                type: 'tool-call',
+                toolName: 'Bash',
+                artifact: {
+                    kind: 'tool-call',
+                    tool: { permission: { status: 'pending' } }
+                }
+            }
+        ])).toBe(false)
+    })
+
+    it('groups reasoning, tools, and intermediate text while leaving the final text outside', () => {
+        const parts = [
+            { type: 'text' },
+            { type: 'reasoning' },
+            { type: 'tool-call', toolName: 'Bash' },
+            { type: 'text' }
+        ]
+
+        expect(getExecutionProcessGroupPaths(parts)).toEqual([
+            ['group-execution-process'],
+            ['group-execution-process', 'group-reasoning'],
+            ['group-execution-process'],
+            []
+        ])
+    })
+
+    it('leaves pure final text and interactive tools outside the execution process', () => {
+        expect(getExecutionProcessGroupPaths([{ type: 'text' }])).toEqual([[]])
+
+        const interactiveParts = [
+            { type: 'text' },
+            { type: 'tool-call', toolName: 'AskUserQuestion' }
+        ]
+        expect(getExecutionProcessGroupPaths(interactiveParts)).toEqual([[], []])
     })
 
     it('keeps process modules in a fixed-height nested scroll surface', () => {

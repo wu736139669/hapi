@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { isObject } from '@hapi/protocol'
 import { isAskUserQuestionToolName } from '@/components/ToolCard/askUserQuestion'
 import { isRequestUserInputToolName } from '@/components/ToolCard/requestUserInput'
 import { useTranslation } from '@/lib/use-translation'
@@ -9,16 +10,45 @@ const EXECUTION_PROCESS_MAX_HEIGHT = 'calc(var(--tg-viewport-stable-height, var(
 type MessagePartForExecutionProcess = {
     readonly type: string
     readonly toolName?: string
+    readonly artifact?: unknown
+}
+
+export type ExecutionProcessGroupKey = 'group-execution-process' | 'group-reasoning'
+
+const EXECUTION_PROCESS_GROUP = ['group-execution-process'] as const
+const REASONING_GROUP = ['group-execution-process', 'group-reasoning'] as const
+
+function hasPendingPermission(artifact: unknown): boolean {
+    return isObject(artifact)
+        && artifact.kind === 'tool-call'
+        && isObject(artifact.tool)
+        && isObject(artifact.tool.permission)
+        && artifact.tool.permission.status === 'pending'
+}
+
+function isExecutionProcessToolPart(part: MessagePartForExecutionProcess): boolean {
+    if (part.type !== 'tool-call' || typeof part.toolName !== 'string') return false
+    if (NON_EXECUTION_PROCESS_TOOL_NAMES.has(part.toolName)) return false
+    if (isAskUserQuestionToolName(part.toolName) || isRequestUserInputToolName(part.toolName)) return false
+    if (hasPendingPermission(part.artifact)) return false
+    return true
 }
 
 export function shouldRenderExecutionProcessPanel(parts: readonly MessagePartForExecutionProcess[]): boolean {
-    if (parts.length < 2) return false
+    return parts.some((part) => part.type === 'reasoning' || isExecutionProcessToolPart(part))
+}
 
-    return parts.every((part) => {
-        if (part.type !== 'tool-call' || typeof part.toolName !== 'string') return false
-        if (NON_EXECUTION_PROCESS_TOOL_NAMES.has(part.toolName)) return false
-        if (isAskUserQuestionToolName(part.toolName) || isRequestUserInputToolName(part.toolName)) return false
-        return true
+export function getExecutionProcessGroupPaths(
+    parts: readonly MessagePartForExecutionProcess[]
+): readonly (readonly ExecutionProcessGroupKey[])[] {
+    if (!shouldRenderExecutionProcessPanel(parts)) return parts.map(() => [])
+
+    const finalTextIndex = parts.at(-1)?.type === 'text' ? parts.length - 1 : -1
+    return parts.map((part, partIndex) => {
+        if (part.type === 'reasoning') return REASONING_GROUP
+        if (isExecutionProcessToolPart(part)) return EXECUTION_PROCESS_GROUP
+        if (part.type === 'text' && partIndex !== finalTextIndex) return EXECUTION_PROCESS_GROUP
+        return []
     })
 }
 
