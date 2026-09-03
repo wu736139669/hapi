@@ -14,6 +14,7 @@ import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
 import { StudioStore } from './studioStore'
 import { WorkGraphStore } from './workGraphStore'
+import { SessionShareStore } from './sessionShareStore'
 
 export type {
     StoredMachine,
@@ -41,6 +42,8 @@ export { UserStore } from './userStore'
 export { UsageStore } from './usageStore'
 export { StudioStore } from './studioStore'
 export { WorkGraphStore } from './workGraphStore'
+export { SessionShareStore } from './sessionShareStore'
+export type { StoredSessionShare } from './sessionShareStore'
 export {
     WorkGraphNotFoundError,
     WorkGraphPrincipalError,
@@ -80,6 +83,7 @@ export class Store {
     readonly usage: UsageStore
     readonly studios: StudioStore
     readonly workGraph: WorkGraphStore
+    readonly sessionShares: SessionShareStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -115,6 +119,7 @@ export class Store {
         this.db.exec('PRAGMA foreign_keys = ON')
         this.db.exec('PRAGMA busy_timeout = 5000')
         this.initSchema()
+        this.ensureSessionShareSchema()
 
         if (dbPath !== ':memory:' && !dbPath.startsWith('file::memory:')) {
             for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
@@ -135,6 +140,7 @@ export class Store {
         this.usage = new UsageStore(this.db)
         this.studios = new StudioStore(this.db)
         this.workGraph = new WorkGraphStore(this.db)
+        this.sessionShares = new SessionShareStore(this.db)
     }
 
     /**
@@ -1047,6 +1053,26 @@ export class Store {
             );
             CREATE INDEX IF NOT EXISTS idx_studio_posts_room_created
                 ON studio_posts(room_id, created_at ASC);
+        `)
+    }
+
+    private ensureSessionShareSchema(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS session_shares (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                share_token TEXT NOT NULL UNIQUE,
+                access_code_hash TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('active', 'revoked')),
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_shares_session
+                ON session_shares(session_id, namespace, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_session_shares_namespace
+                ON session_shares(namespace, updated_at DESC);
         `)
     }
 

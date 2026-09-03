@@ -79,6 +79,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const getPendingCount = (s: Session) => s.agentState?.requests ? Object.keys(s.agentState.requests).length : 0
 
         const namespace = c.get('namespace')
+        const guestSessionId = c.get('sessionId')
         const limitRaw = c.req.query('limit')
         const parsedLimit = limitRaw === undefined ? null : Number(limitRaw)
         const limit = parsedLimit !== null && Number.isFinite(parsedLimit)
@@ -86,7 +87,9 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             : null
         const order = c.req.query('order')
 
-        let sessionRecords = engine.getSessionsByNamespace(namespace)
+        let sessionRecords = (guestSessionId
+            ? engine.getSessionsByNamespace(namespace).filter((session) => session.id === guestSessionId)
+            : engine.getSessionsByNamespace(namespace))
             .sort((a, b) => {
                 // Peer discovery wants newest activity first before limit truncation.
                 if (order === 'updatedAt') {

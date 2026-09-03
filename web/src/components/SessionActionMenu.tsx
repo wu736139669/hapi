@@ -28,6 +28,7 @@ type SessionActionMenuProps = {
     onSetPersonalPinned?: (pinned: boolean) => void
     onExport?: () => void
     onStudio?: () => void
+    onSessionShare?: () => void
     onSyncCodex?: () => void
     onSyncPi?: () => void
     onSyncDsh?: () => void
@@ -203,6 +204,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onSetPersonalPinned,
         onExport,
         onStudio,
+        onSessionShare,
         onSyncCodex,
         onSyncPi,
         onSyncDsh,
@@ -264,6 +266,8 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onClose()
         onStudio?.()
     }
+
+    const handleSessionShare = () => { onClose(); onSessionShare?.() }
 
     const handleSyncCodex = () => {
         onClose()
@@ -413,6 +417,13 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     >
                         <ShareIcon className="h-[18px] w-[18px] text-[var(--app-hint)]" />
                         {t('studio.action.create')}
+                    </button>
+                ) : null}
+
+                {onSessionShare ? (
+                    <button type="button" role="menuitem" className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`} onClick={handleSessionShare}>
+                        <ShareIcon className="h-[18px] w-[18px] text-[var(--app-hint)]" />
+                        {t('session.action.sessionShare')}
                     </button>
                 ) : null}
 

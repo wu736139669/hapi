@@ -413,6 +413,17 @@ export type VisibilityPayload = {
     visibility: 'visible' | 'hidden'
 }
 
+export type SessionShare = {
+    id: string
+    sessionId: string
+    shareToken: string
+    createdAt: number
+    updatedAt: number
+}
+
+export type SessionShareCreateResponse = { share: SessionShare; accessCode: string }
+export type SessionShareExchangeResponse = { token: string; sessionId: string; share: SessionShare }
+
 export type StudioAccessMode = 'view' | 'contribute'
 export type StudioPostKind = 'discussion' | 'suggestion'
 export type StudioPostStatus = 'open' | 'submitted' | 'dismissed'

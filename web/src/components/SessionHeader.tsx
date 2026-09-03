@@ -27,6 +27,9 @@ import { useSessionHeaderMetadata } from '@/hooks/useSessionHeaderMetadata'
 import { formatSessionHeaderTimestamp } from '@/lib/sessionHeaderTimestamp'
 import { selectMobileSessionHeaderSecondary } from '@/lib/sessionHeaderMobileMetadata'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
+import { useOptionalAppContext } from '@/lib/app-context'
+import { SessionShareDialog } from '@/components/SessionShareDialog'
+import type { SessionShare } from '@/types/api'
 import { ApiError } from '@/api/client'
 
 /** Same preference order as session-list chips: display label → host → short id. */
@@ -147,6 +150,7 @@ export function SessionHeader(props: {
     onToggleTerminal?: () => void
     terminalActive?: boolean
     api: ApiClient | null
+    baseUrl?: string
     titleSuggestionAvailable?: boolean
     canReopen?: boolean
     reopenDisabledReason?: string
@@ -155,6 +159,7 @@ export function SessionHeader(props: {
     onSessionReopened?: (newSessionId: string) => void | Promise<void>
 }) {
     const { t, locale } = useTranslation()
+    const isSessionGuest = useOptionalAppContext()?.isSessionGuest ?? false
     const queryClient = useQueryClient()
     const { addToast } = useToast()
     const { session, api, onSessionDeleted, onSessionReopened } = props
@@ -189,7 +194,8 @@ export function SessionHeader(props: {
     const dshSessionId = session.metadata?.flavor === 'dsh'
         ? session.metadata.dshSessionId?.trim() || null
         : null
-    const { machines } = useMachines(api, Boolean(api))
+    const actionApi = isSessionGuest ? null : api
+    const { machines } = useMachines(actionApi, Boolean(actionApi))
     const machineLabelsById = useMachineLabels(machines)
     const machineLabel = useMemo(
         () => resolveSessionHeaderMachineLabel(session, machineLabelsById),
@@ -228,9 +234,14 @@ export function SessionHeader(props: {
     const [isSyncingPi, setIsSyncingPi] = useState(false)
     const [isSyncingDsh, setIsSyncingDsh] = useState(false)
     const [isCreatingStudio, setIsCreatingStudio] = useState(false)
+    const [isCreatingSessionShare, setIsCreatingSessionShare] = useState(false)
+    const [sessionShareOpen, setSessionShareOpen] = useState(false)
+    const [sessionShare, setSessionShare] = useState<SessionShare | null>(null)
+    const [sessionShareCode, setSessionShareCode] = useState<string | null>(null)
+    const [sessionShareUrl, setSessionShareUrl] = useState<string | null>(null)
 
     const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, setPinMode, deleteSession, isPending } = useSessionActions(
-        api,
+        actionApi,
         session.id,
         session.metadata?.flavor ?? null
     )
@@ -405,6 +416,51 @@ export function SessionHeader(props: {
         }
     }
 
+    const handleCreateSessionShare = async () => {
+        if (!api || isCreatingSessionShare) return
+        if (sessionShare && sessionShareCode && sessionShareUrl) {
+            setSessionShareOpen(true)
+            return
+        }
+        setIsCreatingSessionShare(true)
+        try {
+            const result = await api.createSessionShare(session.id)
+            const configuredHub = props.baseUrl && props.baseUrl !== window.location.origin ? props.baseUrl : new URLSearchParams(window.location.search).get('hub')
+            const hubQuery = configuredHub ? `?hub=${encodeURIComponent(configuredHub)}` : ''
+            const shareUrl = `${window.location.origin}/shared-session/${encodeURIComponent(result.share.shareToken)}${hubQuery}`
+            setSessionShare(result.share)
+            setSessionShareCode(result.accessCode)
+            setSessionShareUrl(shareUrl)
+            setSessionShareOpen(true)
+        } catch (error) {
+            addToast({ title: t('sessionShare.createFailed'), body: error instanceof Error ? error.message : t('dialog.error.default'), sessionId: session.id, url: `/sessions/${session.id}` })
+        } finally { setIsCreatingSessionShare(false) }
+    }
+
+    const handleRevokeSessionShare = async () => {
+        if (!api || !sessionShare) return
+        try {
+            await api.revokeSessionShare(sessionShare.id)
+            setSessionShareOpen(false)
+            setSessionShare(null)
+            setSessionShareCode(null)
+            setSessionShareUrl(null)
+            addToast({
+                title: t('sessionShare.revoke'),
+                body: t('sessionShare.revoked'),
+                sessionId: session.id,
+                url: `/sessions/${session.id}`
+            })
+        } catch (error) {
+            addToast({
+                title: t('sessionShare.revokeFailed'),
+                body: error instanceof Error ? error.message : t('dialog.error.default'),
+                sessionId: session.id,
+                url: `/sessions/${session.id}`
+            })
+        }
+    }
+
     const handleCreateStudio = async () => {
         if (!api || isCreatingStudio) return
         setIsCreatingStudio(true)
@@ -564,7 +620,7 @@ export function SessionHeader(props: {
                         </button>
                     ) : null}
 
-                    <button
+                    {!isSessionGuest ? <button
                         type="button"
                         onClick={handleMenuToggle}
                         onPointerDown={(e) => e.stopPropagation()}
@@ -576,11 +632,11 @@ export function SessionHeader(props: {
                         title={t('session.more')}
                     >
                         <MoreVerticalIcon />
-                    </button>
+                    </button> : null}
                 </div>
             </div>
 
-            <SessionActionMenu
+            {!isSessionGuest ? <SessionActionMenu
                 isOpen={menuOpen}
                 onClose={() => setMenuOpen(false)}
                 sessionId={session.id}
@@ -592,6 +648,7 @@ export function SessionHeader(props: {
                 onSetPinMode={api ? (mode) => void handleSetPinMode(mode) : undefined}
                 onExport={() => setExportOpen(true)}
                 onStudio={api ? () => void handleCreateStudio() : undefined}
+                onSessionShare={api ? () => void handleCreateSessionShare() : undefined}
                 onSyncCodex={api && codexSessionId ? handleSyncCodex : undefined}
                 onSyncPi={api && piSessionId && !session.active ? handleSyncPi : undefined}
                 onSyncDsh={api && dshSessionId && !session.active ? handleSyncDsh : undefined}
@@ -602,7 +659,9 @@ export function SessionHeader(props: {
                 onDelete={() => setDeleteOpen(true)}
                 anchorPoint={menuAnchorPoint}
                 menuId={menuId}
-            />
+            /> : null}
+
+            <SessionShareDialog isOpen={sessionShareOpen} share={sessionShare} accessCode={sessionShareCode} shareUrl={sessionShareUrl} onClose={() => setSessionShareOpen(false)} onRevoke={api && sessionShare ? () => { void handleRevokeSessionShare() } : undefined} />
 
             {reopenError ? (
                 <ConfirmDialog

@@ -28,18 +28,40 @@ export type TerminalHandlersDeps = {
     terminalRegistry: TerminalRegistry
     maxTerminalsPerSocket: number
     maxTerminalsPerSession: number
+    isGuestTokenActive?: (shareToken: string) => boolean
 }
 
 export function registerTerminalHandlers(socket: SocketWithData, deps: TerminalHandlersDeps): void {
     const { io, getSession, terminalRegistry, maxTerminalsPerSocket, maxTerminalsPerSession } = deps
     const cliNamespace = io.of('/cli')
     const namespace = typeof socket.data.namespace === 'string' ? socket.data.namespace : null
+    const guestSessionId = typeof socket.data.sessionId === 'string' ? socket.data.sessionId : null
+
+    // Re-check guest share state after the Socket.IO handshake so revoking a
+    // share also invalidates already-open terminal connections.
+    const isGuestShareActive = (): boolean => {
+        if (!guestSessionId) {
+            return true
+        }
+        const shareToken = socket.data.shareToken
+        const active = Boolean(shareToken && deps.isGuestTokenActive?.(shareToken) === true)
+        if (!active) {
+            // Lightweight test sockets do not implement disconnect(); real
+            // Socket.IO sockets do, so close the connection when revoked.
+            const socketWithDisconnect = socket as SocketWithData & { disconnect?: (close?: boolean) => void }
+            socketWithDisconnect.disconnect?.(true)
+        }
+        return active
+    }
 
     const emitTerminalError = (terminalId: string, message: string) => {
         socket.emit('terminal:error', { terminalId, message })
     }
 
     const resolveEntryForSocket = (terminalId: string): TerminalRegistryEntry | null => {
+        if (!isGuestShareActive()) {
+            return null
+        }
         const entry = terminalRegistry.get(terminalId)
         if (!entry || entry.socketId !== socket.id) {
             return null
@@ -92,7 +114,7 @@ export function registerTerminalHandlers(socket: SocketWithData, deps: TerminalH
 
         const { sessionId, terminalId, cols, rows } = parsed.data
         const session = getSession(sessionId)
-        if (!namespace || !session || session.namespace !== namespace || !session.active) {
+        if (!isGuestShareActive() || (guestSessionId && guestSessionId !== sessionId) || !namespace || !session || session.namespace !== namespace || !session.active) {
             emitTerminalError(terminalId, 'Session is inactive or unavailable.')
             return
         }
@@ -244,8 +266,11 @@ export function registerTerminalHandlers(socket: SocketWithData, deps: TerminalH
     // rejection path (a session that just went inactive) unmounts the terminal
     // view anyway via canViewAgentTerminal, so there is no live viewer to inform.
     const isAuthorizedSession = (sessionId: string): boolean => {
+        if (!isGuestShareActive()) {
+            return false
+        }
         const session = getSession(sessionId)
-        return Boolean(namespace && session && session.namespace === namespace && session.active)
+        return Boolean((!guestSessionId || guestSessionId === sessionId) && namespace && session && session.namespace === namespace && session.active)
     }
     const tellCliIfNoViewers = (sessionId: string): void => {
         const size = socket.nsp.adapter.rooms.get(agentTerminalRoom(sessionId))?.size ?? 0

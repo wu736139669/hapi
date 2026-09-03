@@ -35,7 +35,10 @@ import type {
     SessionsResponse,
     StudioAccessMode,
     StudioOwnerResponse,
-    StudioPost
+    StudioPost,
+    SessionShare,
+    SessionShareCreateResponse,
+    SessionShareExchangeResponse
 } from '@/types/api'
 import type {
     AgyModelsResponse,
@@ -387,6 +390,22 @@ export class ApiClient {
 
     async getSession(sessionId: string): Promise<SessionResponse> {
         return await this.request<SessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}`)
+    }
+
+    async createSessionShare(sessionId: string): Promise<SessionShareCreateResponse> {
+        return await this.request<SessionShareCreateResponse>('/api/session-shares', { method: 'POST', body: JSON.stringify({ sessionId }) })
+    }
+
+    async getSessionShare(sessionId: string): Promise<{ share: SessionShare | null }> {
+        return await this.request<{ share: SessionShare | null }>(`/api/session-shares/session/${encodeURIComponent(sessionId)}`)
+    }
+
+    async revokeSessionShare(shareId: string): Promise<void> {
+        await this.request(`/api/session-shares/${encodeURIComponent(shareId)}`, { method: 'DELETE' })
+    }
+
+    async exchangeSessionShare(shareToken: string, accessCode: string): Promise<SessionShareExchangeResponse> {
+        return await this.request<SessionShareExchangeResponse>(`/api/public/session-shares/${encodeURIComponent(shareToken)}/exchange`, { method: 'POST', body: JSON.stringify({ accessCode }) })
     }
 
     async createStudio(input: {

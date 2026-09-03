@@ -36,6 +36,7 @@ import { createHubSettingsRoutes } from './routes/hubSettings'
 import { createWorkGraphRoutes } from './routes/workGraph'
 import { createClaudeModelsRoutes } from './routes/claudeModels'
 import { createPublicStudioRoutes, createStudioRoutes } from './routes/studios'
+import { createSessionShareRoutes } from './routes/sessionShares'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 import type { Server as BunServer, ServerWebSocket } from 'bun'
@@ -302,8 +303,13 @@ function createWebApp(options: {
         getSyncEngine: options.getSyncEngine
     }))
 
-    app.use('/api/*', createAuthMiddleware(options.jwtSecret))
-    app.route('/api', createEventsRoutes(options.getSseManager, options.getSyncEngine, options.getVisibilityTracker))
+    app.use('/api/*', createAuthMiddleware(options.jwtSecret, {
+        isGuestTokenActive: (shareToken) => options.store.sessionShares.getActiveByToken(shareToken) !== null
+    }))
+    app.route('/api', createSessionShareRoutes({ store: options.store, jwtSecret: options.jwtSecret, getSyncEngine: options.getSyncEngine }))
+    app.route('/api', createEventsRoutes(options.getSseManager, options.getSyncEngine, options.getVisibilityTracker, {
+        isGuestTokenActive: (shareToken) => options.store.sessionShares.getActiveByToken(shareToken) !== null
+    }))
     app.route('/api', createSessionsRoutes(options.getSyncEngine))
     app.route('/api', createMessagesRoutes(options.getSyncEngine))
     app.route('/api', createPermissionsRoutes(options.getSyncEngine))

@@ -17,7 +17,10 @@ import type { CliSocketWithData, SocketData, SocketServer } from './socketTypes'
 
 const jwtPayloadSchema = z.object({
     uid: z.number(),
-    ns: z.string()
+    ns: z.string(),
+    sid: z.string().min(1).optional(),
+    role: z.literal('session-guest').optional(),
+    sht: z.string().min(1).optional()
 })
 
 const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60_000
@@ -151,6 +154,14 @@ export function createSocketServer(deps: SocketServerDeps): {
             }
             socket.data.userId = parsed.data.uid
             socket.data.namespace = parsed.data.ns
+            if (parsed.data.role === 'session-guest' && parsed.data.sid) {
+                if (!parsed.data.sht || deps.store.sessionShares.getActiveByToken(parsed.data.sht) === null) {
+                    return next(new Error('Share revoked or expired'))
+                }
+                socket.data.role = parsed.data.role
+                socket.data.sessionId = parsed.data.sid
+                socket.data.shareToken = parsed.data.sht
+            }
             next()
             return
         } catch {
@@ -164,7 +175,8 @@ export function createSocketServer(deps: SocketServerDeps): {
         },
         terminalRegistry,
         maxTerminalsPerSocket,
-        maxTerminalsPerSession
+        maxTerminalsPerSession,
+        isGuestTokenActive: (shareToken) => deps.store.sessionShares.getActiveByToken(shareToken) !== null
     }))
 
     return { io, engine, rpcRegistry }

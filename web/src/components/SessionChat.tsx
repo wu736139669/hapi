@@ -113,6 +113,7 @@ import { useVoiceOptional } from '@/lib/voice-context'
 import { AgentTerminalView } from '@/components/AgentTerminal/AgentTerminalView'
 import { VoiceBackendSession, registerSessionStore, registerVoiceHooksStore, voiceHooks } from '@/realtime'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
+import { useOptionalAppContext } from '@/lib/app-context'
 
 type SessionModelSelection = { provider: string; modelId: string } | string | null
 
@@ -399,6 +400,7 @@ function hasAbortableAgentRun(blocks: readonly ChatBlock[]): boolean {
 
 type SessionChatProps = {
     api: ApiClient
+    baseUrl?: string
     titleSuggestionAvailable?: boolean
     session: Session
     cursorChatOnDisk?: boolean
@@ -469,6 +471,7 @@ export function SessionChat(props: SessionChatProps) {
 }
 
 function SessionChatInner(props: SessionChatProps) {
+    const isSessionGuest = useOptionalAppContext()?.isSessionGuest ?? false
     const { haptic } = usePlatform()
     const { t } = useTranslation()
     const { codexExplorationCollapsed } = useCodexExplorationCollapse()
@@ -883,7 +886,7 @@ function SessionChatInner(props: SessionChatProps) {
     const machineCursorModelsState = useCursorModelsForMachine({
         api: props.api,
         machineId: sessionMachineId,
-        enabled: agentFlavor === 'cursor' && props.session.active && Boolean(sessionMachineId)
+        enabled: !isSessionGuest && agentFlavor === 'cursor' && props.session.active && Boolean(sessionMachineId)
     })
     const sessionCliModelSkus = useMemo(() => (
         mergeCursorCliModelSkus(
@@ -1620,7 +1623,7 @@ function SessionChatInner(props: SessionChatProps) {
         onSendMessage: handleSend,
         onAbort: handleAbort,
         attachmentAdapter,
-        allowSendWhenInactive: true,
+        allowSendWhenInactive: !isSessionGuest,
         pendingScheduleRef,
         pendingSendIntentRef,
     })
@@ -1638,8 +1641,9 @@ function SessionChatInner(props: SessionChatProps) {
                 onToggleTerminal={canViewAgentTerminal ? () => setTerminalVisible(v => !v) : undefined}
                 terminalActive={terminalVisible}
                 api={props.api}
+                baseUrl={props.baseUrl}
                 titleSuggestionAvailable={props.titleSuggestionAvailable}
-                canReopen={inactiveCanResume}
+                canReopen={isSessionGuest ? false : inactiveCanResume}
                 reopenDisabledReason={props.reopenDisabledReason}
                 reopenHint={props.reopenHint}
                 onSessionDeleted={props.onBack}
@@ -1703,8 +1707,8 @@ function SessionChatInner(props: SessionChatProps) {
                         onRefresh={props.onRefresh}
                         onRetryMessage={props.onRetryMessage}
                         historyActionPending={historyActionPending}
-                        onForkConversation={controlledByUser ? undefined : onForkConversation}
-                        onRewindConversation={controlledByUser ? undefined : onRewindConversation}
+                        onForkConversation={isSessionGuest || controlledByUser ? undefined : onForkConversation}
+                        onRewindConversation={isSessionGuest || controlledByUser ? undefined : onRewindConversation}
                         isLatestCompletedBoundary={isLatestCompletedBoundary}
                         onViewModeChange={props.onViewModeChange}
                         isSyncingTail={props.isSyncingTail}
@@ -1859,8 +1863,8 @@ function SessionChatInner(props: SessionChatProps) {
                                 : undefined
                         }
                         active={props.session.active}
-                        allowSendWhenInactive
-                        onResumeStoredDraft={() => handleSend('', undefined, null)}
+                        allowSendWhenInactive={!isSessionGuest}
+                        onResumeStoredDraft={isSessionGuest ? undefined : () => handleSend('', undefined, null)}
                         thinking={props.session.thinking}
                         agentState={props.session.agentState}
                         backgroundTaskCount={props.session.backgroundTaskCount}
@@ -1969,7 +1973,7 @@ function SessionChatInner(props: SessionChatProps) {
                                 ? handleServiceTierChange
                                 : undefined
                         }
-                        onSwitchToRemote={handleSwitchToRemote}
+                        onSwitchToRemote={isSessionGuest ? undefined : handleSwitchToRemote}
                         onTerminal={props.session.active && terminalSupported ? handleViewTerminal : undefined}
                         terminalUnsupported={props.session.active && !terminalSupported}
                         autocompleteSuggestions={props.autocompleteSuggestions}
