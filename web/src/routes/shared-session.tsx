@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "@tanstack/react-router";
-import { ApiClient } from "@/api/client";
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import { ApiClient, ApiError } from "@/api/client";
 import { useServerUrl } from "@/hooks/useServerUrl";
 import { saveSessionGuest } from "@/lib/sessionGuest";
 import { LoadingState } from "@/components/LoadingState";
@@ -8,17 +8,18 @@ import { useTranslation } from "@/lib/use-translation";
 
 export default function SharedSessionPage() {
   const { shareToken } = useParams({ from: "/shared-session/$shareToken" });
+  const { lang } = useSearch({ from: "/shared-session/$shareToken" });
   const { baseUrl } = useServerUrl();
   const navigate = useNavigate();
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
 
   const submit = async () => {
     const normalized = code.replace(/\D/g, "").slice(0, 6);
     if (normalized.length !== 6) {
-      setError(t("sessionShare.code"));
+      setError(t("sessionShare.codeRequired"));
       return;
     }
     setBusy(true);
@@ -33,13 +34,21 @@ export default function SharedSessionPage() {
       await navigate({
         to: "/sessions/$sessionId",
         params: { sessionId: result.sessionId },
-        search: { guest: true, share: shareToken },
+        search: {
+          guest: true,
+          share: shareToken,
+          lang: lang ?? locale,
+        },
         replace: true,
       });
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : t("sessionShare.invalid"),
-      );
+      if (cause instanceof ApiError && cause.code === "rate_limited") {
+        setError(t("sessionShare.rateLimited"));
+      } else if (cause instanceof ApiError && cause.code === "invalid_access_code") {
+        setError(t("sessionShare.invalid"));
+      } else {
+        setError(t("sessionShare.failed"));
+      }
     } finally {
       setBusy(false);
     }

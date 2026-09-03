@@ -57,6 +57,21 @@ describe('ApiClient error mapping', () => {
         }
     })
 
+    it('preserves public session-share verification error codes on 401', async () => {
+        fetchMock.mockResolvedValueOnce(
+            new Response(
+                JSON.stringify({ error: 'Invalid access code or revoked share', code: 'invalid_access_code' }),
+                { status: 401, statusText: 'Unauthorized' }
+            )
+        )
+
+        const api = new ApiClient('')
+        await expect(api.exchangeSessionShare('share-token', '000000')).rejects.toMatchObject({
+            status: 401,
+            code: 'invalid_access_code',
+        })
+    })
+
     it('passes the 422 missing-metadata body through unchanged so the UI can show the missing fields', async () => {
         fetchMock.mockResolvedValueOnce(
             new Response(

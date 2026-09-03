@@ -15,6 +15,19 @@ export const I18nContext = createContext<I18nContextValue | null>(null)
 
 const locales: Record<Locale, Translations> = { en, 'zh-CN': zhCN }
 
+function getInitialLocale(): Locale {
+  const saved = localStorage.getItem('hapi-lang')
+  if (saved === 'en' || saved === 'zh-CN') return saved
+
+  // Shared-session links are commonly opened on a second device. The owner
+  // may include an explicit language, while a bare share link defaults to the
+  // Chinese UI used by the HAPI operator in this deployment.
+  const requested = new URLSearchParams(window.location.search).get('lang')
+  if (requested === 'en' || requested === 'zh-CN') return requested
+  if (window.location.pathname.startsWith('/shared-session/')) return 'zh-CN'
+  return 'en'
+}
+
 function interpolate(str: string, params?: Record<string, string | number>): string {
   if (!params) return str
   return str.replace(/\{(\w+)\}/g, (match, key) => {
@@ -24,10 +37,7 @@ function interpolate(str: string, params?: Record<string, string | number>): str
 }
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(() => {
-    const saved = localStorage.getItem('hapi-lang')
-    return (saved === 'en' || saved === 'zh-CN') ? saved : 'en'
-  })
+  const [locale, setLocaleState] = useState<Locale>(getInitialLocale)
 
   const setLocale = useCallback((newLocale: Locale) => {
     setLocaleState(newLocale)

@@ -426,8 +426,11 @@ export function SessionHeader(props: {
         try {
             const result = await api.createSessionShare(session.id)
             const configuredHub = props.baseUrl && props.baseUrl !== window.location.origin ? props.baseUrl : new URLSearchParams(window.location.search).get('hub')
-            const hubQuery = configuredHub ? `?hub=${encodeURIComponent(configuredHub)}` : ''
-            const shareUrl = `${window.location.origin}/shared-session/${encodeURIComponent(result.share.shareToken)}${hubQuery}`
+            const shareParams = new URLSearchParams()
+            if (configuredHub) shareParams.set('hub', configuredHub)
+            shareParams.set('lang', locale)
+            const shareQuery = shareParams.toString() ? `?${shareParams.toString()}` : ''
+            const shareUrl = `${window.location.origin}/shared-session/${encodeURIComponent(result.share.shareToken)}${shareQuery}`
             setSessionShare(result.share)
             setSessionShareCode(result.accessCode)
             setSessionShareUrl(shareUrl)
@@ -496,26 +499,29 @@ export function SessionHeader(props: {
         <>
             <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
                 <div className="mx-auto w-full max-w-content flex items-center gap-2 p-3">
-                    {/* Back button */}
-                    <button
-                        type="button"
-                        onClick={props.onBack}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
-                    >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="20"
-                            height="20"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
+                    {/* Guest shares have no session list to return to. */}
+                    {!isSessionGuest ? (
+                        <button
+                            type="button"
+                            onClick={props.onBack}
+                            aria-label={t('common.back')}
+                            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
                         >
-                            <polyline points="15 18 9 12 15 6" />
-                        </svg>
-                    </button>
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="20"
+                                height="20"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            >
+                                <polyline points="15 18 9 12 15 6" />
+                            </svg>
+                        </button>
+                    ) : null}
 
                     {/* Session info - two lines: title and path */}
                     <div className="min-w-0 flex-1">

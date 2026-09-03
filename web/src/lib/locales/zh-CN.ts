@@ -1283,5 +1283,13 @@ export default {
   'sessionShare.verify': '验证中…',
   'sessionShare.enter': '进入会话',
   'sessionShare.invalid': '访问码无效或分享已撤销',
+  'sessionShare.rateLimited': '验证次数过多，请稍后一分钟再试。',
+  'sessionShare.failed': '验证分享失败，请稍后重试。',
+  'sessionShare.backToShare': '返回分享页面',
+  'sessionShare.codeRequired': '请输入 6 位访问码。',
   'sessionShare.createFailed': '创建协作分享失败',
+  'session.unavailable': '会话不可用',
+  'session.retry': '重试',
+  'session.notFoundReturningToSessions': '会话不存在，即将返回会话列表…',
+  'session.notFoundReturningToShare': '会话不存在，即将返回分享页面…',
 } as const

@@ -405,7 +405,26 @@ export class ApiClient {
     }
 
     async exchangeSessionShare(shareToken: string, accessCode: string): Promise<SessionShareExchangeResponse> {
-        return await this.request<SessionShareExchangeResponse>(`/api/public/session-shares/${encodeURIComponent(shareToken)}/exchange`, { method: 'POST', body: JSON.stringify({ accessCode }) })
+        // This endpoint intentionally has no authenticated session yet. Keep
+        // its structured error response intact so the share join screen can
+        // translate stable codes such as `invalid_access_code` and
+        // `rate_limited` instead of receiving request()'s generic 401 error.
+        const res = await fetch(this.buildUrl(`/api/public/session-shares/${encodeURIComponent(shareToken)}/exchange`), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ accessCode })
+        })
+        if (!res.ok) {
+            const body = await res.text().catch(() => '')
+            const code = parseErrorCode(body)
+            throw new ApiError(
+                `HTTP ${res.status} ${res.statusText}: ${body}`,
+                res.status,
+                code,
+                body || undefined
+            )
+        }
+        return await res.json() as SessionShareExchangeResponse
     }
 
     async createStudio(input: {

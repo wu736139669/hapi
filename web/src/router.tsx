@@ -170,7 +170,7 @@ function SessionsPage() {
     const matchRoute = useMatchRoute()
     const { t } = useTranslation()
     const { addToast } = useToast()
-    const { sessions, isLoading, error, refetch } = useSessions(api)
+    const { sessions, isLoading, error, refetch } = useSessions(isSessionGuest ? null : api)
     const [initializedHub, setInitializedHub] = useState<string | null>(null)
     const { machines } = useMachines(api, !isSessionGuest)
     const handleRefresh = useCallback(() => {
@@ -331,14 +331,14 @@ function classifySendError(
 }
 
 function SessionPage() {
-    const { api, baseUrl, titleSuggestionAvailable = false, isSessionGuest = false } = useAppContext()
+    const { api, baseUrl, titleSuggestionAvailable = false, isSessionGuest = false, guestShareToken } = useAppContext()
     const { t } = useTranslation()
     const goBack = useAppGoBack()
     const navigate = useNavigate()
     const queryClient = useQueryClient()
     const { addToast } = useToast()
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
-    const { outline } = useSearch({ from: '/sessions/$sessionId' })
+    const { outline, share } = useSearch({ from: '/sessions/$sessionId' })
     const {
         session,
         error: sessionError,
@@ -654,7 +654,7 @@ function SessionPage() {
         getSuggestions: getSkillSuggestions,
     } = useSkills(api, sessionId)
     // Mention pool is stricter than sidebar (#1506): titled sessions only; match via sessionMatchesQuery.
-    const { sessions: allSessions } = useSessions(api)
+    const { sessions: allSessions } = useSessions(isSessionGuest ? null : api)
     const { machines: mentionMachines } = useMachines(api, !isSessionGuest)
     const mentionMachineLabelsById = useMachineLabels(mentionMachines)
     // Same fallbacks as share picker / SessionList search.
@@ -746,22 +746,32 @@ function SessionPage() {
         if (sessionError) {
             return (
                 <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center">
-                    <div className="text-sm font-medium text-[var(--app-fg)]">Session unavailable</div>
+                    <div className="text-sm font-medium text-[var(--app-fg)]">{t('session.unavailable')}</div>
                     <div className="max-w-md text-xs text-[var(--app-hint)]">{sessionError}</div>
                     <div className="flex gap-2">
                         <button
                             type="button"
-                            onClick={() => navigate({ to: '/sessions', replace: true })}
+                            onClick={() => {
+                                if (isSessionGuest && (guestShareToken || share)) {
+                                    navigate({
+                                        to: '/shared-session/$shareToken',
+                                        params: { shareToken: guestShareToken || share! },
+                                        replace: true,
+                                    })
+                                } else {
+                                    navigate({ to: '/sessions', replace: true })
+                                }
+                            }}
                             className="rounded-md border border-[var(--app-border)] px-3 py-1.5 text-sm text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]"
                         >
-                            Back to sessions
+                            {isSessionGuest ? t('sessionShare.backToShare') : t('share.backToSessions')}
                         </button>
                         <button
                             type="button"
                             onClick={() => { void refetchSession() }}
                             className="rounded-md bg-[var(--app-button)] px-3 py-1.5 text-sm text-[var(--app-button-text)]"
                         >
-                            Retry
+                            {t('session.retry')}
                         </button>
                     </div>
                 </div>
@@ -769,7 +779,7 @@ function SessionPage() {
         }
         return (
             <div className="flex-1 flex items-center justify-center p-4">
-                <LoadingState label="Loading session…" className="text-sm" />
+                <LoadingState label={t('loading.session')} className="text-sm" />
             </div>
         )
     }
@@ -830,7 +840,8 @@ function SessionPage() {
 }
 
 function SessionDetailRoute() {
-    const { api } = useAppContext()
+    const { api, isSessionGuest = false, guestShareToken } = useAppContext()
+    const { t } = useTranslation()
     const pathname = useLocation({ select: location => location.pathname })
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
     const navigate = useNavigate()
@@ -867,13 +878,17 @@ function SessionDetailRoute() {
         if (!sessionNotFound) {
             return
         }
-        navigate({ to: '/sessions', replace: true })
-    }, [navigate, sessionNotFound, sessionId])
+        if (isSessionGuest && guestShareToken) {
+            navigate({ to: '/shared-session/$shareToken', params: { shareToken: guestShareToken }, replace: true })
+        } else {
+            navigate({ to: '/sessions', replace: true })
+        }
+    }, [guestShareToken, isSessionGuest, navigate, sessionNotFound, sessionId])
 
     if (sessionNotFound) {
         return (
             <div className="flex-1 flex items-center justify-center p-4">
-                <LoadingState label="Session not found. Returning to sessions…" className="text-sm" />
+                <LoadingState label={isSessionGuest ? t('session.notFoundReturningToShare') : t('session.notFoundReturningToSessions')} className="text-sm" />
             </div>
         )
     }
@@ -1035,11 +1050,12 @@ const sessionsIndexRoute = createRoute({
 const sessionDetailRoute = createRoute({
     getParentRoute: () => sessionsRoute,
     path: '$sessionId',
-    validateSearch: (search: Record<string, unknown>): { outline?: boolean; guest?: boolean; share?: string } => {
+    validateSearch: (search: Record<string, unknown>): { outline?: boolean; guest?: boolean; share?: string; lang?: 'en' | 'zh-CN' } => {
         const outline = search.outline === true || search.outline === 'true'
         const guest = search.guest === true || search.guest === 'true'
         const share = typeof search.share === 'string' && search.share.length > 0 ? search.share : undefined
-        return { ...(outline ? { outline: true } : {}), ...(guest ? { guest: true } : {}), ...(share ? { share } : {}) }
+        const lang = search.lang === 'en' || search.lang === 'zh-CN' ? search.lang : undefined
+        return { ...(outline ? { outline: true } : {}), ...(guest ? { guest: true } : {}), ...(share ? { share } : {}), ...(lang ? { lang } : {}) }
     },
     component: SessionDetailRoute,
 })
@@ -1254,6 +1270,10 @@ const studioOwnerRoute = createRoute({
 const sharedSessionRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/shared-session/$shareToken',
+    validateSearch: (search: Record<string, unknown>): { lang?: 'en' | 'zh-CN' } => {
+        const lang = search.lang === 'en' || search.lang === 'zh-CN' ? search.lang : undefined
+        return lang ? { lang } : {}
+    },
     component: SharedSessionPage,
 })
 

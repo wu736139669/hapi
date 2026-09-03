@@ -1284,5 +1284,13 @@ export default {
   'sessionShare.verify': 'Verifying…',
   'sessionShare.enter': 'Enter session',
   'sessionShare.invalid': 'Invalid access code or revoked share',
+  'sessionShare.rateLimited': 'Too many attempts. Try again in a minute.',
+  'sessionShare.failed': 'Could not verify this share. Please try again.',
+  'sessionShare.backToShare': 'Back to share page',
+  'sessionShare.codeRequired': 'Enter the 6-digit access code.',
   'sessionShare.createFailed': 'Could not create collaborative share',
+  'session.unavailable': 'Session unavailable',
+  'session.retry': 'Retry',
+  'session.notFoundReturningToSessions': 'Session not found. Returning to sessions…',
+  'session.notFoundReturningToShare': 'Session not found. Returning to the share page…',
 } as const

@@ -753,7 +753,9 @@ function SessionChatInner(props: SessionChatProps) {
     const codexCollaborationModeSupported = agentFlavor === 'codex' && !controlledByUser
     const claudeCustomModelsState = useClaudeCustomModels({
         api: props.api,
-        enabled: agentFlavor === 'claude'
+        // Guest shares are scoped to one session; custom Claude models are a
+        // hub-wide setting and would otherwise trigger a forbidden request.
+        enabled: !isSessionGuest && agentFlavor === 'claude'
     })
     const claudeModelOptions = useMemo(() => (
         agentFlavor === 'claude'
@@ -763,7 +765,9 @@ function SessionChatInner(props: SessionChatProps) {
     const codexModelsState = useCodexModels({
         api: props.api,
         sessionId: props.session.id,
-        machineId: props.session.metadata?.machineId ?? null,
+        // Machine discovery is a global resource. Guests can still use the
+        // session-scoped Codex model endpoint without leaking machine access.
+        machineId: isSessionGuest ? null : props.session.metadata?.machineId ?? null,
         enabled: agentFlavor === 'codex' && props.session.active && !controlledByUser
     })
     const dshModelsState = useDshModels({
