@@ -169,6 +169,39 @@ describe("session share routes", () => {
     });
     expect(guestGlobal.status).toBe(403);
 
+    const forbiddenGuestConfigurationRequests = [
+      { path: "permission-mode", body: { mode: "auto" } },
+      { path: "collaboration-mode", body: { mode: "plan" } },
+      { path: "copilot-agent-mode", body: { mode: "autonomous" } },
+      { path: "model", body: { model: "gpt-next" } },
+      {
+        path: "model-reasoning-effort",
+        body: { modelReasoningEffort: "high" },
+      },
+      { path: "effort", body: { effort: "high" } },
+      { path: "service-tier", body: { serviceTier: "fast" } },
+    ];
+    for (const request of forbiddenGuestConfigurationRequests) {
+      const response = await app.request(
+        `/api/sessions/${session.id}/${request.path}`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${guestToken}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(request.body),
+        },
+      );
+      expect(response.status).toBe(403);
+    }
+
+    const guestModels = await app.request(
+      `/api/sessions/${session.id}/codex-models`,
+      { headers: { authorization: `Bearer ${guestToken}` } },
+    );
+    expect(guestModels.status).toBe(403);
+
     const second = await app.request("/api/session-shares", {
       method: "POST",
       headers: {

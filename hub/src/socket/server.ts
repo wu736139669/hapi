@@ -154,13 +154,8 @@ export function createSocketServer(deps: SocketServerDeps): {
             }
             socket.data.userId = parsed.data.uid
             socket.data.namespace = parsed.data.ns
-            if (parsed.data.role === 'session-guest' && parsed.data.sid) {
-                if (!parsed.data.sht || deps.store.sessionShares.getActiveByToken(parsed.data.sht) === null) {
-                    return next(new Error('Share revoked or expired'))
-                }
-                socket.data.role = parsed.data.role
-                socket.data.sessionId = parsed.data.sid
-                socket.data.shareToken = parsed.data.sht
+            if (parsed.data.role === 'session-guest') {
+                return next(new Error('Guest terminal access is disabled'))
             }
             next()
             return
@@ -175,8 +170,7 @@ export function createSocketServer(deps: SocketServerDeps): {
         },
         terminalRegistry,
         maxTerminalsPerSocket,
-        maxTerminalsPerSession,
-        isGuestTokenActive: (shareToken) => deps.store.sessionShares.getActiveByToken(shareToken) !== null
+        maxTerminalsPerSession
     }))
 
     return { io, engine, rpcRegistry }

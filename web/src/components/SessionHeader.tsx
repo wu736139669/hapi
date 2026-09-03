@@ -613,7 +613,7 @@ export function SessionHeader(props: {
                         </button>
                     ) : null}
 
-                    {props.onToggleTerminal ? (
+                    {!isSessionGuest && props.onToggleTerminal ? (
                         <button
                             type="button"
                             onClick={props.onToggleTerminal}

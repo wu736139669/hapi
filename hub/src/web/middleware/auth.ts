@@ -56,10 +56,11 @@ export function createAuthMiddleware(jwtSecret: Uint8Array, options?: { isGuestT
                 if (!(path === '/api/events' || path === '/api/sessions' || path.startsWith('/api/sessions/'))) {
                     return c.json({ error: 'Guest access is limited to the shared session' }, 403)
                 }
-                const forbiddenGuestAction = /\/(fork|rewind|archive|reopen|resume|pin|summary|title-suggestion|switch|migrate-to-acp)(?:$|\/)/.test(path)
+                const forbiddenGuestAction = /\/(fork|rewind|archive|reopen|resume|pin|summary|title-suggestion|switch|migrate-to-acp|permission-mode|collaboration-mode|copilot-agent-mode|model|model-reasoning-effort|effort|service-tier)(?:$|\/)/.test(path)
+                const forbiddenGuestModelDiscovery = /\/(codex-models|dsh-models|opencode-models|opencode-reasoning-effort-options|grok-models|grok-reasoning-effort-options|copilot-models|cursor-models|pi-models)(?:$|\/)/.test(path)
                 const isSessionMetadataPatch = path.match(/^\/api\/sessions\/[^/]+$/) && c.req.method === 'PATCH'
                 const isSessionDelete = path.match(/^\/api\/sessions\/[^/]+$/) && c.req.method === 'DELETE'
-                if (forbiddenGuestAction || isSessionMetadataPatch || isSessionDelete) {
+                if (forbiddenGuestAction || forbiddenGuestModelDiscovery || isSessionMetadataPatch || isSessionDelete) {
                     return c.json({ error: 'Guest cannot perform this action' }, 403)
                 }
             }

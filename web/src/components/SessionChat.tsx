@@ -510,7 +510,7 @@ function SessionChatInner(props: SessionChatProps) {
     // misleadingly "connected" view. Matches the composer terminal button, which
     // is likewise gated on `session.active`.
     const canViewAgentTerminal =
-        props.session.metadata?.startingMode === 'pty' && props.session.active
+        !isSessionGuest && props.session.metadata?.startingMode === 'pty' && props.session.active
     const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const visibleGroupsRef = useRef<ToolGroupBlock[]>([])
@@ -765,15 +765,14 @@ function SessionChatInner(props: SessionChatProps) {
     const codexModelsState = useCodexModels({
         api: props.api,
         sessionId: props.session.id,
-        // Machine discovery is a global resource. Guests can still use the
-        // session-scoped Codex model endpoint without leaking machine access.
+        // Model discovery is owner-only for collaborative shares.
         machineId: isSessionGuest ? null : props.session.metadata?.machineId ?? null,
-        enabled: agentFlavor === 'codex' && props.session.active && !controlledByUser
+        enabled: !isSessionGuest && agentFlavor === 'codex' && props.session.active && !controlledByUser
     })
     const dshModelsState = useDshModels({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'dsh' && props.session.active && !controlledByUser
+        enabled: !isSessionGuest && agentFlavor === 'dsh' && props.session.active && !controlledByUser
     })
     const dshModelOptions = useMemo(
         () => agentFlavor === 'dsh'
@@ -825,12 +824,12 @@ function SessionChatInner(props: SessionChatProps) {
     const opencodeModelsState = useOpencodeModels({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'opencode' && props.session.active
+        enabled: !isSessionGuest && agentFlavor === 'opencode' && props.session.active
     })
     const opencodeReasoningEffortState = useOpencodeReasoningEffortOptions({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'opencode' && props.session.active
+        enabled: !isSessionGuest && agentFlavor === 'opencode' && props.session.active
     })
     const opencodeModelOptions = useMemo(() => {
         if (agentFlavor !== 'opencode') {
@@ -845,12 +844,12 @@ function SessionChatInner(props: SessionChatProps) {
     const grokModelsState = useGrokModels({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'grok' && props.session.active && !controlledByUser
+        enabled: !isSessionGuest && agentFlavor === 'grok' && props.session.active && !controlledByUser
     })
     const grokEffortState = useGrokReasoningEffortOptions({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'grok' && props.session.active && !controlledByUser
+        enabled: !isSessionGuest && agentFlavor === 'grok' && props.session.active && !controlledByUser
     })
     const grokModelOptions = useMemo(() => (
         agentFlavor === 'grok'
@@ -866,7 +865,7 @@ function SessionChatInner(props: SessionChatProps) {
     const copilotModelsState = useCopilotModels({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'copilot' && props.session.active && !controlledByUser
+        enabled: !isSessionGuest && agentFlavor === 'copilot' && props.session.active && !controlledByUser
     })
     const copilotModelOptions = useMemo(() => (
         agentFlavor === 'copilot'
@@ -884,7 +883,7 @@ function SessionChatInner(props: SessionChatProps) {
     const cursorModelsState = useCursorModels({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'cursor' && props.session.active
+        enabled: !isSessionGuest && agentFlavor === 'cursor' && props.session.active
     })
     const sessionMachineId = props.session.metadata?.machineId ?? null
     const machineCursorModelsState = useCursorModelsForMachine({
@@ -921,7 +920,7 @@ function SessionChatInner(props: SessionChatProps) {
     const piModelsState = usePiModels({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'pi' && props.session.active
+        enabled: !isSessionGuest && agentFlavor === 'pi' && props.session.active
     })
     // Fallback to cached models from metadata when session is inactive
     const piMetadata = props.session.metadata as Record<string, unknown> | null
@@ -1850,8 +1849,8 @@ function SessionChatInner(props: SessionChatProps) {
                                         // so Pi model changes go through the dedicated picker only.
                                         : undefined
                         }
-                        piModels={piModels}
-                        piSelectedModel={agentFlavor === 'pi' ? piSelectedModel : undefined}
+                        piModels={isSessionGuest ? undefined : piModels}
+                        piSelectedModel={!isSessionGuest && agentFlavor === 'pi' ? piSelectedModel : undefined}
                         availableModelReasoningEffortOptions={
                             agentFlavor === 'codex'
                                 ? codexReasoningEffortOptions
@@ -1878,17 +1877,17 @@ function SessionChatInner(props: SessionChatProps) {
                         contextModel={reduced.latestUsage?.model ?? props.session.model}
                         controlledByUser={controlledByUser}
                         onCollaborationModeChange={
-                            codexCollaborationModeSupported && props.session.active && !controlledByUser
+                            !isSessionGuest && codexCollaborationModeSupported && props.session.active && !controlledByUser
                                 ? handleCollaborationModeChange
                                 : undefined
                         }
                         onCopilotAgentModeChange={
-                            agentFlavor === 'copilot' && props.session.active && !controlledByUser
+                            !isSessionGuest && agentFlavor === 'copilot' && props.session.active && !controlledByUser
                                 ? handleCopilotAgentModeChange
                                 : undefined
                         }
                         onPermissionModeChange={
-                            agentFlavor === 'copilot' && controlledByUser
+                            isSessionGuest || (agentFlavor === 'copilot' && controlledByUser)
                                 ? undefined
                                 : handlePermissionModeChange
                         }
@@ -1917,7 +1916,9 @@ function SessionChatInner(props: SessionChatProps) {
                                 : undefined
                         }
                         onModelChange={
-                            agentFlavor === 'codex'
+                            isSessionGuest
+                                ? undefined
+                                : agentFlavor === 'codex'
                                 ? (props.session.active && !controlledByUser && !codexModelsState.error ? handleModelChange : undefined)
                                 : agentFlavor === 'dsh'
                                     ? (props.session.active && !controlledByUser && !dshModelsState.error ? handleModelChange : undefined)
@@ -1943,7 +1944,8 @@ function SessionChatInner(props: SessionChatProps) {
                                         : handleModelChange
                         }
                         onModelEffortChange={
-                            agentFlavor === 'cursor'
+                            !isSessionGuest
+                                && agentFlavor === 'cursor'
                                 && props.session.active
                                 && !controlledByUser
                                 && !cursorCatalogPending
@@ -1952,7 +1954,8 @@ function SessionChatInner(props: SessionChatProps) {
                                 : undefined
                         }
                         onModelReasoningEffortChange={
-                            (agentFlavor === 'codex' || agentFlavor === 'dsh' || agentFlavor === 'opencode')
+                            !isSessionGuest
+                                && (agentFlavor === 'codex' || agentFlavor === 'dsh' || agentFlavor === 'opencode')
                                 && props.session.active
                                 && !controlledByUser
                             && (agentFlavor !== 'opencode' || opencodeReasoningEffortState.options.length > 0)
@@ -1961,7 +1964,9 @@ function SessionChatInner(props: SessionChatProps) {
                                 : undefined
                         }
                         onEffortChange={
-                            agentFlavor === 'grok'
+                            isSessionGuest
+                                ? undefined
+                                : agentFlavor === 'grok'
                                 ? (props.session.active && !controlledByUser && grokEffortState.options.length > 0
                                     ? handleEffortChange
                                     : undefined)
@@ -1969,7 +1974,8 @@ function SessionChatInner(props: SessionChatProps) {
                         }
                         serviceTier={effectiveCodexServiceTier}
                         onServiceTierChange={
-                            agentFlavor === 'codex'
+                            !isSessionGuest
+                                && agentFlavor === 'codex'
                                 && props.session.active
                                 && !controlledByUser
                                 && !codexModelsState.error
@@ -1978,8 +1984,8 @@ function SessionChatInner(props: SessionChatProps) {
                                 : undefined
                         }
                         onSwitchToRemote={isSessionGuest ? undefined : handleSwitchToRemote}
-                        onTerminal={props.session.active && terminalSupported ? handleViewTerminal : undefined}
-                        terminalUnsupported={props.session.active && !terminalSupported}
+                        onTerminal={!isSessionGuest && props.session.active && terminalSupported ? handleViewTerminal : undefined}
+                        terminalUnsupported={!isSessionGuest && props.session.active && !terminalSupported}
                         autocompleteSuggestions={props.autocompleteSuggestions}
                         voiceStatus={voice?.status}
                         voiceMicMuted={voice?.micMuted}

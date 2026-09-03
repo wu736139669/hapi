@@ -5,6 +5,7 @@ import type { Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { I18nProvider } from '@/lib/i18n-context'
 import { ToastProvider, useToast } from '@/lib/toast-context'
+import { AppContextProvider } from '@/lib/app-context'
 import { resolveSessionHeaderMachineLabel, SessionHeader } from './SessionHeader'
 
 afterEach(() => {
@@ -280,6 +281,32 @@ describe('SessionHeader', () => {
         expect(terminal).toHaveAttribute('aria-pressed', 'true')
         terminal.click()
         expect(onToggleTerminal).toHaveBeenCalledOnce()
+    })
+
+    it('hides the agent terminal control for collaborative guests', () => {
+        render(
+            <QueryClientProvider client={new QueryClient()}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <AppContextProvider value={{
+                            api: {} as ApiClient,
+                            token: 'guest-token',
+                            baseUrl: 'http://localhost',
+                            isSessionGuest: true
+                        }}>
+                            <SessionHeader
+                                session={baseSession({ metadata: { flavor: 'agy', path: '/repo', host: 'machine' } })}
+                                onBack={vi.fn()}
+                                onToggleTerminal={vi.fn()}
+                                api={null}
+                            />
+                        </AppContextProvider>
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        expect(screen.queryByRole('button', { name: 'Terminal' })).not.toBeInTheDocument()
     })
 
     it('shows an inherited catalog-default Fast tier', () => {
