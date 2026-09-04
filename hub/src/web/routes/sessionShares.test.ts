@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { SignJWT } from "jose";
+import { SignJWT, decodeJwt } from "jose";
 import { Hono } from "hono";
 import { Store } from "../../store";
 import type { SyncEngine } from "../../sync/syncEngine";
@@ -153,6 +153,7 @@ describe("session share routes", () => {
     );
     expect(exchanged.status).toBe(200);
     const guestToken = ((await exchanged.json()) as { token: string }).token;
+    expect(decodeJwt(guestToken)).not.toHaveProperty("exp");
 
     const guestSessions = await app.request("/api/sessions", {
       headers: { authorization: `Bearer ${guestToken}` },

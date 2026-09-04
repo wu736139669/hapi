@@ -160,7 +160,6 @@ export function createSessionShareRoutes(options: {
     })
       .setProtectedHeader({ alg: "HS256" })
       .setIssuedAt()
-      .setExpirationTime("8h")
       .sign(options.jwtSecret);
 
     c.header("Cache-Control", "no-store");
