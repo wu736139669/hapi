@@ -12,7 +12,7 @@ import { HoverTooltip } from '@/components/HoverTooltip'
 import { safeCopyToClipboard } from '@/lib/clipboard'
 import { buildSessionReferenceText } from '@/lib/sessionReference'
 import { usePlatform } from '@/hooks/usePlatform'
-import { CopyIcon } from '@/components/icons'
+import { CopyIcon, ShareIcon } from '@/components/icons'
 
 type SessionActionMenuProps = {
     isOpen: boolean
@@ -24,9 +24,14 @@ type SessionActionMenuProps = {
     sessionPinned?: boolean
     sessionGlobalPinned?: boolean
     onSetPinMode?: (mode: 'none' | 'project' | 'global') => void
+    sessionPersonalPinned?: boolean
+    onSetPersonalPinned?: (pinned: boolean) => void
     onExport?: () => void
+    onStudio?: () => void
+    onSessionShare?: () => void
     onSyncCodex?: () => void
     onSyncPi?: () => void
+    onSyncDsh?: () => void
     onArchive: () => void
     onReopen?: () => void
     reopenDisabledReason?: string
@@ -195,9 +200,14 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         sessionPinned = false,
         sessionGlobalPinned = false,
         onSetPinMode,
+        sessionPersonalPinned = false,
+        onSetPersonalPinned,
         onExport,
+        onStudio,
+        onSessionShare,
         onSyncCodex,
         onSyncPi,
+        onSyncDsh,
         onArchive,
         onReopen,
         reopenDisabledReason,
@@ -232,6 +242,11 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onSetPinMode?.(mode)
     }
 
+    const handleSetPersonalPinned = (pinned: boolean) => {
+        onClose()
+        onSetPersonalPinned?.(pinned)
+    }
+
     const handleArchive = () => {
         onClose()
         onArchive()
@@ -247,6 +262,13 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onExport?.()
     }
 
+    const handleStudio = () => {
+        onClose()
+        onStudio?.()
+    }
+
+    const handleSessionShare = () => { onClose(); onSessionShare?.() }
+
     const handleSyncCodex = () => {
         onClose()
         onSyncCodex?.()
@@ -255,6 +277,11 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
     const handleSyncPi = () => {
         onClose()
         onSyncPi?.()
+    }
+
+    const handleSyncDsh = () => {
+        onClose()
+        onSyncDsh?.()
     }
 
     const handleDelete = () => {
@@ -381,6 +408,25 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     {t('session.action.rename')}
                 </button>
 
+                {onStudio ? (
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                        onClick={handleStudio}
+                    >
+                        <ShareIcon className="h-[18px] w-[18px] text-[var(--app-hint)]" />
+                        {t('studio.action.create')}
+                    </button>
+                ) : null}
+
+                {onSessionShare ? (
+                    <button type="button" role="menuitem" className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`} onClick={handleSessionShare}>
+                        <ShareIcon className="h-[18px] w-[18px] text-[var(--app-hint)]" />
+                        {t('session.action.sessionShare')}
+                    </button>
+                ) : null}
+
                 <button
                     type="button"
                     role="menuitem"
@@ -390,6 +436,18 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     <CopyIcon className="h-[18px] w-[18px] text-[var(--app-hint)]" />
                     {t('session.action.copyReference')}
                 </button>
+
+                {onSetPersonalPinned ? (
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                        onClick={() => handleSetPersonalPinned(!sessionPersonalPinned)}
+                    >
+                        <PinIcon filled={sessionPersonalPinned} className="text-[var(--app-hint)]" />
+                        {t(sessionPersonalPinned ? 'session.action.unpinPersonal' : 'session.action.pinPersonal')}
+                    </button>
+                ) : null}
 
                 {onSetPinMode ? (
                     <>
@@ -447,6 +505,18 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     >
                         <SyncIcon className="text-[var(--app-hint)]" />
                         {t('session.action.syncPi')}
+                    </button>
+                ) : null}
+
+                {onSyncDsh ? (
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                        onClick={handleSyncDsh}
+                    >
+                        <SyncIcon className="text-[var(--app-hint)]" />
+                        {t('session.action.syncDsh')}
                     </button>
                 ) : null}
 

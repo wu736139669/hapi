@@ -20,6 +20,10 @@ export function requireSession(
     options?: { requireActive?: boolean }
 ): { sessionId: string; session: Session } | Response {
     const namespace = c.get('namespace')
+    const guestSessionId = c.get('sessionId')
+    if (guestSessionId && guestSessionId !== sessionId) {
+        return c.json({ error: 'Session access denied' }, 403)
+    }
     const access = engine.resolveSessionAccess(sessionId, namespace)
     if (!access.ok) {
         const status = access.reason === 'access-denied' ? 403 : 404
@@ -55,6 +59,9 @@ export function requireMachine(
     engine: SyncEngine,
     machineId: string
 ): Machine | Response {
+    if (c.get('role') === 'session-guest') {
+        return c.json({ error: 'Machine access denied' }, 403)
+    }
     const namespace = c.get('namespace')
     const machine = engine.getMachine(machineId)
     if (!machine) {

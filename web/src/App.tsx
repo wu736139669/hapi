@@ -21,6 +21,7 @@ import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
 import { VoiceProvider } from '@/lib/voice-context'
 import { requireHubUrlForLogin } from '@/lib/runtime-config'
+import { useSessionGuestAuth } from '@/hooks/useSessionGuestAuth'
 import { getAppGlobalSseSubscription, getAppSessionSseSubscription } from '@/lib/appSseSubscriptions'
 import { reconcileQueuedStateAfterConnect } from '@/lib/queued-state-reconciliation'
 import { LoginPrompt } from '@/components/LoginPrompt'
@@ -68,6 +69,11 @@ function AppInner() {
     const [titleSuggestionAvailable, setTitleSuggestionAvailable] = useState(false)
     const goBack = useAppGoBack()
     const pathname = useLocation({ select: (location) => location.pathname })
+    const search = useLocation({ select: (location) => location.search })
+    const guestAuth = useSessionGuestAuth(baseUrl, pathname, search)
+    const effectiveToken = guestAuth.auth?.token ?? token
+    const effectiveApi = guestAuth.api ?? api
+    const isSessionGuest = guestAuth.auth !== null
     const matchRoute = useMatchRoute()
     const router = useRouter()
     const { addToast } = useToast()
@@ -172,7 +178,7 @@ function AppInner() {
     const isFirstConnectRef = useRef(true)
     const baseUrlRef = useRef(baseUrl)
     const pushPromptedRef = useRef(false)
-    const { isSupported: isPushSupported, permission: pushPermission, requestPermission, subscribe } = usePushNotifications(api)
+    const { isSupported: isPushSupported, permission: pushPermission, requestPermission, subscribe } = usePushNotifications(isSessionGuest ? null : api)
 
     useEffect(() => {
         if (baseUrlRef.current === baseUrl) {
@@ -368,12 +374,12 @@ function AppInner() {
         () => getAppSessionSseSubscription(selectedSessionId),
         [selectedSessionId]
     )
-    const sseEnabled = Boolean(api && token)
+    const sseEnabled = Boolean(effectiveApi && effectiveToken)
     const showReconnectingBanner = sseDisconnected && !isSyncing
 
     const { subscriptionId: globalSubscriptionId } = useSSE({
-        enabled: sseEnabled,
-        token: token ?? '',
+        enabled: sseEnabled && !isSessionGuest,
+        token: effectiveToken ?? '',
         baseUrl,
         subscription: globalEventSubscription,
         scope: 'global',
@@ -385,7 +391,7 @@ function AppInner() {
 
     const { subscriptionId: sessionSubscriptionId } = useSSE({
         enabled: sseEnabled && Boolean(sessionEventSubscription),
-        token: token ?? '',
+        token: effectiveToken ?? '',
         baseUrl,
         subscription: sessionEventSubscription ?? undefined,
         scope: 'full',
@@ -394,16 +400,35 @@ function AppInner() {
     })
 
     useVisibilityReporter({
-        api,
+        api: effectiveApi,
         subscriptionId: globalSubscriptionId,
-        enabled: sseEnabled
+        enabled: sseEnabled && !isSessionGuest
     })
 
     useVisibilityReporter({
-        api,
+        api: effectiveApi,
         subscriptionId: sessionSubscriptionId,
-        enabled: sseEnabled && Boolean(sessionEventSubscription)
+        enabled: sseEnabled && Boolean(sessionEventSubscription) && !isSessionGuest
     })
+
+    if (isSessionGuest && effectiveApi && effectiveToken) {
+        return <AppContextProvider value={{ api: effectiveApi, token: effectiveToken, baseUrl, titleSuggestionAvailable, isSessionGuest: true, guestShareToken: guestAuth.shareToken ?? undefined }}><div className="h-full min-h-0 flex flex-col"><Outlet /></div></AppContextProvider>
+    }
+
+    if (pathname.startsWith('/shared-session/')) {
+        return <div className="h-full min-h-0 flex flex-col"><Outlet /></div>
+    }
+
+    // Public studio links intentionally do not require a HAPI login token.
+    // Keep this route outside the authenticated shell; the public API only
+    // exposes a redacted transcript and the studio's own guest post endpoint.
+    if (pathname.startsWith('/studio/')) {
+        return (
+            <div className="h-full min-h-0 flex flex-col">
+                <Outlet />
+            </div>
+        )
+    }
 
     // Loading auth source
     if (isAuthSourceLoading) {
@@ -484,7 +509,7 @@ function AppInner() {
     }
 
     return (
-        <AppContextProvider value={{ api, token, baseUrl, titleSuggestionAvailable }}>
+        <AppContextProvider value={{ api: effectiveApi!, token: effectiveToken!, baseUrl, titleSuggestionAvailable }}>
             <VoiceProvider>
                 <PwaUpdateBannerWithStatusOffset
                     isSyncing={isSyncing}

@@ -224,6 +224,57 @@ export type ListCodexSessionsRpcResponse = z.infer<typeof ListCodexSessionsRpcRe
 export type ArchiveCodexSessionRpcRequest = z.infer<typeof ArchiveCodexSessionRpcRequestSchema>
 export type ArchiveCodexSessionRpcResponse = z.infer<typeof ArchiveCodexSessionRpcResponseSchema>
 
+export const ClaudeImportedMessageContentSchema = z.union([
+    z.object({
+        role: z.literal('user'),
+        content: z.object({ type: z.literal('text'), text: z.string() }),
+        meta: z.object({ sentFrom: z.literal('cli') })
+    }),
+    z.object({
+        role: z.literal('agent'),
+        content: z.object({ type: z.literal('output'), data: z.unknown() }),
+        meta: z.object({ sentFrom: z.literal('cli') })
+    })
+])
+
+export const ClaudeImportedMessageSchema = z.object({
+    localId: z.string().min(1),
+    createdAt: z.number(),
+    content: ClaudeImportedMessageContentSchema
+})
+
+export const ClaudeLocalSessionSummarySchema = z.object({
+    id: z.string().min(1),
+    title: z.string(),
+    lastUserMessage: z.string().nullable().optional(),
+    cwd: z.string().nullable().optional(),
+    file: z.string().min(1),
+    modifiedAt: z.number(),
+    model: z.string().nullable().optional(),
+    messageCount: z.number().int().nonnegative()
+})
+
+export const ClaudeLocalSessionWithMessagesSchema = ClaudeLocalSessionSummarySchema.extend({
+    messages: z.array(ClaudeImportedMessageSchema)
+})
+
+export const ListClaudeSessionsRpcRequestSchema = z.object({
+    cwd: z.string().nullable().optional(),
+    sessionIds: z.array(z.string().min(1)).optional()
+})
+
+export const ListClaudeSessionsRpcResponseSchema = z.union([
+    z.object({ success: z.literal(true), sessions: z.array(z.union([ClaudeLocalSessionWithMessagesSchema, ClaudeLocalSessionSummarySchema])) }),
+    z.object({ success: z.literal(false), error: z.string() })
+])
+
+export type ClaudeImportedMessageContent = z.infer<typeof ClaudeImportedMessageContentSchema>
+export type ClaudeImportedMessage = z.infer<typeof ClaudeImportedMessageSchema>
+export type ClaudeLocalSessionSummary = z.infer<typeof ClaudeLocalSessionSummarySchema>
+export type ClaudeLocalSessionWithMessages = z.infer<typeof ClaudeLocalSessionWithMessagesSchema>
+export type ListClaudeSessionsRpcRequest = z.infer<typeof ListClaudeSessionsRpcRequestSchema>
+export type ListClaudeSessionsRpcResponse = z.infer<typeof ListClaudeSessionsRpcResponseSchema>
+
 export const PiImportedMessageContentSchema = CodexImportedMessageSchema
 
 export const PiImportedMessageSchema = z.object({
@@ -268,6 +319,51 @@ export type PiLocalSessionSummary = z.infer<typeof PiLocalSessionSummarySchema>
 export type PiLocalSessionWithMessages = z.infer<typeof PiLocalSessionWithMessagesSchema>
 export type ListPiSessionsRpcRequest = z.infer<typeof ListPiSessionsRpcRequestSchema>
 export type ListPiSessionsRpcResponse = z.infer<typeof ListPiSessionsRpcResponseSchema>
+
+export const DshImportedMessageSchema = z.object({
+    localId: z.string().min(1),
+    eventSeq: z.number().int().nonnegative(),
+    createdAt: z.number(),
+    content: CodexImportedMessageSchema
+})
+
+export const DshLocalSessionSummarySchema = z.object({
+    id: z.string().min(1),
+    title: z.string(),
+    lastUserMessage: z.string().nullable().optional(),
+    cwd: z.string().nullable().optional(),
+    modifiedAt: z.number(),
+    model: z.string().nullable().optional(),
+    reasoningEffort: z.string().nullable().optional(),
+    messageCount: z.number().int().nonnegative(),
+    running: z.boolean(),
+    parentSessionId: z.string().nullable().optional()
+})
+
+export const DshLocalSessionWithMessagesSchema = DshLocalSessionSummarySchema.extend({
+    messages: z.array(DshImportedMessageSchema),
+    lastEventSeq: z.number().int().nonnegative().nullable()
+})
+
+export const ListDshSessionsRpcRequestSchema = z.object({
+    cwd: z.string().nullable().optional(),
+    sessionIds: z.array(z.string().min(1)).optional()
+})
+
+export const ListDshSessionsRpcResponseSchema = z.union([
+    z.object({
+        success: z.literal(true),
+        sessions: z.array(z.union([DshLocalSessionWithMessagesSchema, DshLocalSessionSummarySchema])),
+        sourceUrl: z.string().url()
+    }),
+    z.object({ success: z.literal(false), error: z.string() })
+])
+
+export type DshImportedMessage = z.infer<typeof DshImportedMessageSchema>
+export type DshLocalSessionSummary = z.infer<typeof DshLocalSessionSummarySchema>
+export type DshLocalSessionWithMessages = z.infer<typeof DshLocalSessionWithMessagesSchema>
+export type ListDshSessionsRpcRequest = z.infer<typeof ListDshSessionsRpcRequestSchema>
+export type ListDshSessionsRpcResponse = z.infer<typeof ListDshSessionsRpcResponseSchema>
 
 export const SessionCollaborationModeRequestSchema = z.object({
     mode: CodexCollaborationModeSchema
@@ -738,6 +834,35 @@ export type CodexModelsResponse = {
 }
 
 export type ListCodexModelsResponse = CodexModelsResponse
+
+export type DshReasoningEffortOption = {
+    id: string
+    name: string
+    isDefault: boolean
+}
+
+export type DshModelSummary = {
+    provider: string
+    providerName: string
+    modelId: string
+    name: string
+    reasoningEfforts: DshReasoningEffortOption[]
+}
+
+export type DshModelSelection = {
+    provider: string
+    modelId: string
+    reasoningEffort?: string
+}
+
+export type DshModelsResponse = {
+    success: boolean
+    availableModels?: DshModelSummary[]
+    current?: DshModelSelection | null
+    error?: string
+}
+
+export type ListDshModelsResponse = DshModelsResponse
 
 export type OpencodeModelSummary = {
     modelId: string

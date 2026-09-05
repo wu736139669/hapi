@@ -1,12 +1,13 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { ApiClient } from '@/api/client'
-import type { CodexDuplicateSessionGroup, CodexLocalSessionSummary, Machine, PiLocalSessionSummary } from '@/types/api'
+import type { ClaudeLocalSessionSummary, CodexDuplicateSessionGroup, CodexLocalSessionSummary, DshLocalSessionSummary, Machine, PiLocalSessionSummary } from '@/types/api'
 import type { CodexCollaborationMode, GrokPermissionMode, PermissionMode, CopilotAgentMode } from '@hapi/protocol'
 import { codexModelAdvertisesFastTier } from '@/components/AssistantChat/codexFastMode'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useMachinePathsExists } from '@/hooks/useMachinePathsExists'
 import { useSpawnSession } from '@/hooks/mutations/useSpawnSession'
 import { useCodexModels } from '@/hooks/queries/useCodexModels'
+import { useDshModels } from '@/hooks/queries/useDshModels'
 import { useCursorModelsForMachine } from '@/hooks/queries/useCursorModelsForMachine'
 import { useAgyModels } from '@/hooks/queries/useAgyModels'
 import { useOpencodeModelsForCwd } from '@/hooks/queries/useOpencodeModelsForCwd'
@@ -19,6 +20,7 @@ import { useDirectorySuggestions } from '@/hooks/useDirectorySuggestions'
 import { useRecentPaths } from '@/hooks/useRecentPaths'
 import { useTranslation } from '@/lib/use-translation'
 import { getCodexModelReasoningEfforts } from '@/lib/codexModelCapabilities'
+import { buildDshModelOptions, getDshReasoningOptions } from '@/lib/dshModelOptions'
 import {
     buildNewSessionCursorModelCatalog,
     buildNewSessionCursorPickerState,
@@ -38,11 +40,14 @@ import {
     shouldRestoreNewSessionFormDraft
 } from './newSessionFormDraft'
 import type { AgentType, LaunchEffort, CodexReasoningEffort, NewSessionServiceTier, SessionType } from './types'
+import { MODEL_OPTIONS } from './types'
 import { ActionButtons } from './ActionButtons'
 import { AgentSelector } from './AgentSelector'
 import { CollaborationModeSelector } from './CollaborationModeSelector'
+import { ClaudeImportActions } from './ClaudeImportActions'
 import { CodexImportActions } from './CodexImportActions'
 import { PiImportActions } from './PiImportActions'
+import { DshImportActions } from './DshImportActions'
 import { clearBatchImportedCodexSelection, resolveCodexImportRedirectSessionId } from './codexImportMerge'
 import { AgyModelSelector } from './AgyModelSelector'
 import { DirectorySection } from './DirectorySection'
@@ -69,7 +74,9 @@ import { SessionTypeSelector } from './SessionTypeSelector'
 import { PermissionField } from './PermissionField'
 import { usesCodexFamilyPermissionModes } from '@/lib/codexFamilyPermissionAgents'
 import { CodexSessionSyncDialog } from '@/components/CodexSessionSyncDialog'
+import { ClaudeSessionImportDialog } from '@/components/ClaudeSessionImportDialog'
 import { PiSessionImportDialog } from '@/components/PiSessionImportDialog'
+import { DshSessionImportDialog } from '@/components/DshSessionImportDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { formatRunnerSpawnError } from '../../utils/formatRunnerSpawnError'
 import { markCodexSessionsImported } from '@/lib/codexImportedSessions'
@@ -126,6 +133,15 @@ export function NewSession(props: {
     const [codexImportError, setCodexImportError] = useState<string | null>(null)
     const [isImportingCodexSession, setIsImportingCodexSession] = useState(false)
     const [isCodexImportDialogOpen, setIsCodexImportDialogOpen] = useState(false)
+    const [claudeImportSessions, setClaudeImportSessions] = useState<ClaudeLocalSessionSummary[]>([])
+    const [selectedClaudeImportSessionId, setSelectedClaudeImportSessionId] = useState<string | null>(null)
+    const [claudeImportMachineId, setClaudeImportMachineId] = useState<string | null>(null)
+    const [isLoadingClaudeImportSessions, setIsLoadingClaudeImportSessions] = useState(false)
+    const [claudeImportError, setClaudeImportError] = useState<string | null>(null)
+    const [isImportingClaudeSession, setIsImportingClaudeSession] = useState(false)
+    const [isBulkImportingClaudeSessions, setIsBulkImportingClaudeSessions] = useState(false)
+    const [isClaudeImportDialogOpen, setIsClaudeImportDialogOpen] = useState(false)
+    const claudeLoadGenerationRef = useRef(0)
     const [piImportSessions, setPiImportSessions] = useState<PiLocalSessionSummary[]>([])
     const [selectedPiImportSessionId, setSelectedPiImportSessionId] = useState<string | null>(null)
     const [piImportMachineId, setPiImportMachineId] = useState<string | null>(null)
@@ -135,6 +151,15 @@ export function NewSession(props: {
     const [isBulkImportingPiSessions, setIsBulkImportingPiSessions] = useState(false)
     const [isPiImportDialogOpen, setIsPiImportDialogOpen] = useState(false)
     const piLoadGenerationRef = useRef(0)
+    const [dshImportSessions, setDshImportSessions] = useState<DshLocalSessionSummary[]>([])
+    const [selectedDshImportSessionId, setSelectedDshImportSessionId] = useState<string | null>(null)
+    const [dshImportMachineId, setDshImportMachineId] = useState<string | null>(null)
+    const [isLoadingDshImportSessions, setIsLoadingDshImportSessions] = useState(false)
+    const [dshImportError, setDshImportError] = useState<string | null>(null)
+    const [isImportingDshSession, setIsImportingDshSession] = useState(false)
+    const [isBulkImportingDshSessions, setIsBulkImportingDshSessions] = useState(false)
+    const [isDshImportDialogOpen, setIsDshImportDialogOpen] = useState(false)
+    const dshLoadGenerationRef = useRef(0)
     const [isCreating, setIsCreating] = useState(false)
     const createInFlightRef = useRef(false)
     const [isBulkImportingCodexSessions, setIsBulkImportingCodexSessions] = useState(false)
@@ -150,8 +175,12 @@ export function NewSession(props: {
         || props.isLoading
         || isImportingCodexSession
         || isBulkImportingCodexSessions
+        || isImportingClaudeSession
+        || isBulkImportingClaudeSessions
         || isImportingPiSession
         || isBulkImportingPiSessions
+        || isImportingDshSession
+        || isBulkImportingDshSessions
     )
     const worktreeInputRef = useRef<HTMLInputElement>(null)
     const preserveRestoredDraftRef = useRef(false)
@@ -191,6 +220,22 @@ export function NewSession(props: {
             setCodexImportError(null)
         }
     }, [agent])
+
+    useEffect(() => {
+        if (agent !== 'claude') {
+            setSelectedClaudeImportSessionId(null)
+            setClaudeImportSessions([])
+            setClaudeImportMachineId(null)
+            setClaudeImportError(null)
+        }
+    }, [agent])
+
+    useEffect(() => {
+        setSelectedClaudeImportSessionId(null)
+        setClaudeImportSessions([])
+        setClaudeImportMachineId(null)
+        setClaudeImportError(null)
+    }, [machineId])
 
     useEffect(() => {
         savePreferredYoloMode(yoloMode)
@@ -283,7 +328,68 @@ export function NewSession(props: {
         machineId,
         enabled: agent === 'codex' && Boolean(machineId)
     })
+    const dshModelsState = useDshModels({
+        api: props.api,
+        machineId,
+        enabled: agent === 'dsh' && Boolean(machineId)
+    })
     const [agySelectedModel, setAgySelectedModel] = useState<string | null>(null)
+    const [claudeCustomModels, setClaudeCustomModels] = useState<string[]>([])
+    const [claudeModelsLoaded, setClaudeModelsLoaded] = useState(false)
+    useEffect(() => {
+        let cancelled = false
+        setClaudeModelsLoaded(false)
+        if (!props.api) {
+            setClaudeModelsLoaded(true)
+            return
+        }
+        try {
+            props.api.getClaudeCustomModels().then((result) => {
+                if (!cancelled) {
+                    setClaudeCustomModels(Array.isArray(result.models) ? result.models : [])
+                    setClaudeModelsLoaded(true)
+                }
+            }).catch(() => {
+                // Custom models are optional — fall back to the built-in presets.
+                if (!cancelled) {
+                    setClaudeCustomModels([])
+                    setClaudeModelsLoaded(true)
+                }
+            })
+        } catch {
+            // Partial api clients (tests, older hub versions) without the
+            // method must not break the New Session form.
+            setClaudeCustomModels([])
+            setClaudeModelsLoaded(true)
+        }
+        return () => {
+            cancelled = true
+        }
+    }, [props.api])
+    const claudeModelOptions = useMemo(() => {
+        const options = [...MODEL_OPTIONS.claude]
+        for (const modelName of claudeCustomModels) {
+            if (!options.some((option) => option.value === modelName)) {
+                options.push({ value: modelName, label: modelName })
+            }
+        }
+        if (
+            agent === 'claude'
+            && model !== 'auto'
+            && !options.some((option) => option.value === model)
+        ) {
+            options.splice(1, 0, { value: model, label: model })
+        }
+        return options
+    }, [agent, claudeCustomModels, model])
+    const claudePreferredModelValues = useMemo(
+        () => agent === 'claude'
+            ? [...MODEL_OPTIONS.claude.map((option) => option.value), ...claudeCustomModels]
+            : null,
+        [agent, claudeCustomModels]
+    )
+    const claudeModelsLoading = agent === 'claude' && !claudeModelsLoaded
+    const preferredModelCatalogReady = !claudeModelsLoading
     const runnerSpawnError = useMemo(
         () => formatRunnerSpawnError(selectedMachine),
         [selectedMachine]
@@ -309,6 +415,14 @@ export function NewSession(props: {
         () => codexSupportedReasoningEfforts?.map((value) => ({ value })),
         [codexSupportedReasoningEfforts]
     )
+    const dshModelOptions = useMemo(() => [
+        { value: 'auto', label: 'Default' },
+        ...buildDshModelOptions(dshModelsState.availableModels, dshModelsState.current)
+    ], [dshModelsState.availableModels, dshModelsState.current])
+    const dshReasoningEffortOptions = useMemo(
+        () => getDshReasoningOptions(dshModelsState.availableModels, dshModelsState.current, model),
+        [dshModelsState.availableModels, dshModelsState.current, model]
+    )
 
     useEffect(() => {
         if (
@@ -321,6 +435,25 @@ export function NewSession(props: {
         }
         setModelReasoningEffort('default')
     }, [agent, codexSupportedReasoningEfforts, modelReasoningEffort])
+
+    useEffect(() => {
+        if (
+            agent !== 'dsh'
+            || modelReasoningEffort === 'default'
+            || dshModelsState.isLoading
+            || dshModelsState.error
+            || dshReasoningEffortOptions.some((option) => option.value === modelReasoningEffort)
+        ) {
+            return
+        }
+        setModelReasoningEffort('default')
+    }, [
+        agent,
+        dshModelsState.error,
+        dshModelsState.isLoading,
+        dshReasoningEffortOptions,
+        modelReasoningEffort
+    ])
 
     useEffect(() => {
         if (
@@ -756,14 +889,15 @@ export function NewSession(props: {
     }, [agent, machineId, deferredDirectory])
 
     useEffect(() => {
-        if (!machineId || preserveRestoredDraftRef.current) {
+        if (!machineId || preserveRestoredDraftRef.current || !preferredModelCatalogReady) {
             return
         }
 
         const preferred = resolvePreferredLaunchSettings(
             agent,
             loadPreferredLaunchSettings(machineId, agent),
-            legacyCodexYolo
+            legacyCodexYolo,
+            claudePreferredModelValues ?? undefined
         )
 
         setModel(agent === 'opencode' ? 'auto' : preferred.model)
@@ -779,7 +913,7 @@ export function NewSession(props: {
         setAgySelectedModel(
             agent === 'agy' && preferred.model !== 'auto' ? preferred.model : null
         )
-    }, [agent, legacyCodexYolo, machineId])
+    }, [agent, claudePreferredModelValues, legacyCodexYolo, machineId, preferredModelCatalogReady])
 
     useEffect(() => {
         if (
@@ -907,6 +1041,44 @@ export function NewSession(props: {
     }, [agent, machineId, props.api, trimmedDirectory, t])
 
     useEffect(() => {
+        claudeLoadGenerationRef.current += 1
+        setIsLoadingClaudeImportSessions(false)
+    }, [agent, machineId, trimmedDirectory])
+
+    useEffect(() => () => {
+        claudeLoadGenerationRef.current += 1
+    }, [])
+
+    const loadClaudeImportSessions = useCallback(async () => {
+        if (agent !== 'claude' || !machineId) return
+        const generation = ++claudeLoadGenerationRef.current
+        setIsLoadingClaudeImportSessions(true)
+        setClaudeImportError(null)
+        try {
+            const result = await props.api.getClaudeSessions(trimmedDirectory || null, machineId)
+            if (generation !== claudeLoadGenerationRef.current) return
+            if (!result.success) throw new Error(result.error)
+            setClaudeImportSessions(result.sessions)
+            setClaudeImportMachineId(result.machineId ?? machineId)
+            setSelectedClaudeImportSessionId((current) => current && result.sessions.some((session) => session.id === current) ? current : null)
+        } catch (loadError) {
+            if (generation !== claudeLoadGenerationRef.current) return
+            setClaudeImportSessions([])
+            setClaudeImportMachineId(null)
+            setSelectedClaudeImportSessionId(null)
+            setClaudeImportError(loadError instanceof Error ? loadError.message : t('claudeImport.failed.body'))
+        } finally {
+            if (generation === claudeLoadGenerationRef.current) setIsLoadingClaudeImportSessions(false)
+        }
+    }, [agent, machineId, props.api, trimmedDirectory, t])
+
+    const formatClaudeImportError = useCallback((code?: string, message?: string): string => {
+        if (code === 'transcript_diverged') return t('claudeImport.error.diverged')
+        if (code === 'session_active') return t('claudeImport.error.active')
+        return message?.trim() || t('claudeImport.failed.body')
+    }, [t])
+
+    useEffect(() => {
         piLoadGenerationRef.current += 1
         setIsLoadingPiImportSessions(false)
     }, [agent, machineId, trimmedDirectory])
@@ -942,6 +1114,45 @@ export function NewSession(props: {
         if (code === 'transcript_diverged') return t('piImport.error.diverged')
         if (code === 'session_active') return t('piImport.error.active')
         return message?.trim() || t('piImport.failed.body')
+    }, [t])
+
+    useEffect(() => {
+        dshLoadGenerationRef.current += 1
+        setIsLoadingDshImportSessions(false)
+    }, [agent, machineId, trimmedDirectory])
+
+    useEffect(() => () => {
+        dshLoadGenerationRef.current += 1
+    }, [])
+
+    const loadDshImportSessions = useCallback(async () => {
+        if (agent !== 'dsh' || !machineId) return
+        const generation = ++dshLoadGenerationRef.current
+        setIsLoadingDshImportSessions(true)
+        setDshImportError(null)
+        try {
+            const result = await props.api.getDshSessions(trimmedDirectory || null, machineId)
+            if (generation !== dshLoadGenerationRef.current) return
+            if (!result.success) throw new Error(result.error)
+            setDshImportSessions(result.sessions)
+            setDshImportMachineId(result.machineId ?? machineId)
+            setSelectedDshImportSessionId((current) =>
+                current && result.sessions.some((session) => session.id === current) ? current : null)
+        } catch (loadError) {
+            if (generation !== dshLoadGenerationRef.current) return
+            setDshImportSessions([])
+            setDshImportMachineId(null)
+            setSelectedDshImportSessionId(null)
+            setDshImportError(loadError instanceof Error ? loadError.message : t('dshImport.failed.body'))
+        } finally {
+            if (generation === dshLoadGenerationRef.current) setIsLoadingDshImportSessions(false)
+        }
+    }, [agent, machineId, props.api, trimmedDirectory, t])
+
+    const formatDshImportError = useCallback((code?: string, message?: string): string => {
+        if (code === 'transcript_diverged') return t('dshImport.error.diverged')
+        if (code === 'session_active') return t('dshImport.error.active')
+        return message?.trim() || t('dshImport.failed.body')
     }, [t])
 
     const normalizeCodexScriptError = useCallback((message: string | null | undefined, fallback: string): string => {
@@ -1138,6 +1349,66 @@ export function NewSession(props: {
         t
     ])
 
+    const handleBulkImportClaudeSessions = useCallback(async (sessionIds: string[]) => {
+        if (isBulkImportingClaudeSessions || isLoadingClaudeImportSessions) return
+        setIsBulkImportingClaudeSessions(true)
+        try {
+            const result = await props.api.importClaudeSessions({
+                sessionIds,
+                cwd: trimmedDirectory || null,
+                machineId: claudeImportMachineId ?? machineId
+            })
+            const importedCount = result.results.filter((item) => item.hapiSessionId && !item.error).length
+            const failed = result.results.filter((item) => item.error)
+            if (importedCount > 0) {
+                addToast({
+                    title: t('claudeImport.success.title'),
+                    body: t('claudeImport.success.body', { n: importedCount }),
+                    sessionId: '',
+                    url: ''
+                })
+                await refetchSessions()
+                await loadClaudeImportSessions()
+            }
+            if (failed.length > 0) {
+                const first = failed[0]!.error!
+                addToast({
+                    title: t('claudeImport.failed.title'),
+                    body: t('claudeImport.failed.partial', {
+                        failed: failed.length,
+                        reason: formatClaudeImportError(first.code, first.message)
+                    }),
+                    sessionId: '',
+                    url: ''
+                })
+                return
+            }
+            setIsClaudeImportDialogOpen(false)
+            setSelectedClaudeImportSessionId(null)
+        } catch (importError) {
+            addToast({
+                title: t('claudeImport.failed.title'),
+                body: importError instanceof Error ? importError.message : t('claudeImport.failed.body'),
+                sessionId: '',
+                url: ''
+            })
+        } finally {
+            setIsBulkImportingClaudeSessions(false)
+        }
+    }, [
+        addToast,
+        claudeImportMachineId,
+        formatClaudeImportError,
+        isBulkImportingClaudeSessions,
+        isLoadingClaudeImportSessions,
+        loadClaudeImportSessions,
+        machineId,
+        props.api,
+        refetchSessions,
+        t,
+        trimmedDirectory
+    ])
+
     const handleBulkImportPiSessions = useCallback(async (sessionIds: string[]) => {
         if (isBulkImportingPiSessions || isLoadingPiImportSessions) return
         setIsBulkImportingPiSessions(true)
@@ -1198,16 +1469,82 @@ export function NewSession(props: {
         trimmedDirectory
     ])
 
+    const handleBulkImportDshSessions = useCallback(async (sessionIds: string[]) => {
+        if (isBulkImportingDshSessions || isLoadingDshImportSessions) return
+        setIsBulkImportingDshSessions(true)
+        try {
+            const result = await props.api.importDshSessions({
+                sessionIds,
+                cwd: trimmedDirectory || null,
+                machineId: dshImportMachineId ?? machineId
+            })
+            const importedCount = result.results.filter((item) => item.hapiSessionId && !item.error).length
+            const failed = result.results.filter((item) => item.error)
+            if (importedCount > 0) {
+                addToast({
+                    title: t('dshImport.success.title'),
+                    body: t('dshImport.success.body', { n: importedCount }),
+                    sessionId: '',
+                    url: ''
+                })
+                await refetchSessions()
+                await loadDshImportSessions()
+            }
+            if (failed.length > 0) {
+                const first = failed[0]!.error!
+                addToast({
+                    title: t('dshImport.failed.title'),
+                    body: t('dshImport.failed.partial', {
+                        failed: failed.length,
+                        reason: formatDshImportError(first.code, first.message)
+                    }),
+                    sessionId: '',
+                    url: ''
+                })
+                return
+            }
+            setIsDshImportDialogOpen(false)
+            setSelectedDshImportSessionId(null)
+        } catch (importError) {
+            addToast({
+                title: t('dshImport.failed.title'),
+                body: importError instanceof Error ? importError.message : t('dshImport.failed.body'),
+                sessionId: '',
+                url: ''
+            })
+        } finally {
+            setIsBulkImportingDshSessions(false)
+        }
+    }, [
+        addToast,
+        dshImportMachineId,
+        formatDshImportError,
+        isBulkImportingDshSessions,
+        isLoadingDshImportSessions,
+        loadDshImportSessions,
+        machineId,
+        props.api,
+        refetchSessions,
+        t,
+        trimmedDirectory
+    ])
+
     const selectedCodexImportSession = useMemo(
         () => codexImportSessions.find((session) => session.id === selectedCodexImportSessionId) ?? null,
         [codexImportSessions, selectedCodexImportSessionId]
+    )
+    const selectedClaudeImportSession = useMemo(
+        () => claudeImportSessions.find((session) => session.id === selectedClaudeImportSessionId) ?? null,
+        [claudeImportSessions, selectedClaudeImportSessionId]
     )
     const selectedPiImportSession = useMemo(
         () => piImportSessions.find((session) => session.id === selectedPiImportSessionId) ?? null,
         [piImportSessions, selectedPiImportSessionId]
     )
-    // Pi history import reopens the native session as-is; the launch-only
-    // model/effort controls would silently not apply, so hide them.
+    const selectedDshImportSession = useMemo(
+        () => dshImportSessions.find((session) => session.id === selectedDshImportSessionId) ?? null,
+        [dshImportSessions, selectedDshImportSessionId]
+    )
     const showPiLaunchConfig = agent !== 'pi' || !selectedPiImportSession
 
     const handleAgentChange = useCallback((newAgent: AgentType) => {
@@ -1223,9 +1560,15 @@ export function NewSession(props: {
         setSelectedCodexImportSessionId(null)
         setCodexImportSessions([])
         setCodexImportMachineId(null)
+        setSelectedClaudeImportSessionId(null)
+        setClaudeImportSessions([])
+        setClaudeImportMachineId(null)
         setSelectedPiImportSessionId(null)
         setPiImportSessions([])
         setPiImportMachineId(null)
+        setSelectedDshImportSessionId(null)
+        setDshImportSessions([])
+        setDshImportMachineId(null)
         const paths = getRecentPaths(newMachineId)
         if (paths[0]) {
             setDirectory(paths[0])
@@ -1322,6 +1665,11 @@ export function NewSession(props: {
         if (session.cwd?.trim()) setDirectory(session.cwd.trim())
     }, [])
 
+    const handleSelectDshImportSession = useCallback((session: DshLocalSessionSummary) => {
+        setSelectedDshImportSessionId(session.id)
+        if (session.cwd?.trim()) setDirectory(session.cwd.trim())
+    }, [])
+
     const handlePathClick = useCallback((path: string) => {
         setDirectory(path)
     }, [])
@@ -1415,7 +1763,7 @@ export function NewSession(props: {
             const resolvedEffort = (agent === 'claude' || agent === 'grok' || agent === 'pi') && effort !== 'auto'
                 ? effort
                 : undefined
-            const resolvedModelReasoningEffort = (agent === 'codex' || agent === 'opencode') && modelReasoningEffort !== 'default'
+            const resolvedModelReasoningEffort = (agent === 'codex' || agent === 'dsh' || agent === 'opencode') && modelReasoningEffort !== 'default'
                 ? modelReasoningEffort
                 : undefined
             const usesCodexFamilyPermissions = usesCodexFamilyPermissionModes(agent)
@@ -1477,6 +1825,34 @@ export function NewSession(props: {
                 return
             }
 
+            if (agent === 'claude' && selectedClaudeImportSession) {
+                setIsImportingClaudeSession(true)
+                const result = await props.api.importClaudeSessions({
+                    sessionIds: [selectedClaudeImportSession.id],
+                    cwd: selectedClaudeImportSession.cwd ?? trimmedDirectory,
+                    machineId: claudeImportMachineId ?? machineId,
+                    model: resolvedModel ?? null,
+                    effort: resolvedEffort ?? null,
+                    permissionMode: yoloMode ? 'bypassPermissions' : 'default'
+                })
+                const imported = result.results.find((item) => item.claudeSessionId === selectedClaudeImportSession.id)
+                if (imported?.error) {
+                    setIsImportingClaudeSession(false)
+                    haptic.notification('error')
+                    setError(formatClaudeImportError(imported.error.code, imported.error.message))
+                    return
+                }
+                if (!imported?.hapiSessionId) throw new Error(result.error || t('claudeImport.failed.body'))
+                const reopened = await props.api.reopenSession(imported.hapiSessionId)
+                haptic.notification('success')
+                savePreferredLaunchSettings(machineId, agent, preferredLaunchSettings)
+                clearNewSessionFormDraft()
+                setLastUsedMachineId(machineId)
+                addRecentPath(machineId, trimmedDirectory)
+                props.onSuccess(reopened.sessionId)
+                return
+            }
+
             if (agent === 'pi' && selectedPiImportSession) {
                 setIsImportingPiSession(true)
                 const result = await props.api.importPiSessions({
@@ -1492,6 +1868,31 @@ export function NewSession(props: {
                     return
                 }
                 if (!imported?.hapiSessionId) throw new Error(result.error || t('piImport.failed.body'))
+                const reopened = await props.api.reopenSession(imported.hapiSessionId)
+                haptic.notification('success')
+                savePreferredLaunchSettings(machineId, agent, preferredLaunchSettings)
+                clearNewSessionFormDraft()
+                setLastUsedMachineId(machineId)
+                addRecentPath(machineId, trimmedDirectory)
+                props.onSuccess(reopened.sessionId)
+                return
+            }
+
+            if (agent === 'dsh' && selectedDshImportSession) {
+                setIsImportingDshSession(true)
+                const result = await props.api.importDshSessions({
+                    sessionIds: [selectedDshImportSession.id],
+                    cwd: selectedDshImportSession.cwd ?? trimmedDirectory,
+                    machineId: dshImportMachineId ?? machineId
+                })
+                const imported = result.results.find((item) => item.dshSessionId === selectedDshImportSession.id)
+                if (imported?.error) {
+                    setIsImportingDshSession(false)
+                    haptic.notification('error')
+                    setError(formatDshImportError(imported.error.code, imported.error.message))
+                    return
+                }
+                if (!imported?.hapiSessionId) throw new Error(result.error || t('dshImport.failed.body'))
                 const reopened = await props.api.reopenSession(imported.hapiSessionId)
                 haptic.notification('success')
                 savePreferredLaunchSettings(machineId, agent, preferredLaunchSettings)
@@ -1537,7 +1938,9 @@ export function NewSession(props: {
             setError(result.message)
         } catch (e) {
             setIsImportingCodexSession(false)
+            setIsImportingClaudeSession(false)
             setIsImportingPiSession(false)
+            setIsImportingDshSession(false)
             haptic.notification('error')
             setError(e instanceof Error ? e.message : 'Failed to create session')
         } finally {
@@ -1547,7 +1950,8 @@ export function NewSession(props: {
     }
 
     const isLaunchPreferenceValidationPending =
-        (agent === 'codex'
+        claudeModelsLoading
+        || (agent === 'codex'
             && (model !== 'auto' || modelReasoningEffort !== 'default')
             && codexModelsState.isLoading)
         || (agent === 'agy'
@@ -1634,6 +2038,19 @@ export function NewSession(props: {
                 isDisabled={isFormDisabled}
                 onAgentChange={handleAgentChange}
             />
+            {agent === 'claude' ? (
+                <ClaudeImportActions
+                    selectedSession={selectedClaudeImportSession}
+                    isLoading={isLoadingClaudeImportSessions}
+                    isDisabled={isFormDisabled}
+                    error={claudeImportError}
+                    onChooseHistory={() => {
+                        setIsClaudeImportDialogOpen(true)
+                        void loadClaudeImportSessions()
+                    }}
+                    onClear={() => setSelectedClaudeImportSessionId(null)}
+                />
+            ) : null}
             {agent === 'codex' ? (
                 <CodexImportActions
                     selectedSession={selectedCodexImportSession}
@@ -1658,6 +2075,19 @@ export function NewSession(props: {
                         void loadPiImportSessions()
                     }}
                     onClear={() => setSelectedPiImportSessionId(null)}
+                />
+            ) : null}
+            {agent === 'dsh' ? (
+                <DshImportActions
+                    selectedSession={selectedDshImportSession}
+                    isLoading={isLoadingDshImportSessions}
+                    isDisabled={isFormDisabled}
+                    error={dshImportError}
+                    onChooseHistory={() => {
+                        setIsDshImportDialogOpen(true)
+                        void loadDshImportSessions()
+                    }}
+                    onClear={() => setSelectedDshImportSessionId(null)}
                 />
             ) : null}
             {agent === 'agy' ? (
@@ -1727,8 +2157,12 @@ export function NewSession(props: {
                         agent={agent}
                         model={model}
                         options={
-                            agent === 'codex'
+                            agent === 'claude'
+                                ? claudeModelOptions
+                                : agent === 'codex'
                                 ? codexModelOptions
+                                : agent === 'dsh'
+                                    ? dshModelOptions
                                 : agent === 'grok'
                                     ? grokModelOptions
                                     : agent === 'copilot'
@@ -1740,16 +2174,21 @@ export function NewSession(props: {
                         isDisabled={
                             isFormDisabled
                             || (agent === 'codex' && Boolean(codexModelsState.error))
+                            || (agent === 'dsh' && Boolean(dshModelsState.error))
                             || (agent === 'grok' && Boolean(grokModelsState.error))
                             || (agent === 'copilot' && Boolean(copilotModelsState.error))
                             || (agent === 'pi' && Boolean(piModelsState.error))
                         }
-                        isLoading={(agent === 'codex' && codexModelsState.isLoading)
+                        isLoading={claudeModelsLoading
+                            || (agent === 'codex' && codexModelsState.isLoading)
+                            || (agent === 'dsh' && dshModelsState.isLoading)
                             || (agent === 'grok' && grokModelsState.isLoading)
                             || (agent === 'copilot' && copilotModelsState.isLoading)
                             || (agent === 'pi' && piModelsState.isLoading)}
                         error={agent === 'codex' && codexModelsState.error
                             ? `${t('newSession.model.loadFailed')}: ${codexModelsState.error}`
+                            : agent === 'dsh' && dshModelsState.error
+                                ? `${t('newSession.model.loadFailed')}: ${dshModelsState.error}`
                             : agent === 'grok' && grokModelsState.error
                                 ? `${t('newSession.model.loadFailed')}: ${grokModelsState.error}`
                                 : agent === 'copilot' && copilotModelsState.error
@@ -1768,7 +2207,7 @@ export function NewSession(props: {
                     onEffortChange={setEffort}
                     reasoningEffort={modelReasoningEffort}
                     onReasoningEffortChange={setModelReasoningEffort}
-                    isDisabled={isFormDisabled || (agent === 'codex' && codexModelsState.isLoading)}
+                    isDisabled={isFormDisabled || claudeModelsLoading || (agent === 'codex' && codexModelsState.isLoading)}
                     grokOptions={agent === 'grok' ? grokEffortOptions : undefined}
                     codexReasoningOptions={agent === 'codex' ? codexReasoningEffortOptions : undefined}
                     piSelectedModel={agent === 'pi' ? piSelectedModel : null}
@@ -1779,7 +2218,7 @@ export function NewSession(props: {
                 nativeValue={agent === 'grok' ? grokPermissionMode : codexFamilyPermissionMode}
                 yoloMode={yoloMode}
                 autoPermissionModeSupported={agent === 'grok' ? grokModelsState.autoPermissionModeSupported : null}
-                isDisabled={isFormDisabled}
+                isDisabled={isFormDisabled || claudeModelsLoading}
                 onNativeChange={(mode) => {
                     if (agent === 'grok') {
                         setGrokPermissionMode(mode as GrokPermissionMode)
@@ -1815,12 +2254,33 @@ export function NewSession(props: {
             ) : null}
 
             <ActionButtons
-                isPending={isCreating || isPending || isImportingCodexSession || isImportingPiSession}
+                isPending={isCreating || isPending || isImportingCodexSession || isImportingPiSession || isImportingDshSession}
                 canCreate={canCreate}
                 isDisabled={isFormDisabled}
                 createLabel={createLabel}
                 onCancel={props.onCancel}
                 onCreate={handleCreate}
+            />
+            <ClaudeSessionImportDialog
+                isOpen={isClaudeImportDialogOpen}
+                onClose={() => setIsClaudeImportDialogOpen(false)}
+                sessions={claudeImportSessions}
+                currentSessionId={selectedClaudeImportSessionId}
+                currentWorkDirectory={trimmedDirectory}
+                onConfirm={async (sessionIds) => {
+                    if (sessionIds.length === 1) {
+                        const session = claudeImportSessions.find((candidate) => candidate.id === sessionIds[0])
+                        if (session) {
+                            setSelectedClaudeImportSessionId(session.id)
+                            if (session.cwd?.trim()) setDirectory(session.cwd.trim())
+                            setIsClaudeImportDialogOpen(false)
+                        }
+                        return
+                    }
+                    await handleBulkImportClaudeSessions(sessionIds)
+                }}
+                isPending={isBulkImportingClaudeSessions}
+                isLoading={isLoadingClaudeImportSessions}
             />
             <CodexSessionSyncDialog
                 isOpen={isCodexImportDialogOpen}
@@ -1865,6 +2325,26 @@ export function NewSession(props: {
                 }}
                 isPending={isBulkImportingPiSessions}
                 isLoading={isLoadingPiImportSessions}
+            />
+            <DshSessionImportDialog
+                isOpen={isDshImportDialogOpen}
+                onClose={() => setIsDshImportDialogOpen(false)}
+                sessions={dshImportSessions}
+                currentSessionId={selectedDshImportSessionId}
+                currentWorkDirectory={trimmedDirectory}
+                onConfirm={async (sessionIds) => {
+                    if (sessionIds.length === 1) {
+                        const session = dshImportSessions.find((candidate) => candidate.id === sessionIds[0])
+                        if (session) {
+                            handleSelectDshImportSession(session)
+                            setIsDshImportDialogOpen(false)
+                        }
+                        return
+                    }
+                    await handleBulkImportDshSessions(sessionIds)
+                }}
+                isPending={isBulkImportingDshSessions}
+                isLoading={isLoadingDshImportSessions}
             />
             <ConfirmDialog
                 isOpen={isDuplicateMergeConfirmOpen && duplicateSessionGroups.length > 0}

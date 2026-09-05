@@ -125,6 +125,28 @@
                 "tone": "danger"
             }
         ],
+        "dsh": [
+            {
+                "label": "Default",
+                "mode": "default",
+                "tone": "neutral"
+            },
+            {
+                "label": "Read Only",
+                "mode": "read-only",
+                "tone": "warning"
+            },
+            {
+                "label": "Workspace Write",
+                "mode": "workspace-write",
+                "tone": "warning"
+            },
+            {
+                "label": "Full Access",
+                "mode": "danger-full-access",
+                "tone": "danger"
+            }
+        ],
         "gemini": [
             {
                 "label": "Default",

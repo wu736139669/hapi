@@ -79,10 +79,12 @@ function createHarness(options?: {
     sessionNamespace?: string
     maxTerminalsPerSocket?: number
     maxTerminalsPerSession?: number
+    role?: 'session-guest'
 }): Harness {
     const io = new FakeServer()
     const terminalSocket = new FakeSocket('terminal-socket')
     terminalSocket.data.namespace = 'default'
+    if (options?.role) terminalSocket.data.role = options.role
     const terminalRegistry = new TerminalRegistry({ idleTimeoutMs: 0 })
     const cliNamespace = io.of('/cli')
 
@@ -114,6 +116,25 @@ function lastEmit(socket: FakeSocket, event: string): EmittedEvent | undefined {
 }
 
 describe('terminal socket handlers', () => {
+    it('registers no terminal handlers for collaborative guests', () => {
+        const { terminalSocket, cliNamespace, terminalRegistry } = createHarness({ role: 'session-guest' })
+        const cliSocket = new FakeSocket('cli-socket-1')
+        connectCliSocket(cliNamespace, cliSocket, 'session-1')
+
+        terminalSocket.trigger('terminal:create', {
+            sessionId: 'session-1',
+            terminalId: 'terminal-1',
+            cols: 80,
+            rows: 24
+        })
+        terminalSocket.trigger('agent-terminal:subscribe', { sessionId: 'session-1' })
+        terminalSocket.trigger('agent-terminal:input', { sessionId: 'session-1', data: 'a' })
+
+        expect(terminalRegistry.get('terminal-1')).toBeNull()
+        expect(terminalSocket.rooms.size).toBe(0)
+        expect(cliSocket.emitted).toHaveLength(0)
+    })
+
     it('rejects terminal creation when session is inactive', () => {
         const { terminalSocket, terminalRegistry } = createHarness({ sessionActive: false })
 

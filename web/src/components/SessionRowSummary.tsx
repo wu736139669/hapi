@@ -99,6 +99,8 @@ function getSessionTimeLabel(
  */
 export function SessionRowSummary(props: {
     session: SessionSummary
+    /** Compact rows used by the collapsed session index rail. */
+    compact?: boolean
     showPath?: boolean
     showDetailedStatus?: boolean
     selected?: boolean
@@ -120,6 +122,7 @@ export function SessionRowSummary(props: {
 }) {
     const {
         session: s,
+        compact = false,
         showPath = true,
         showDetailedStatus = true,
         selected = false,
@@ -160,18 +163,18 @@ export function SessionRowSummary(props: {
     const timeLabel = getSessionTimeLabel(s, t)
 
     return (
-        <div className={`flex w-full min-w-0 flex-col gap-1 ${className ?? ''}`}>
-            <div className={`grid grid-cols-[minmax(9rem,1fr)_minmax(0,max-content)] items-center gap-2 ${!s.active ? 'opacity-50' : ''}`}>
-                <div className="flex min-w-0 items-center gap-2">
-                    <AgentFlavorIcon flavor={s.metadata?.flavor} className="h-4 w-4 shrink-0 -translate-y-px" />
+        <div className={`flex w-full min-w-0 flex-col ${compact ? 'gap-0' : 'gap-1'} ${className ?? ''}`}>
+            <div className={`grid min-w-0 items-center ${compact ? 'grid-cols-[minmax(0,1fr)] gap-1' : 'grid-cols-[minmax(9rem,1fr)_minmax(0,max-content)] gap-2'} ${!s.active ? 'opacity-50' : ''}`}>
+                <div className={`flex min-w-0 items-center ${compact ? 'gap-1' : 'gap-2'}`}>
+                    <AgentFlavorIcon flavor={s.metadata?.flavor} className={compact ? 'h-3.5 w-3.5 shrink-0 -translate-y-px' : 'h-4 w-4 shrink-0 -translate-y-px'} />
                     <div
-                        className={`min-w-0 flex-1 truncate text-sm font-medium ${s.active ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}
+                        className={`min-w-0 flex-1 truncate font-medium ${compact ? 'text-xs' : 'text-sm'} ${s.active ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}
                         title={sessionName}
                     >
                         {sessionName}
                     </div>
                     {s.active && s.thinking ? (
-                        <LoaderIcon className="h-3.5 w-3.5 shrink-0 animate-spin-slow text-[var(--app-badge-success-text)]" />
+                        <LoaderIcon className={compact ? 'h-3 w-3 shrink-0 animate-spin-slow text-[var(--app-badge-success-text)]' : 'h-3.5 w-3.5 shrink-0 animate-spin-slow text-[var(--app-badge-success-text)]'} />
                     ) : urgentAttention && nestedTooltips && attentionId ? (
                         <SessionAttentionIndicator
                             attention={attention}
@@ -232,7 +235,7 @@ export function SessionRowSummary(props: {
                             aria-label={attentionLabel ?? undefined}
                         />
                     ) : null}
-                    {hasScheduleTooltip && nestedTooltips && scheduleId ? (
+                    {!compact && hasScheduleTooltip && nestedTooltips && scheduleId ? (
                         <HoverTooltip
                             id={scheduleId}
                             target={<ScheduleIcon className="h-3.5 w-3.5 text-[var(--app-hint)]" />}
@@ -248,13 +251,13 @@ export function SessionRowSummary(props: {
                                 </span>
                             </span>
                         </HoverTooltip>
-                    ) : hasScheduleTooltip ? (
+                    ) : !compact && hasScheduleTooltip ? (
                         <span className="shrink-0" aria-label={scheduledLabel} title={scheduledLabel}>
                             <ScheduleIcon className="h-3.5 w-3.5 text-[var(--app-hint)]" />
                         </span>
                     ) : null}
                 </div>
-                <div className="flex min-w-0 items-center justify-end gap-2 overflow-hidden text-xs">
+                {!compact ? <div className="flex min-w-0 items-center justify-end gap-2 overflow-hidden text-xs">
                     {todoProgress ? (
                         <span className="flex shrink-0 items-center gap-1 text-[var(--app-hint)]">
                             <BulbIcon className="h-3 w-3" />
@@ -269,13 +272,13 @@ export function SessionRowSummary(props: {
                     {timeLabel ? (
                         <span className="min-w-0 truncate whitespace-nowrap tabular-nums text-[var(--app-hint)]">{timeLabel}</span>
                     ) : null}
+                </div> : null}
                 </div>
-            </div>
-            {projectLabel || machineLabel ? (
+            {!compact && (projectLabel || machineLabel) ? (
                 <div className="truncate text-xs text-[var(--app-hint)]" title={[projectLabel, machineLabel].filter(Boolean).join(' · ')}>
                     {[projectLabel, machineLabel].filter(Boolean).join(' · ')}
                 </div>
-            ) : showPath || worktreeLabel ? (
+            ) : !compact && (showPath || worktreeLabel) ? (
                 <div
                     className="truncate text-xs text-[var(--app-hint)]"
                     title={worktreeLabel

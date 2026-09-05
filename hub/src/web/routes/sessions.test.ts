@@ -65,6 +65,7 @@ function createApp(session: Session, opts?: {
     archiveSession?: (sessionId: string) => Promise<void>
     getCursorChatStoreStatus?: SyncEngine['getCursorChatStoreStatus']
     listCodexModelsForSession?: SyncEngine['listCodexModelsForSession']
+    listDshModelsForSession?: SyncEngine['listDshModelsForSession']
     forkConversation?: SyncEngine['forkConversation']
     rewindConversation?: SyncEngine['rewindConversation']
     suggestSessionTitle?: SyncEngine['suggestSessionTitle']
@@ -133,6 +134,10 @@ function createApp(session: Session, opts?: {
         listCodexModelsForSession: opts?.listCodexModelsForSession ?? (async () => ({
             success: true,
             models: []
+        })),
+        listDshModelsForSession: opts?.listDshModelsForSession ?? (async () => ({
+            success: true,
+            availableModels: []
         })),
         listOpencodeModelsForSession,
         listOpencodeReasoningEffortOptionsForSession,
@@ -276,6 +281,34 @@ describe('sessions routes', () => {
             success: true,
             models: [{ id: 'gpt-5.5', displayName: 'GPT-5.5', isDefault: true }]
         })
+    })
+
+    it('uses session-scoped DeepSeek Harness model discovery', async () => {
+        const session = createSession({
+            metadata: {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'dsh',
+                machineId: 'machine-1'
+            }
+        })
+        const captured: string[] = []
+        const result = {
+            success: true as const,
+            current: { provider: 'deepseek-official', modelId: 'deepseek-v4-pro' },
+            availableModels: []
+        }
+        const { app } = createApp(session, {
+            listDshModelsForSession: async (sessionId) => {
+                captured.push(sessionId)
+                return result
+            }
+        })
+
+        const response = await app.request('/api/sessions/session-1/dsh-models')
+        expect(response.status).toBe(200)
+        expect(captured).toEqual(['session-1'])
+        expect(await response.json()).toEqual(result)
     })
 
     it('returns the machine-scoped Cursor chat store status', async () => {
@@ -459,7 +492,7 @@ describe('sessions routes', () => {
 
         expect(response.status).toBe(400)
         expect(await response.json()).toEqual({
-            error: 'Model reasoning effort is only supported for Codex and OpenCode sessions'
+            error: 'Model reasoning effort is only supported for Codex, DeepSeek Harness, and OpenCode sessions'
         })
         expect(applySessionConfigCalls).toEqual([])
     })
@@ -525,6 +558,29 @@ describe('sessions routes', () => {
         expect(await response.json()).toEqual({ ok: true })
         expect(applySessionConfigCalls).toEqual([
             ['session-1', { modelReasoningEffort: 'high' }]
+        ])
+    })
+
+    it('applies model reasoning effort changes for remote DeepSeek Harness sessions', async () => {
+        const session = createSession({
+            metadata: {
+                path: '/tmp/project',
+                host: 'localhost',
+                flavor: 'dsh'
+            }
+        })
+        const { app, applySessionConfigCalls } = createApp(session)
+
+        const response = await app.request('/api/sessions/session-1/model-reasoning-effort', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ modelReasoningEffort: 'max' })
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ ok: true })
+        expect(applySessionConfigCalls).toEqual([
+            ['session-1', { modelReasoningEffort: 'max' }]
         ])
     })
 

@@ -34,6 +34,12 @@ describe('getBuiltinSlashCommands', () => {
         expect(commands.map((command) => command.name)).toContain('compact')
     })
 
+    it('exposes the native DSH compaction command', () => {
+        expect(getBuiltinSlashCommands('dsh')).toEqual([
+            { name: 'compact', description: 'Compact older conversation history', source: 'builtin' }
+        ])
+    })
+
     it('does not fall back to Claude commands for kimi', () => {
         expect(getBuiltinSlashCommands('kimi')).toEqual([])
     })

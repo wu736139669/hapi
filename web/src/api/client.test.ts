@@ -57,6 +57,21 @@ describe('ApiClient error mapping', () => {
         }
     })
 
+    it('preserves public session-share verification error codes on 401', async () => {
+        fetchMock.mockResolvedValueOnce(
+            new Response(
+                JSON.stringify({ error: 'Invalid access code or revoked share', code: 'invalid_access_code' }),
+                { status: 401, statusText: 'Unauthorized' }
+            )
+        )
+
+        const api = new ApiClient('')
+        await expect(api.exchangeSessionShare('share-token', '000000')).rejects.toMatchObject({
+            status: 401,
+            code: 'invalid_access_code',
+        })
+    })
+
     it('passes the 422 missing-metadata body through unchanged so the UI can show the missing fields', async () => {
         fetchMock.mockResolvedValueOnce(
             new Response(
@@ -141,6 +156,37 @@ describe('ApiClient error mapping', () => {
         expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
             method: 'POST',
             body: JSON.stringify({ sessionIds: ['pi-1'], cwd: '/tmp/project', machineId: 'machine-1' })
+        })
+    })
+
+    it('lists and imports Claude sessions through the selected machine', async () => {
+        fetchMock
+            .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, sessions: [], machineId: 'machine-1' }), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, results: [], machineId: 'machine-1' }), { status: 200 }))
+        const api = new ApiClient('test-token')
+
+        await api.getClaudeSessions('/tmp/project', 'machine-1')
+        await api.importClaudeSessions({
+            sessionIds: ['claude-1'],
+            cwd: '/tmp/project',
+            machineId: 'machine-1',
+            model: 'claude-sonnet-4-5',
+            effort: 'high',
+            permissionMode: 'bypassPermissions'
+        })
+
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/claude/sessions?cwd=%2Ftmp%2Fproject&machineId=machine-1')
+        expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/claude/import-sessions')
+        expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+            method: 'POST',
+            body: JSON.stringify({
+                sessionIds: ['claude-1'],
+                cwd: '/tmp/project',
+                machineId: 'machine-1',
+                model: 'claude-sonnet-4-5',
+                effort: 'high',
+                permissionMode: 'bypassPermissions'
+            })
         })
     })
 

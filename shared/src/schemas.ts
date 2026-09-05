@@ -81,6 +81,7 @@ export const MetadataSchema = z.object({
     //   undefined     = no migration in flight; banner hidden.
     // tiann/hapi#873.
     cursorMigrationState: z.enum(['in_progress', 'ambiguous']).optional(),
+    dshSessionId: z.string().optional(),
     kimiSessionId: z.string().optional(),
     copilotSessionId: z.string().optional(),
     piSessionId: z.string().optional(),
@@ -136,6 +137,15 @@ export const MetadataSchema = z.object({
     // Pi localId → append-only session entry id mapping. Pi entry ids are the
     // only stable native boundary accepted by its fork API.
     conversationHistoryEntryIds: z.record(z.string(), z.string().min(1)).optional(),
+    claudeImportState: z.object({
+        state: z.enum(['importing', 'complete', 'failed', 'diverged']),
+        machineId: z.string(),
+        claudeSessionId: z.string(),
+        sourceFile: z.string(),
+        startedAt: z.number(),
+        updatedAt: z.number(),
+        error: z.string().optional()
+    }).optional(),
     // Latest Pi append-log entry observed by HAPI. Import uses it as the
     // incremental cursor so native history already streamed live is not copied twice.
     piHistoryLeafEntryId: z.string().optional(),
@@ -149,6 +159,19 @@ export const MetadataSchema = z.object({
         leafEntryId: z.string().nullable().optional(),
         error: z.string().optional()
     }).optional(),
+    dshImportState: z.object({
+        state: z.enum(['importing', 'complete', 'failed', 'diverged']),
+        machineId: z.string(),
+        dshSessionId: z.string(),
+        sourceUrl: z.string().url(),
+        startedAt: z.number(),
+        updatedAt: z.number(),
+        lastEventSeq: z.number().int().nonnegative().nullable().optional(),
+        error: z.string().optional()
+    }).optional(),
+    // Latest DSH event observed through import or the live mux. Import uses
+    // this append-only cursor to avoid copying turns already streamed live.
+    dshHistoryLastEventSeq: z.number().int().nonnegative().optional(),
     // Set when native rewind succeeded but HAPI truncate/hydrate failed.
     conversationHistoryDiverged: z.boolean().optional(),
     worktree: WorktreeMetadataSchema.optional(),

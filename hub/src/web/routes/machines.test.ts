@@ -103,18 +103,23 @@ describe('machines routes', () => {
         })
     })
 
-    it('returns Pi models for an online machine', async () => {
+    it('returns DeepSeek Harness models for an online machine', async () => {
         const machine = createMachine()
+        const result = {
+            success: true as const,
+            current: { provider: 'deepseek-official', modelId: 'deepseek-v4-pro' },
+            availableModels: [{
+                provider: 'deepseek-official',
+                providerName: 'DeepSeek',
+                modelId: 'deepseek-v4-pro',
+                name: 'DeepSeek V4 Pro',
+                reasoningEfforts: []
+            }]
+        }
         const engine = {
             getMachine: () => machine,
             getMachineByNamespace: () => machine,
-            listPiModelsForMachine: async () => ({
-                success: true,
-                availableModels: [
-                    { provider: 'openai-codex', modelId: 'gpt-5.6-sol', reasoning: true }
-                ],
-                currentModelId: null
-            })
+            listDshModelsForMachine: async () => result
         } as Partial<SyncEngine>
 
         const app = new Hono<WebAppEnv>()
@@ -124,16 +129,9 @@ describe('machines routes', () => {
         })
         app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
 
-        const response = await app.request('/api/machines/machine-1/pi-models')
-
+        const response = await app.request('/api/machines/machine-1/dsh-models')
         expect(response.status).toBe(200)
-        expect(await response.json()).toEqual({
-            success: true,
-            availableModels: [
-                { provider: 'openai-codex', modelId: 'gpt-5.6-sol', reasoning: true }
-            ],
-            currentModelId: null
-        })
+        expect(await response.json()).toEqual(result)
     })
 
     it('returns a stable code when the Codex machine RPC target is absent', async () => {

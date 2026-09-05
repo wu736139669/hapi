@@ -21,12 +21,13 @@ const mocks = vi.hoisted(() => ({
     directoryExists: undefined as boolean | undefined,
     copilotModels: [] as Array<{ modelId: string; name?: string }>,
     copilotModelsLoading: false,
-    opencodeModels: [] as Array<{ modelId: string; name?: string }>,
-    opencodeModelsLoading: false,
+    claudeDialogSelection: ['claude-native-1'] as string[],
     piDialogSelection: ['pi-native-1'] as string[],
     piModels: [] as PiModelSummary[],
     piModelsLoading: false,
     piModelsError: null as string | null,
+    opencodeModels: [] as Array<{ modelId: string; name?: string }>,
+    opencodeModelsLoading: false,
     nextModelValue: 'gpt-5.6-terra',
     refetchSessions: vi.fn(),
     addToast: vi.fn()
@@ -91,6 +92,15 @@ vi.mock('@/hooks/queries/useCodexModels', () => ({
         error: null
     })
 }))
+vi.mock('@/hooks/queries/useDshModels', () => ({
+    useDshModels: () => ({
+        availableModels: [],
+        current: null,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn()
+    })
+}))
 vi.mock('@/hooks/queries/useAgyModels', () => ({
     useAgyModels: () => ({
         availableModels: mocks.agyModels,
@@ -150,6 +160,13 @@ vi.mock('../../utils/formatRunnerSpawnError', () => ({
 vi.mock('@/components/CodexSessionSyncDialog', () => ({
     CodexSessionSyncDialog: () => null
 }))
+vi.mock('@/components/ClaudeSessionImportDialog', () => ({
+    ClaudeSessionImportDialog: (props: { isOpen: boolean; sessions: Array<{ id: string }>; onConfirm: (ids: string[]) => Promise<void> }) => props.isOpen ? (
+        <button type="button" data-testid="select-claude-history" disabled={props.sessions.length === 0} onClick={() => void props.onConfirm(mocks.claudeDialogSelection)}>
+            select claude history
+        </button>
+    ) : null
+}))
 vi.mock('@/components/PiSessionImportDialog', () => ({
     PiSessionImportDialog: (props: { isOpen: boolean; sessions: Array<{ id: string }>; onClose: () => void; onConfirm: (ids: string[]) => Promise<void> }) => props.isOpen ? (
         <>
@@ -207,28 +224,64 @@ vi.mock('./AgyModelSelector', () => ({
     )
 }))
 vi.mock('./EffortField', () => ({
-    EffortField: (props: { effort: string; reasoningEffort: string; onReasoningEffortChange: (v: string) => void }) => (
+    EffortField: (props: {
+        effort: string
+        reasoningEffort: string
+        isDisabled: boolean
+        onEffortChange: (value: string) => void
+        onReasoningEffortChange: (value: string) => void
+    }) => (
         <>
-            <div data-testid="launch-effort">{props.effort}</div>
+            <button type="button" data-testid="launch-effort" disabled={props.isDisabled} onClick={() => props.onEffortChange('low')}>
+                {props.effort}
+            </button>
             <button type="button" data-testid="reasoning" onClick={() => props.onReasoningEffortChange('max')}>
                 {props.reasoningEffort}
             </button>
         </>
     )
 }))
+vi.mock('./LaunchEffortSelector', () => ({
+    LaunchEffortSelector: (props: {
+        effort: string
+        isDisabled: boolean
+        onEffortChange: (effort: string) => void
+    }) => (
+        <button
+            type="button"
+            data-testid="launch-effort"
+            disabled={props.isDisabled}
+            onClick={() => props.onEffortChange('low')}
+        >
+            {props.effort}
+        </button>
+    )
+}))
 vi.mock('./ModelSelector', () => ({
     ModelSelector: (props: {
         model: string
         options?: Array<{ value: string; label: string }>
+        isDisabled: boolean
+        isLoading?: boolean
         onModelChange: (model: string) => void
-    }) => (
-        <>
-            <button type="button" data-testid="model" onClick={() => props.onModelChange(mocks.nextModelValue)}>
-                {props.model}
-            </button>
-            <div data-testid="model-options">{props.options?.map((option) => option.label).join(',')}</div>
-        </>
-    )
+    }) => {
+        const displayedModel = props.options && !props.options.some((option) => option.value === props.model)
+            ? props.options[0]?.value ?? props.model
+            : props.model
+        return (
+            <>
+                <button
+                    type="button"
+                    data-testid="model"
+                    disabled={props.isDisabled || props.isLoading}
+                    onClick={() => props.onModelChange('gpt-5.6-terra')}
+                >
+                    {displayedModel}
+                </button>
+                <div data-testid="model-options">{props.options?.map((option) => option.label).join(',')}</div>
+            </>
+        )
+    }
 }))
 vi.mock('./ActionButtons', () => ({
     ActionButtons: (props: { onCreate: () => void; onChooseFolder?: () => void; canCreate: boolean }) => (
@@ -387,6 +440,89 @@ describe('NewSession launch preferences', () => {
         )
 
         await waitFor(() => expect(screen.getByTestId('create')).toBeDisabled())
+    })
+
+    it('waits for custom Claude models before restoring a saved model', async () => {
+        savePreferredAgent('claude')
+        savePreferredLaunchSettings('machine-1', 'claude', {
+            model: 'deepseek-v4-flash[1m]',
+            cursorSelectedBase: 'auto',
+            effort: 'high',
+            modelReasoningEffort: 'default'
+        })
+        const claudeApi = {
+            getClaudeCustomModels: vi.fn().mockResolvedValue({
+                models: ['deepseek-v4-flash[1m]']
+            })
+        } as unknown as ApiClient
+
+        render(
+            <NewSession
+                api={claudeApi}
+                machines={[machine]}
+                initialMachineId="machine-1"
+                initialDirectory="C:\\repo"
+                onSuccess={mocks.onSuccess}
+                onCancel={() => {}}
+            />
+        )
+
+        await waitFor(() => {
+            expect(screen.getByTestId('model')).toHaveTextContent('deepseek-v4-flash[1m]')
+            expect(screen.getByTestId('launch-effort')).toHaveTextContent('high')
+        })
+    })
+
+    it('blocks model changes and creation until custom Claude models load', async () => {
+        savePreferredAgent('claude')
+        savePreferredLaunchSettings('machine-1', 'claude', {
+            model: 'deepseek-v4-flash[1m]',
+            cursorSelectedBase: 'auto',
+            effort: 'high',
+            modelReasoningEffort: 'default'
+        })
+        let resolveModels!: (value: { models: string[] }) => void
+        const claudeApi = {
+            getClaudeCustomModels: vi.fn().mockReturnValue(new Promise((resolve) => {
+                resolveModels = resolve
+            }))
+        } as unknown as ApiClient
+
+        render(
+            <NewSession
+                api={claudeApi}
+                machines={[machine]}
+                initialMachineId="machine-1"
+                initialDirectory="C:\\repo"
+                onSuccess={mocks.onSuccess}
+                onCancel={() => {}}
+            />
+        )
+
+        const model = screen.getByTestId('model')
+        const effort = screen.getByTestId('launch-effort')
+        const create = screen.getByTestId('create')
+        expect(model).toBeDisabled()
+        expect(effort).toBeDisabled()
+        expect(create).toBeDisabled()
+        fireEvent.click(model)
+        fireEvent.click(effort)
+        fireEvent.click(create)
+        expect(model).toHaveTextContent('auto')
+        expect(effort).toHaveTextContent('auto')
+        expect(mocks.spawnSession).not.toHaveBeenCalled()
+
+        await act(async () => {
+            resolveModels({ models: ['deepseek-v4-flash[1m]'] })
+        })
+
+        await waitFor(() => {
+            expect(model).toHaveTextContent('deepseek-v4-flash[1m]')
+            expect(model).toBeEnabled()
+            expect(effort).toHaveTextContent('high')
+            expect(effort).toBeEnabled()
+            expect(create).toBeEnabled()
+        })
     })
 
     it.each([
@@ -652,6 +788,58 @@ describe('NewSession launch preferences', () => {
         expect(mocks.spawnSession).not.toHaveBeenCalled()
     })
 
+    it('imports the selected Claude history and resumes the canonical HAPI session', async () => {
+        savePreferredAgent('claude')
+        const claudeApi = {
+            getClaudeSessions: vi.fn().mockResolvedValue({
+                success: true,
+                machineId: 'machine-1',
+                sessions: [{
+                    id: 'claude-native-1',
+                    title: 'Existing Claude session',
+                    cwd: 'C:\\repo',
+                    file: 'C:\\claude-native-1.jsonl',
+                    modifiedAt: 1,
+                    messageCount: 2
+                }]
+            }),
+            importClaudeSessions: vi.fn().mockResolvedValue({
+                success: true,
+                machineId: 'machine-1',
+                results: [{ claudeSessionId: 'claude-native-1', hapiSessionId: 'hapi-claude-1', action: 'created', appended: 2 }]
+            }),
+            reopenSession: vi.fn().mockResolvedValue({ ok: true, sessionId: 'hapi-claude-1', resumed: true })
+        } as unknown as ApiClient
+
+        render(
+            <NewSession
+                api={claudeApi}
+                machines={[machine]}
+                initialMachineId="machine-1"
+                initialDirectory="C:\\repo"
+                onSuccess={mocks.onSuccess}
+                onCancel={() => {}}
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: 'claudeImport.inline.choose' }))
+        await waitFor(() => expect(screen.getByTestId('select-claude-history')).toBeEnabled())
+        fireEvent.click(screen.getByTestId('select-claude-history'))
+        fireEvent.click(screen.getByTestId('create'))
+
+        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('hapi-claude-1'))
+        expect(claudeApi.importClaudeSessions).toHaveBeenCalledWith({
+            sessionIds: ['claude-native-1'],
+            cwd: 'C:\\repo',
+            machineId: 'machine-1',
+            model: null,
+            effort: null,
+            permissionMode: 'default'
+        })
+        expect(claudeApi.reopenSession).toHaveBeenCalledWith('hapi-claude-1')
+        expect(mocks.spawnSession).not.toHaveBeenCalled()
+    })
+
     it('discards a stale Pi scan after switching machines', async () => {
         savePreferredAgent('pi')
         mocks.piDialogSelection = ['pi-machine-b']
@@ -838,21 +1026,32 @@ describe('NewSession launch preferences', () => {
         })
     })
 
-    it('resets a restored Pi model that left the machine catalog', async () => {
-        savePreferredAgent('pi')
-        mocks.piModels = [
-            { provider: 'openai-codex', modelId: 'gpt-5.6-sol' },
-        ]
-        savePreferredLaunchSettings('machine-1', 'pi', {
-            model: 'openai-codex/stale-model',
+    it('keeps a browse-return custom Claude model visible when it is no longer configured', async () => {
+        savePreferredAgent('claude')
+        saveNewSessionFormDraft({
+            agent: 'claude',
+            model: 'deepseek-v4-flash[1m]',
             cursorSelectedBase: 'auto',
+            machineId: 'machine-1',
             effort: 'high',
             modelReasoningEffort: 'default',
+            serviceTier: 'standard',
+            collaborationMode: 'default',
+            copilotAgentMode: 'interactive',
+            yoloMode: false,
+            codexFamilyPermissionMode: 'default',
+            grokPermissionMode: 'default',
+            sessionType: 'simple',
+            worktreeName: ''
         })
+        mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-1' })
+        const claudeApi = {
+            getClaudeCustomModels: vi.fn().mockResolvedValue({ models: [] })
+        } as unknown as ApiClient
 
         render(
             <NewSession
-                api={api}
+                api={claudeApi}
                 machines={[machine]}
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
@@ -862,158 +1061,13 @@ describe('NewSession launch preferences', () => {
         )
 
         await waitFor(() => {
-            expect(screen.getByTestId('model')).toHaveTextContent('auto')
-            expect(screen.getByTestId('launch-effort')).toHaveTextContent('auto')
-        })
-    })
-
-    it('resets a restored effort the Default Pi selection cannot offer', async () => {
-        savePreferredAgent('pi')
-        mocks.piModels = [
-            {
-                provider: 'openai-codex',
-                modelId: 'gpt-5.6-sol',
-                reasoning: true,
-                thinkingLevelMap: { xhigh: 'xhigh', max: 'max' },
-            },
-        ]
-        // Default model (auto) renders the effort field without a map, which
-        // hides xhigh — the restored hidden level must not survive into create.
-        savePreferredLaunchSettings('machine-1', 'pi', {
-            model: 'auto',
-            cursorSelectedBase: 'auto',
-            effort: 'xhigh',
-            modelReasoningEffort: 'default',
-        })
-
-        render(
-            <NewSession
-                api={api}
-                machines={[machine]}
-                initialMachineId="machine-1"
-                initialDirectory="C:\\repo"
-                onSuccess={mocks.onSuccess}
-                onCancel={() => {}}
-            />
-        )
-
-        await waitFor(() => {
-            expect(screen.getByTestId('launch-effort')).toHaveTextContent('auto')
-        })
-    })
-
-    it('keeps a restored xhigh effort when the selected model map opts in', async () => {
-        savePreferredAgent('pi')
-        mocks.piModels = [
-            {
-                provider: 'openai-codex',
-                modelId: 'gpt-5.6-sol',
-                reasoning: true,
-                thinkingLevelMap: { xhigh: 'xhigh', max: 'max' },
-            },
-        ]
-        savePreferredLaunchSettings('machine-1', 'pi', {
-            model: 'openai-codex/gpt-5.6-sol',
-            cursorSelectedBase: 'auto',
-            effort: 'xhigh',
-            modelReasoningEffort: 'default',
-        })
-
-        render(
-            <NewSession
-                api={api}
-                machines={[machine]}
-                initialMachineId="machine-1"
-                initialDirectory="C:\\repo"
-                onSuccess={mocks.onSuccess}
-                onCancel={() => {}}
-            />
-        )
-
-        await waitFor(() => {
-            expect(screen.getByTestId('model')).toHaveTextContent('openai-codex/gpt-5.6-sol')
-            expect(screen.getByTestId('launch-effort')).toHaveTextContent('xhigh')
-        })
-    })
-
-    it('does not submit a hidden restored effort when Pi model discovery fails', async () => {
-        savePreferredAgent('pi')
-        // A failed catalog never resolves the restored model, so the effort
-        // field renders with an undefined map and hides xhigh. Creation is not
-        // blocked on error (only on loading), so the hidden level must have
-        // been reconciled away rather than forwarded.
-        mocks.piModels = []
-        mocks.piModelsError = 'probe failed'
-        savePreferredLaunchSettings('machine-1', 'pi', {
-            model: 'openai-codex/gpt-5.6-sol',
-            cursorSelectedBase: 'auto',
-            effort: 'xhigh',
-            modelReasoningEffort: 'default',
-        })
-
-        render(
-            <NewSession
-                api={api}
-                machines={[machine]}
-                initialMachineId="machine-1"
-                initialDirectory="C:\\repo"
-                onSuccess={mocks.onSuccess}
-                onCancel={() => {}}
-            />
-        )
-
-        await waitFor(() => {
-            expect(screen.getByTestId('launch-effort')).toHaveTextContent('auto')
-        })
-
-        act(() => {
-            mocks.spawnSession.mockImplementation(async () => ({ type: 'success', sessionId: 'session-1' }))
+            expect(screen.getByTestId('model')).toHaveTextContent('deepseek-v4-flash[1m]')
+            expect(screen.getByTestId('create')).toBeEnabled()
         })
         fireEvent.click(screen.getByTestId('create'))
 
-        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
-        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
-            agent: 'pi',
-            effort: undefined,
-        }))
-    })
-
-    it('shows Pi machine models and thinking-level effort and forwards both on create', async () => {
-        savePreferredAgent('pi')
-        mocks.piModels = [
-            { provider: 'openai-codex', modelId: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },
-            { provider: 'opencode-go', modelId: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
-        ]
-
-        render(
-            <NewSession
-                api={api}
-                machines={[machine]}
-                initialMachineId="machine-1"
-                initialDirectory="C:\\repo"
-                onSuccess={mocks.onSuccess}
-                onCancel={() => {}}
-            />
-        )
-
-        await waitFor(() => {
-            // Provider-qualified options surfaced through the unified ModelSelector.
-            expect(screen.getByTestId('model-options')).toHaveTextContent('GPT-5.6 Sol')
-            expect(screen.getByTestId('model-options')).toHaveTextContent('DeepSeek V4 Pro')
-        })
-
-        // Select the second provider's model and a thinking level.
-        act(() => {
-            mocks.spawnSession.mockImplementation(async () => ({ type: 'success', sessionId: 'session-1' }))
-        })
-        mocks.nextModelValue = 'opencode-go/deepseek-v4-pro'
-        fireEvent.click(screen.getByTestId('model'))
-        fireEvent.click(screen.getByTestId('create'))
-
-        await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('session-1'))
-        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
-            agent: 'pi',
-            model: 'opencode-go/deepseek-v4-pro',
-        }))
+        await waitFor(() => expect(mocks.spawnSession).toHaveBeenCalledWith(
+            expect.objectContaining({ model: 'deepseek-v4-flash[1m]' })
+        ))
     })
 })

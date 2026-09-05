@@ -85,7 +85,9 @@ import { SessionStatusPanel } from '@/components/SessionStatusPanel'
 import { buildSessionStatusData } from '@/chat/sessionStatus'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
+import { useClaudeCustomModels } from '@/hooks/queries/useClaudeCustomModels'
 import { useCodexModels } from '@/hooks/queries/useCodexModels'
+import { useDshModels } from '@/hooks/queries/useDshModels'
 import { useCursorModels } from '@/hooks/queries/useCursorModels'
 import { useCursorModelsForMachine } from '@/hooks/queries/useCursorModelsForMachine'
 import {
@@ -108,10 +110,12 @@ import { useCopilotModels } from '@/hooks/queries/useCopilotModels'
 import { useGrokReasoningEffortOptions } from '@/hooks/queries/useGrokReasoningEffortOptions'
 import { usePiModels } from '@/hooks/queries/usePiModels'
 import { useOpencodeReasoningEffortOptions } from '@/hooks/queries/useOpencodeReasoningEffortOptions'
+import { buildDshModelOptions, getDshReasoningOptions } from '@/lib/dshModelOptions'
 import { useVoiceOptional } from '@/lib/voice-context'
 import { AgentTerminalView } from '@/components/AgentTerminal/AgentTerminalView'
 import { VoiceBackendSession, registerSessionStore, registerVoiceHooksStore, voiceHooks } from '@/realtime'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
+import { useOptionalAppContext } from '@/lib/app-context'
 
 type SessionModelSelection = { provider: string; modelId: string } | string | null
 
@@ -485,6 +489,7 @@ function hasAbortableAgentRun(blocks: readonly ChatBlock[]): boolean {
 
 type SessionChatProps = {
     api: ApiClient
+    baseUrl?: string
     titleSuggestionAvailable?: boolean
     session: Session
     cursorChatOnDisk?: boolean
@@ -556,6 +561,7 @@ export function SessionChat(props: SessionChatProps) {
 }
 
 function SessionChatInner(props: SessionChatProps) {
+    const isSessionGuest = useOptionalAppContext()?.isSessionGuest ?? false
     const { haptic } = usePlatform()
     const { t } = useTranslation()
     const { codexExplorationCollapsed } = useCodexExplorationCollapse()
@@ -598,7 +604,7 @@ function SessionChatInner(props: SessionChatProps) {
     // misleadingly "connected" view. Matches the composer terminal button, which
     // is likewise gated on `session.active`.
     const canViewAgentTerminal =
-        props.session.metadata?.startingMode === 'pty' && props.session.active
+        !isSessionGuest && props.session.metadata?.startingMode === 'pty' && props.session.active
     const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const visibleGroupsRef = useRef<ToolGroupBlock[]>([])
@@ -853,12 +859,45 @@ function SessionChatInner(props: SessionChatProps) {
     const agentFlavor = props.session.metadata?.flavor ?? null
     const controlledByUser = props.session.agentState?.controlledByUser === true
     const codexCollaborationModeSupported = agentFlavor === 'codex' && !controlledByUser
+    const claudeCustomModelsState = useClaudeCustomModels({
+        api: props.api,
+        // Guest shares are scoped to one session; custom Claude models are a
+        // hub-wide setting and would otherwise trigger a forbidden request.
+        enabled: !isSessionGuest && agentFlavor === 'claude'
+    })
+    const claudeModelOptions = useMemo(() => (
+        agentFlavor === 'claude'
+            ? claudeCustomModelsState.models.map((model) => ({ value: model, label: model }))
+            : undefined
+    ), [agentFlavor, claudeCustomModelsState.models])
     const codexModelsState = useCodexModels({
         api: props.api,
         sessionId: props.session.id,
-        machineId: props.session.metadata?.machineId ?? null,
-        enabled: agentFlavor === 'codex' && props.session.active && !controlledByUser
+        // Model discovery is owner-only for collaborative shares.
+        machineId: isSessionGuest ? null : props.session.metadata?.machineId ?? null,
+        enabled: !isSessionGuest && agentFlavor === 'codex' && props.session.active && !controlledByUser
     })
+    const dshModelsState = useDshModels({
+        api: props.api,
+        sessionId: props.session.id,
+        enabled: !isSessionGuest && agentFlavor === 'dsh' && props.session.active && !controlledByUser
+    })
+    const dshModelOptions = useMemo(
+        () => agentFlavor === 'dsh'
+            ? buildDshModelOptions(dshModelsState.availableModels, dshModelsState.current)
+            : undefined,
+        [agentFlavor, dshModelsState.availableModels, dshModelsState.current]
+    )
+    const dshReasoningEffortOptions = useMemo(
+        () => agentFlavor === 'dsh'
+            ? getDshReasoningOptions(
+                dshModelsState.availableModels,
+                dshModelsState.current,
+                props.session.model
+            )
+            : undefined,
+        [agentFlavor, dshModelsState.availableModels, dshModelsState.current, props.session.model]
+    )
     const effectiveCodexServiceTier = agentFlavor === 'codex'
         ? getEffectiveCodexServiceTier(
             props.session.serviceTier,
@@ -893,12 +932,12 @@ function SessionChatInner(props: SessionChatProps) {
     const opencodeModelsState = useOpencodeModels({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'opencode' && props.session.active
+        enabled: !isSessionGuest && agentFlavor === 'opencode' && props.session.active
     })
     const opencodeReasoningEffortState = useOpencodeReasoningEffortOptions({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'opencode' && props.session.active
+        enabled: !isSessionGuest && agentFlavor === 'opencode' && props.session.active
     })
     const opencodeModelOptions = useMemo(() => {
         if (agentFlavor !== 'opencode') {
@@ -913,12 +952,12 @@ function SessionChatInner(props: SessionChatProps) {
     const grokModelsState = useGrokModels({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'grok' && props.session.active && !controlledByUser
+        enabled: !isSessionGuest && agentFlavor === 'grok' && props.session.active && !controlledByUser
     })
     const grokEffortState = useGrokReasoningEffortOptions({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'grok' && props.session.active && !controlledByUser
+        enabled: !isSessionGuest && agentFlavor === 'grok' && props.session.active && !controlledByUser
     })
     const grokModelOptions = useMemo(() => (
         agentFlavor === 'grok'
@@ -934,7 +973,7 @@ function SessionChatInner(props: SessionChatProps) {
     const copilotModelsState = useCopilotModels({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'copilot' && props.session.active && !controlledByUser
+        enabled: !isSessionGuest && agentFlavor === 'copilot' && props.session.active && !controlledByUser
     })
     const copilotModelOptions = useMemo(() => (
         agentFlavor === 'copilot'
@@ -952,13 +991,13 @@ function SessionChatInner(props: SessionChatProps) {
     const cursorModelsState = useCursorModels({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'cursor' && props.session.active
+        enabled: !isSessionGuest && agentFlavor === 'cursor' && props.session.active
     })
     const sessionMachineId = props.session.metadata?.machineId ?? null
     const machineCursorModelsState = useCursorModelsForMachine({
         api: props.api,
         machineId: sessionMachineId,
-        enabled: agentFlavor === 'cursor' && props.session.active && Boolean(sessionMachineId)
+        enabled: !isSessionGuest && agentFlavor === 'cursor' && props.session.active && Boolean(sessionMachineId)
     })
     const sessionCliModelSkus = useMemo(() => (
         mergeCursorCliModelSkus(
@@ -989,7 +1028,7 @@ function SessionChatInner(props: SessionChatProps) {
     const piModelsState = usePiModels({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'pi' && props.session.active
+        enabled: !isSessionGuest && agentFlavor === 'pi' && props.session.active
     })
     // Fallback to cached models from metadata when session is inactive
     const piMetadata = props.session.metadata as Record<string, unknown> | null
@@ -1405,13 +1444,21 @@ function SessionChatInner(props: SessionChatProps) {
     // Model mode change handler
     const handleModelChange = useCallback(async (model: SessionModelSelection) => {
         const previousModelReasoningEffort = props.session.modelReasoningEffort
-        const shouldClearReasoningEffort = agentFlavor === 'codex'
-            && Boolean(previousModelReasoningEffort)
-            && supportsCodexReasoningEffort(
-                codexModelsState.models,
-                model,
-                previousModelReasoningEffort
-            ) === false
+        const shouldClearReasoningEffort = Boolean(previousModelReasoningEffort) && (
+            agentFlavor === 'codex'
+                ? supportsCodexReasoningEffort(
+                    codexModelsState.models,
+                    model,
+                    previousModelReasoningEffort
+                ) === false
+                : agentFlavor === 'dsh' && typeof model === 'string'
+                    ? !getDshReasoningOptions(
+                        dshModelsState.availableModels,
+                        dshModelsState.current,
+                        model
+                    ).some((option) => option.value === previousModelReasoningEffort)
+                    : false
+        )
 
         try {
             await applyModelChangeWithReasoningRollback({
@@ -1421,6 +1468,7 @@ function SessionChatInner(props: SessionChatProps) {
                 setModel,
                 setModelReasoningEffort
             })
+            if (agentFlavor === 'dsh') await dshModelsState.refetch()
             haptic.notification('success')
             props.onRefresh()
         } catch (e) {
@@ -1430,6 +1478,9 @@ function SessionChatInner(props: SessionChatProps) {
     }, [
         agentFlavor,
         codexModelsState.models,
+        dshModelsState.availableModels,
+        dshModelsState.current,
+        dshModelsState.refetch,
         props.session.modelReasoningEffort,
         setModelReasoningEffort,
         setModel,
@@ -1481,13 +1532,14 @@ function SessionChatInner(props: SessionChatProps) {
     const handleModelReasoningEffortChange = useCallback(async (modelReasoningEffort: string | null) => {
         try {
             await setModelReasoningEffort(modelReasoningEffort)
+            if (agentFlavor === 'dsh') await dshModelsState.refetch()
             haptic.notification('success')
             props.onRefresh()
         } catch (e) {
             haptic.notification('error')
             console.error('Failed to set model reasoning effort:', e)
         }
-    }, [setModelReasoningEffort, props.onRefresh, haptic])
+    }, [agentFlavor, dshModelsState.refetch, setModelReasoningEffort, props.onRefresh, haptic])
 
     const handleEffortChange = useCallback(async (effort: string | null) => {
         try {
@@ -1708,7 +1760,7 @@ function SessionChatInner(props: SessionChatProps) {
         onSendMessage: handleSend,
         onAbort: handleAbort,
         attachmentAdapter,
-        allowSendWhenInactive: true,
+        allowSendWhenInactive: !isSessionGuest,
         pendingScheduleRef,
         pendingSendIntentRef,
     })
@@ -1726,8 +1778,9 @@ function SessionChatInner(props: SessionChatProps) {
                 onToggleTerminal={canViewAgentTerminal ? () => setTerminalVisible(v => !v) : undefined}
                 terminalActive={terminalVisible}
                 api={props.api}
+                baseUrl={props.baseUrl}
                 titleSuggestionAvailable={props.titleSuggestionAvailable}
-                canReopen={inactiveCanResume}
+                canReopen={isSessionGuest ? false : inactiveCanResume}
                 reopenDisabledReason={props.reopenDisabledReason}
                 reopenHint={props.reopenHint}
                 onSessionDeleted={props.onBack}
@@ -1792,8 +1845,8 @@ function SessionChatInner(props: SessionChatProps) {
                         onRefresh={props.onRefresh}
                         onRetryMessage={props.onRetryMessage}
                         historyActionPending={historyActionPending}
-                        onForkConversation={controlledByUser ? undefined : onForkConversation}
-                        onRewindConversation={controlledByUser ? undefined : onRewindConversation}
+                        onForkConversation={isSessionGuest || controlledByUser ? undefined : onForkConversation}
+                        onRewindConversation={isSessionGuest || controlledByUser ? undefined : onRewindConversation}
                         isLatestCompletedBoundary={isLatestCompletedBoundary}
                         onViewModeChange={props.onViewModeChange}
                         isSyncingTail={props.isSyncingTail}
@@ -1822,7 +1875,6 @@ function SessionChatInner(props: SessionChatProps) {
                                 </div>
                             </div>
                         ) : null}
-
                         {/*
                          * tiann/hapi#893: one-time banner shown on first
                          * v2-load when localStorage entries got migrated to
@@ -1859,13 +1911,24 @@ function SessionChatInner(props: SessionChatProps) {
                             <QueuedMessagesBar
                                 sessionId={props.session.id}
                                 api={props.api}
+                                sessionMetadata={props.session.metadata}
+                                steeringActive={
+                                    props.session.active
+                                    && !controlledByUser
+                                    && props.session.agentState?.steeringActive === true
+                                }
+                                isThinking={
+                                    props.session.active
+                                    && !controlledByUser
+                                    && props.session.thinking
+                                }
                                 pendingSchedule={pendingSchedule}
                                 pendingScheduleRevision={pendingScheduleRevision}
                                 onEdit={({ pendingSchedule: restored }) => {
                                     // Restore the schedule so the clock button re-activates
                                     updatePendingSchedule(restored)
                                 }}
-                                canSteer={isSteeringSupportedForSession(props.session.metadata)
+                                canSteer={(agentFlavor === 'pi' || agentFlavor === 'dsh')
                                     && props.session.thinking
                                     && !controlledByUser}
                             />
@@ -1889,12 +1952,16 @@ function SessionChatInner(props: SessionChatProps) {
                         collaborationMode={codexCollaborationModeSupported ? props.session.collaborationMode : undefined}
                         copilotAgentMode={agentFlavor === 'copilot' ? props.session.copilotAgentMode : undefined}
                         model={props.session.model}
-                        modelReasoningEffort={agentFlavor === 'codex' || agentFlavor === 'opencode' ? props.session.modelReasoningEffort : undefined}
+                        modelReasoningEffort={agentFlavor === 'codex' || agentFlavor === 'dsh' || agentFlavor === 'opencode' ? props.session.modelReasoningEffort : undefined}
                         effort={props.session.effort}
                         agentFlavor={agentFlavor}
                         availableModelOptions={
-                            agentFlavor === 'codex'
+                            agentFlavor === 'claude'
+                                ? claudeModelOptions
+                                : agentFlavor === 'codex'
                                 ? codexModelOptions
+                                : agentFlavor === 'dsh'
+                                    ? dshModelOptions
                                 : agentFlavor === 'cursor'
                                     ? (
                                         cursorCatalogPending
@@ -1917,11 +1984,13 @@ function SessionChatInner(props: SessionChatProps) {
                                         // so Pi model changes go through the settings sheet only.
                                         : undefined
                         }
-                        piModels={piModels}
-                        piSelectedModel={agentFlavor === 'pi' ? piSelectedModel : undefined}
+                        piModels={isSessionGuest ? undefined : piModels}
+                        piSelectedModel={!isSessionGuest && agentFlavor === 'pi' ? piSelectedModel : undefined}
                         availableModelReasoningEffortOptions={
                             agentFlavor === 'codex'
                                 ? codexReasoningEffortOptions
+                                : agentFlavor === 'dsh' && dshReasoningEffortOptions && dshReasoningEffortOptions.length > 0
+                                    ? dshReasoningEffortOptions
                                 : agentFlavor === 'opencode' && opencodeReasoningEffortState.options.length > 0
                                     ? opencodeReasoningEffortState.options
                                     : undefined
@@ -1932,8 +2001,8 @@ function SessionChatInner(props: SessionChatProps) {
                                 : undefined
                         }
                         active={props.session.active}
-                        allowSendWhenInactive
-                        onResumeStoredDraft={() => handleSend('', undefined, null)}
+                        allowSendWhenInactive={!isSessionGuest}
+                        onResumeStoredDraft={isSessionGuest ? undefined : () => handleSend('', undefined, null)}
                         thinking={props.session.thinking}
                         agentState={props.session.agentState}
                         backgroundTaskCount={props.session.backgroundTaskCount}
@@ -1943,17 +2012,17 @@ function SessionChatInner(props: SessionChatProps) {
                         contextModel={reduced.latestUsage?.model ?? props.session.model}
                         controlledByUser={controlledByUser}
                         onCollaborationModeChange={
-                            codexCollaborationModeSupported && props.session.active && !controlledByUser
+                            !isSessionGuest && codexCollaborationModeSupported && props.session.active && !controlledByUser
                                 ? handleCollaborationModeChange
                                 : undefined
                         }
                         onCopilotAgentModeChange={
-                            agentFlavor === 'copilot' && props.session.active && !controlledByUser
+                            !isSessionGuest && agentFlavor === 'copilot' && props.session.active && !controlledByUser
                                 ? handleCopilotAgentModeChange
                                 : undefined
                         }
                         onPermissionModeChange={
-                            agentFlavor === 'copilot' && controlledByUser
+                            isSessionGuest || (agentFlavor === 'copilot' && controlledByUser)
                                 ? undefined
                                 : handlePermissionModeChange
                         }
@@ -1982,8 +2051,12 @@ function SessionChatInner(props: SessionChatProps) {
                                 : undefined
                         }
                         onModelChange={
-                            agentFlavor === 'codex'
+                            isSessionGuest
+                                ? undefined
+                                : agentFlavor === 'codex'
                                 ? (props.session.active && !controlledByUser && !codexModelsState.error ? handleModelChange : undefined)
+                                : agentFlavor === 'dsh'
+                                    ? (props.session.active && !controlledByUser && !dshModelsState.error ? handleModelChange : undefined)
                                 : agentFlavor === 'cursor'
                                     ? (props.session.active
                                         && !controlledByUser
@@ -2006,7 +2079,8 @@ function SessionChatInner(props: SessionChatProps) {
                                         : handleModelChange
                         }
                         onModelEffortChange={
-                            agentFlavor === 'cursor'
+                            !isSessionGuest
+                                && agentFlavor === 'cursor'
                                 && props.session.active
                                 && !controlledByUser
                                 && !cursorCatalogPending
@@ -2015,15 +2089,19 @@ function SessionChatInner(props: SessionChatProps) {
                                 : undefined
                         }
                         onModelReasoningEffortChange={
-                            (agentFlavor === 'codex' || agentFlavor === 'opencode')
+                            !isSessionGuest
+                                && (agentFlavor === 'codex' || agentFlavor === 'dsh' || agentFlavor === 'opencode')
                                 && props.session.active
                                 && !controlledByUser
-                                && (agentFlavor !== 'opencode' || opencodeReasoningEffortState.options.length > 0)
+                            && (agentFlavor !== 'opencode' || opencodeReasoningEffortState.options.length > 0)
+                            && (agentFlavor !== 'dsh' || Boolean(dshReasoningEffortOptions?.length))
                                 ? handleModelReasoningEffortChange
                                 : undefined
                         }
                         onEffortChange={
-                            agentFlavor === 'grok'
+                            isSessionGuest
+                                ? undefined
+                                : agentFlavor === 'grok'
                                 ? (props.session.active && !controlledByUser && grokEffortState.options.length > 0
                                     ? handleEffortChange
                                     : undefined)
@@ -2031,7 +2109,8 @@ function SessionChatInner(props: SessionChatProps) {
                         }
                         serviceTier={effectiveCodexServiceTier}
                         onServiceTierChange={
-                            agentFlavor === 'codex'
+                            !isSessionGuest
+                                && agentFlavor === 'codex'
                                 && props.session.active
                                 && !controlledByUser
                                 && !codexModelsState.error
@@ -2039,9 +2118,9 @@ function SessionChatInner(props: SessionChatProps) {
                                 ? handleServiceTierChange
                                 : undefined
                         }
-                        onSwitchToRemote={handleSwitchToRemote}
-                        onTerminal={props.session.active && terminalSupported ? handleViewTerminal : undefined}
-                        terminalUnsupported={props.session.active && !terminalSupported}
+                        onSwitchToRemote={isSessionGuest ? undefined : handleSwitchToRemote}
+                        onTerminal={!isSessionGuest && props.session.active && terminalSupported ? handleViewTerminal : undefined}
+                        terminalUnsupported={!isSessionGuest && props.session.active && !terminalSupported}
                         autocompleteSuggestions={props.autocompleteSuggestions}
                         voiceStatus={voice?.status}
                         voiceMicMuted={voice?.micMuted}

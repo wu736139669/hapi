@@ -6,6 +6,8 @@ type AppContextValue = {
     token: string
     baseUrl: string
     titleSuggestionAvailable?: boolean
+    isSessionGuest?: boolean
+    guestShareToken?: string
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -27,4 +29,8 @@ export function useAppContext(): AppContextValue {
         throw new Error('AppContext is not available')
     }
     return context
+}
+
+export function useOptionalAppContext(): AppContextValue | null {
+    return useContext(AppContext)
 }

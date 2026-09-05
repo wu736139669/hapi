@@ -3,7 +3,9 @@ import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import {
     ArchiveCodexSessionRpcResponseSchema,
     CursorChatStoreStatusSchema,
+    ListClaudeSessionsRpcResponseSchema,
     ListCodexSessionsRpcResponseSchema,
+    ListDshSessionsRpcResponseSchema,
     ListPiSessionsRpcResponseSchema
 } from '@hapi/protocol/apiTypes'
 import type {
@@ -14,6 +16,7 @@ import type {
     CursorModelSummary,
     CursorModelsResponse,
     CursorChatStoreStatus,
+    DshModelsResponse,
     DeleteUploadResponse,
     DirectoryEntry,
     FileReadResponse,
@@ -21,8 +24,10 @@ import type {
     CopilotModelsResponse,
     GrokModelsResponse,
     GrokReasoningEffortResponse,
+    ListClaudeSessionsRpcResponse,
     ListDirectoryResponse,
     ListCodexSessionsRpcResponse,
+    ListDshSessionsRpcResponse,
     ListPiSessionsRpcResponse,
     ArchiveCodexSessionRpcResponse,
     OpencodeModelsResponse,
@@ -77,6 +82,9 @@ export type RpcPathExistsResponse = PathExistsResponse
 export type RpcCodexModel = CodexModelSummary
 export type RpcListCodexModelsResponse = CodexModelsResponse
 export type RpcListCodexSessionsResponse = ListCodexSessionsRpcResponse
+export type RpcListClaudeSessionsResponse = ListClaudeSessionsRpcResponse
+export type RpcListDshSessionsResponse = ListDshSessionsRpcResponse
+export type RpcListDshModelsResponse = DshModelsResponse
 export type RpcListPiSessionsResponse = ListPiSessionsRpcResponse
 export type RpcArchiveCodexSessionResponse = ArchiveCodexSessionRpcResponse
 export type RpcCursorModel = CursorModelSummary
@@ -363,9 +371,37 @@ export class RpcGateway {
         return ListCodexSessionsRpcResponseSchema.parse(result)
     }
 
+    async listClaudeSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[]): Promise<RpcListClaudeSessionsResponse> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.ListClaudeSessions, { cwd: cwd ?? null, sessionIds }, MODEL_LIST_RPC_TIMEOUT_MS)
+        return ListClaudeSessionsRpcResponseSchema.parse(result)
+    }
+
     async listPiSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[]): Promise<RpcListPiSessionsResponse> {
         const result = await this.machineRpc(machineId, RPC_METHODS.ListPiSessions, { cwd: cwd ?? null, sessionIds }, MODEL_LIST_RPC_TIMEOUT_MS)
         return ListPiSessionsRpcResponseSchema.parse(result)
+    }
+
+    async listDshSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[]): Promise<RpcListDshSessionsResponse> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.ListDshSessions, { cwd: cwd ?? null, sessionIds }, MODEL_LIST_RPC_TIMEOUT_MS)
+        return ListDshSessionsRpcResponseSchema.parse(result)
+    }
+
+    async listDshModelsForMachine(machineId: string): Promise<RpcListDshModelsResponse> {
+        return await this.machineRpc(
+            machineId,
+            RPC_METHODS.ListDshModels,
+            {},
+            MODEL_LIST_RPC_TIMEOUT_MS
+        ) as RpcListDshModelsResponse
+    }
+
+    async listDshModelsForSession(sessionId: string): Promise<RpcListDshModelsResponse> {
+        return await this.sessionRpc(
+            sessionId,
+            RPC_METHODS.ListDshModels,
+            {},
+            MODEL_LIST_RPC_TIMEOUT_MS
+        ) as RpcListDshModelsResponse
     }
 
     async archiveCodexSessionForMachine(machineId: string, sessionId: string): Promise<RpcArchiveCodexSessionResponse> {
@@ -426,8 +462,8 @@ export class RpcGateway {
     }
 
     /**
-     * Ask the CLI to deliver one queued message into the active Pi turn
-     * (Pi native steer). Only the pi flavor registers this handler.
+     * Ask the CLI to deliver one queued message into the active turn.
+     * Pi, Codex, Cursor, and DeepSeek Harness launchers register this handler.
      */
     async steerQueuedMessage(
         sessionId: string,

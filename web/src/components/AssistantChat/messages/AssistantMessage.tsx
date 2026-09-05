@@ -1,4 +1,11 @@
-import { MessagePrimitive, useAuiState, type TextMessagePart } from '@assistant-ui/react'
+import {
+    MessagePartPrimitive,
+    MessagePrimitive,
+    useAuiState,
+    type PartState,
+    type TextMessagePart
+} from '@assistant-ui/react'
+import { useMemo } from 'react'
 import { Reasoning, ReasoningGroup } from '@/components/assistant-ui/reasoning'
 import { HappyToolMessage } from '@/components/AssistantChat/messages/ToolMessage'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
@@ -8,19 +15,54 @@ import { getConversationMessageAnchorId } from '@/chat/outline'
 import { CodexReviewCard } from '@/components/AssistantChat/messages/CodexReviewCard'
 import { MessageActions } from '@/components/AssistantChat/messages/MessageActions'
 import { useHappyChatContext } from '@/components/AssistantChat/context'
+import {
+    ExecutionProcessPanel,
+    getExecutionProcessGroupPaths,
+    type ExecutionProcessGroupKey
+} from '@/components/AssistantChat/messages/ExecutionProcessPanel'
 import { NotifySummaryText } from '@/components/AssistantChat/messages/NotifySummaryText'
 import { useSessionSummaryInChat } from '@/hooks/useSessionSummaryInChat'
 
-const TOOL_COMPONENTS = {
-    Fallback: HappyToolMessage
-} as const
+function AssistantMessageParts() {
+    const parts = useAuiState((s) => s.message.parts)
+    const groupBy = useMemo(() => {
+        const groupPaths = getExecutionProcessGroupPaths(parts)
+        const partIndices = new Map<PartState, number>(
+            parts.map((part, index) => [part, index])
+        )
 
-const MESSAGE_PART_COMPONENTS = {
-    Text: NotifySummaryText,
-    Reasoning: Reasoning,
-    ReasoningGroup: ReasoningGroup,
-    tools: TOOL_COMPONENTS
-} as const
+        return (part: PartState): readonly ExecutionProcessGroupKey[] => {
+            const partIndex = partIndices.get(part)
+            if (partIndex === undefined) return []
+            return groupPaths[partIndex] ?? []
+        }
+    }, [parts])
+
+    return (
+        <MessagePrimitive.GroupedParts groupBy={groupBy} indicator="never">
+            {({ part, children }) => {
+                switch (part.type) {
+                    case 'group-execution-process':
+                        return <ExecutionProcessPanel>{children}</ExecutionProcessPanel>
+                    case 'group-reasoning':
+                        return <ReasoningGroup>{children}</ReasoningGroup>
+                    case 'text':
+                        return <NotifySummaryText {...part} />
+                    case 'reasoning':
+                        return <Reasoning {...part} />
+                    case 'tool-call':
+                        return part.toolUI ?? <HappyToolMessage {...part} />
+                    case 'image':
+                        return <MessagePartPrimitive.Image />
+                    case 'data':
+                        return part.dataRendererUI
+                    default:
+                        return null
+                }
+            }}
+        </MessagePrimitive.GroupedParts>
+    )
+}
 
 export function HappyAssistantMessage() {
     const ctx = useHappyChatContext()
@@ -81,7 +123,7 @@ export function HappyAssistantMessage() {
                 ? <CliOutputBlock text={cliText} />
                 : codexReview
                     ? <CodexReviewCard review={codexReview} />
-                    : <MessagePrimitive.Content components={MESSAGE_PART_COMPONENTS} />}
+                    : <AssistantMessageParts />}
             <MessageActions
                 align="start"
                 copyText={copyText || undefined}

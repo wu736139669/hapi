@@ -1036,14 +1036,83 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
-    it('rejects Codex transcript endpoints outside the default namespace', async () => {
+    it('imports Codex transcripts from the current namespace Runner', async () => {
+        const store = new Store(':memory:')
+        const machine = createMachine('team-a-machine', ['/workspace'], 'team-a')
+        const codexSessionId = '16161616-1616-4616-8616-161616161616'
+        const requestedNamespaces: string[] = []
+        const engine = {
+            getOnlineMachinesByNamespace: (namespace: string) => {
+                requestedNamespaces.push(namespace)
+                return namespace === 'team-a' ? [machine] : []
+            },
+            listCodexSessionsForMachine: async (machineId: string) => {
+                expect(machineId).toBe(machine.id)
+                return {
+                    success: true,
+                    sessions: [{
+                        id: codexSessionId,
+                        title: 'Team A transcript',
+                        cwd: '/workspace/project',
+                        file: '/home/team-a/.codex/sessions/transcript.jsonl',
+                        modifiedAt: 1,
+                        messages: [{
+                            role: 'user',
+                            content: { type: 'text', text: 'team-a message' },
+                            meta: { sentFrom: 'cli' }
+                        }]
+                    }]
+                }
+            },
+            getSessionsByNamespace: (namespace: string) => store.sessions.getSessionsByNamespace(namespace),
+            getOrCreateSession: (
+                tag: string,
+                metadata: unknown,
+                agentState: unknown,
+                namespace: string
+            ) => store.sessions.getOrCreateSession(tag, metadata, agentState, namespace),
+            handleRealtimeEvent: () => {},
+            recordSessionActivity: () => {}
+        } as unknown as SyncEngine
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'team-a')
+            await next()
+        })
+        app.route('/api', createCodexDesktopRoutes({ store, getSyncEngine: () => engine }))
+
+        try {
+            const listResponse = await app.request(`/api/codex/sessions?machineId=${machine.id}`)
+            expect(listResponse.status).toBe(200)
+            expect(await listResponse.json()).toMatchObject({
+                success: true,
+                machineId: machine.id,
+                sessions: [{ id: codexSessionId, title: 'Team A transcript' }]
+            })
+
+            const importResponse = await app.request('/api/codex/sync-session', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ sessionIds: [codexSessionId], machineId: machine.id })
+            })
+            expect(importResponse.status).toBe(200)
+            expect(await importResponse.json()).toMatchObject({ success: true, syncedCount: 1 })
+            expect(store.sessions.getSessionsByNamespace('team-a')).toHaveLength(1)
+            expect(store.sessions.getSessionsByNamespace('default')).toHaveLength(0)
+            expect(requestedNamespaces.every((namespace) => namespace === 'team-a')).toBe(true)
+        } finally {
+            store.close()
+        }
+    })
+
+    it('keeps Hub-local Codex Desktop control restricted to the default namespace', async () => {
         const app = createRoutesApp('team-a')
-        const response = await app.request('/api/codex/sessions')
+        const response = await app.request('/api/codex/restart-desktop', { method: 'POST' })
 
         expect(response.status).toBe(403)
         expect(await response.json()).toEqual({
             success: false,
-            error: 'Codex transcript import is not available outside the default namespace'
+            error: 'Codex Desktop control is not available outside the default namespace'
         })
     })
 

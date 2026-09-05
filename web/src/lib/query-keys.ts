@@ -6,8 +6,11 @@ export const queryKeys = {
     sqliteStorage: ['sqlite-storage'] as const,
     hubSettings: ['hub-settings'] as const,
     usageSummary: (range: string, timeZone: string) => ['usage-summary', range, timeZone] as const,
+    claudeCustomModels: ['claude-custom-models'] as const,
     machineCodexModels: (machineId: string) => ['machine-codex-models', machineId] as const,
     sessionCodexModels: (sessionId: string) => ['session-codex-models', sessionId] as const,
+    machineDshModels: (machineId: string) => ['machine-dsh-models', machineId] as const,
+    sessionDshModels: (sessionId: string) => ['session-dsh-models', sessionId] as const,
     gitStatus: (sessionId: string) => ['git-status', sessionId] as const,
     sessionFiles: (sessionId: string, query: string) => ['session-files', sessionId, query] as const,
     sessionDirectory: (sessionId: string, path: string) => ['session-directory', sessionId, path] as const,
@@ -35,4 +38,5 @@ export const queryKeys = {
     machinePiModels: (machineId: string) => ['machine-pi-models', machineId] as const,
     skills: (sessionId: string) => ['skills', sessionId] as const,
     scratchlist: (sessionId: string) => ['scratchlist', sessionId] as const,
+    studio: (studioId: string) => ['studio', studioId] as const,
 }

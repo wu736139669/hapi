@@ -79,6 +79,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const getPendingCount = (s: Session) => s.agentState?.requests ? Object.keys(s.agentState.requests).length : 0
 
         const namespace = c.get('namespace')
+        const guestSessionId = c.get('sessionId')
         const limitRaw = c.req.query('limit')
         const parsedLimit = limitRaw === undefined ? null : Number(limitRaw)
         const limit = parsedLimit !== null && Number.isFinite(parsedLimit)
@@ -86,7 +87,9 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             : null
         const order = c.req.query('order')
 
-        let sessionRecords = engine.getSessionsByNamespace(namespace)
+        let sessionRecords = (guestSessionId
+            ? engine.getSessionsByNamespace(namespace).filter((session) => session.id === guestSessionId)
+            : engine.getSessionsByNamespace(namespace))
             .sort((a, b) => {
                 // Peer discovery wants newest activity first before limit truncation.
                 if (order === 'updatedAt') {
@@ -675,8 +678,8 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         const flavor = sessionResult.session.metadata?.flavor ?? 'claude'
-        if (flavor !== 'codex' && flavor !== 'opencode') {
-            return c.json({ error: 'Model reasoning effort is only supported for Codex and OpenCode sessions' }, 400)
+        if (flavor !== 'codex' && flavor !== 'dsh' && flavor !== 'opencode') {
+            return c.json({ error: 'Model reasoning effort is only supported for Codex, DeepSeek Harness, and OpenCode sessions' }, 400)
         }
         if (sessionResult.session.agentState?.controlledByUser === true) {
             return c.json({ error: 'Model reasoning effort can only be changed for remote sessions' }, 409)
@@ -1332,6 +1335,29 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to list Codex models'
+            }, 500)
+        }
+    })
+
+    app.get('/sessions/:id/dsh-models', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        if (sessionResult instanceof Response) return sessionResult
+        if (sessionResult.session.metadata?.flavor !== 'dsh') {
+            return c.json({
+                success: false,
+                error: 'DeepSeek Harness models are only available for DeepSeek Harness sessions'
+            }, 400)
+        }
+
+        try {
+            return c.json(await engine.listDshModelsForSession(sessionResult.sessionId))
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to list DeepSeek Harness models'
             }, 500)
         }
     })

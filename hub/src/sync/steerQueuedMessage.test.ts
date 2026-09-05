@@ -48,7 +48,7 @@ describe('SyncEngine.steerQueuedMessage', () => {
         }
     })
 
-    it('rejects unsupported flavors without invoking the CLI', async () => {
+    it('rejects sessions without native steer support without invoking the CLI', async () => {
         const { store, engine } = createEngine()
         try {
             const session = engine.getOrCreateSession(
@@ -63,7 +63,7 @@ describe('SyncEngine.steerQueuedMessage', () => {
 
             expect(result).toEqual({
                 status: 'failed',
-                error: 'Steering is only supported for Pi and Codex sessions',
+                error: 'Steering is not supported for this agent',
                 localId: null
             })
         } finally {

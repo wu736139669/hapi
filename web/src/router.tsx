@@ -74,6 +74,10 @@ import SettingsUsagePage from '@/routes/settings/usage'
 import SharePage from '@/routes/share'
 import { retargetSharePendingTransfer, setSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer, parseShareSearch } from '@/lib/shareTransfer'
+import StudioOwnerPage from '@/routes/studios/owner'
+import PublicStudioPage from '@/routes/studios/public'
+import SharedSessionPage from '@/routes/shared-session'
+import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed'
 
 
 function BackIcon(props: { className?: string }) {
@@ -91,6 +95,15 @@ function BackIcon(props: { className?: string }) {
             className={props.className}
         >
             <polyline points="15 18 9 12 15 6" />
+        </svg>
+    )
+}
+
+function SidebarCollapseIcon(props: { className?: string; direction: 'left' | 'right' }) {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className} aria-hidden="true">
+            <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" />
+            {props.direction === 'left' ? <path d="m14 9-3 3 3 3" /> : <path d="m6 9 3 3-3 3" />}
         </svg>
     )
 }
@@ -155,15 +168,15 @@ function SettingsIcon(props: { className?: string }) {
 }
 
 function SessionsPage() {
-    const { api, baseUrl, titleSuggestionAvailable = false } = useAppContext()
+    const { api, baseUrl, titleSuggestionAvailable = false, isSessionGuest = false } = useAppContext()
     const navigate = useNavigate()
     const pathname = useLocation({ select: location => location.pathname })
     const matchRoute = useMatchRoute()
     const { t } = useTranslation()
     const { addToast } = useToast()
-    const { sessions, isLoading, error, refetch } = useSessions(api)
+    const { sessions, isLoading, error, refetch } = useSessions(isSessionGuest ? null : api)
     const [initializedHub, setInitializedHub] = useState<string | null>(null)
-    const { machines } = useMachines(api, true)
+    const { machines } = useMachines(api, !isSessionGuest)
     const handleRefresh = useCallback(() => {
         return (async () => {
             try {
@@ -214,6 +227,11 @@ function SessionsPage() {
     }, [selectedSessionId, selectedSession?.updatedAt])
     const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
     const sidebar = useSidebarResize()
+    const sidebarCollapse = useSidebarCollapsed()
+    const sidebarIsCollapsed = sidebarCollapse.sidebarCollapsed && !isSessionsIndex
+    if (isSessionGuest) {
+        return <div className="flex h-full min-h-0 flex-col bg-[var(--app-bg)]"><Outlet /></div>
+    }
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
             to: '/sessions/new',
@@ -228,16 +246,17 @@ function SessionsPage() {
         <>
             <div className="flex h-full min-h-0">
             <div
-                className={`${isSessionsIndex ? 'flex' : 'hidden split:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}
-                style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
+                className={sidebarIsCollapsed ? 'sidebar-collapsed-rail hidden split:flex shrink-0 flex-col border-r border-[var(--app-divider)] bg-[var(--app-bg)]' : `${isSessionsIndex ? 'flex' : 'hidden split:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}
+                style={!sidebarIsCollapsed ? { '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties : undefined}
             >
                 <div className="flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)]">
-                    {error ? (
+                    {error && !sidebarIsCollapsed ? (
                         <div className="mx-auto w-full max-w-content px-3 py-2">
                             <div className="text-sm text-red-600">{error}</div>
                         </div>
                     ) : null}
                     <SessionList
+                        compact={sidebarIsCollapsed}
                         key={initializedHub === baseUrl ? 'last-seen-ready' : 'last-seen-pending'}
                         sessions={sessions}
                         selectedSessionId={selectedSessionId}
@@ -251,37 +270,16 @@ function SessionsPage() {
                         onRefresh={handleRefresh}
                         isLoading={isLoading}
                         renderHeader={false}
-                        headerActions={(
+                        headerActions={sidebarIsCollapsed ? (
+                            <button type="button" onClick={() => sidebarCollapse.setSidebarCollapsed(false)} className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]" title={t('sessions.sidebar.expand')} aria-label={t('sessions.sidebar.expand')}>
+                                <SidebarCollapseIcon direction="right" className="h-4 w-4" />
+                            </button>
+                        ) : (
                             <div className="flex items-center gap-2">
-                                {canBrowse && (
-                                    <button
-                                        type="button"
-                                        onClick={() => navigate({ to: '/browse' })}
-                                        className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
-                                        title={t('browse.nav')}
-                                    >
-                                        <FolderOpenIcon className="h-5 w-5" />
-                                    </button>
-                                )}
-                                <button
-                                    type="button"
-                                    onClick={() => navigate({ to: '/settings' })}
-                                    className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
-                                    title={t('settings.title')}
-                                >
-                                    <SettingsIcon className="h-5 w-5" />
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => navigate({
-                                        to: '/sessions/new',
-                                        ...PRESERVE_SESSION_SIDEBAR_SCROLL,
-                                    })}
-                                    className="session-list-new-button flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)] transition-colors"
-                                    title={t('sessions.new')}
-                                >
-                                    <PlusIcon className="h-5 w-5" />
-                                </button>
+                                {!isSessionsIndex ? <button type="button" onClick={() => sidebarCollapse.setSidebarCollapsed(true)} className="hidden split:flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]" title={t('sessions.sidebar.collapse')} aria-label={t('sessions.sidebar.collapse')}><SidebarCollapseIcon direction="left" className="h-5 w-5" /></button> : null}
+                                {canBrowse ? <button type="button" onClick={() => navigate({ to: '/browse' })} className="p-1.5 rounded-full text-[var(--app-hint)]" title={t('browse.nav')}><FolderOpenIcon className="h-5 w-5" /></button> : null}
+                                <button type="button" onClick={() => navigate({ to: '/settings' })} className="p-1.5 rounded-full text-[var(--app-hint)]" title={t('settings.title')}><SettingsIcon className="h-5 w-5" /></button>
+                                <button type="button" onClick={() => navigate({ to: '/sessions/new' })} className="session-list-new-button flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)]" title={t('sessions.new')}><PlusIcon className="h-5 w-5" /></button>
                             </div>
                         )}
                         api={api}
@@ -293,11 +291,11 @@ function SessionsPage() {
             </div>
 
             {/* Resize handle - desktop only */}
-            <div
+            {!sidebarIsCollapsed ? <div
                 className="sidebar-resize-handle hidden split:block shrink-0"
                 data-dragging={sidebar.isDragging || undefined}
                 onPointerDown={sidebar.onPointerDown}
-            />
+            /> : null}
 
             <div className={`${isSessionsIndex ? 'hidden split:flex' : 'flex'} min-w-0 flex-1 flex-col bg-[var(--app-bg)]`}>
                 <div className="flex-1 min-h-0">
@@ -338,14 +336,14 @@ function classifySendError(
 }
 
 function SessionPage() {
-    const { api, titleSuggestionAvailable = false } = useAppContext()
+    const { api, baseUrl, titleSuggestionAvailable = false, isSessionGuest = false, guestShareToken } = useAppContext()
     const { t } = useTranslation()
     const goBack = useAppGoBack()
     const navigate = useNavigate()
     const queryClient = useQueryClient()
     const { addToast } = useToast()
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
-    const { outline } = useSearch({ from: '/sessions/$sessionId' })
+    const { outline, share } = useSearch({ from: '/sessions/$sessionId' })
     const {
         session,
         error: sessionError,
@@ -664,8 +662,8 @@ function SessionPage() {
         getSuggestions: getSkillSuggestions,
     } = useSkills(api, sessionId)
     // Mention pool is stricter than sidebar (#1506): titled sessions only; match via sessionMatchesQuery.
-    const { sessions: allSessions } = useSessions(api)
-    const { machines: mentionMachines } = useMachines(api, true)
+    const { sessions: allSessions } = useSessions(isSessionGuest ? null : api)
+    const { machines: mentionMachines } = useMachines(api, !isSessionGuest)
     const mentionMachineLabelsById = useMachineLabels(mentionMachines)
     // Same fallbacks as share picker / SessionList search.
     const resolveMentionMachineLabel = useCallback((machineId: string | null) => {
@@ -757,22 +755,32 @@ function SessionPage() {
         if (sessionError) {
             return (
                 <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center">
-                    <div className="text-sm font-medium text-[var(--app-fg)]">Session unavailable</div>
+                    <div className="text-sm font-medium text-[var(--app-fg)]">{t('session.unavailable')}</div>
                     <div className="max-w-md text-xs text-[var(--app-hint)]">{sessionError}</div>
                     <div className="flex gap-2">
                         <button
                             type="button"
-                            onClick={() => navigate({ to: '/sessions', replace: true })}
+                            onClick={() => {
+                                if (isSessionGuest && (guestShareToken || share)) {
+                                    navigate({
+                                        to: '/shared-session/$shareToken',
+                                        params: { shareToken: guestShareToken || share! },
+                                        replace: true,
+                                    })
+                                } else {
+                                    navigate({ to: '/sessions', replace: true })
+                                }
+                            }}
                             className="rounded-md border border-[var(--app-border)] px-3 py-1.5 text-sm text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]"
                         >
-                            Back to sessions
+                            {isSessionGuest ? t('sessionShare.backToShare') : t('share.backToSessions')}
                         </button>
                         <button
                             type="button"
                             onClick={() => { void refetchSession() }}
                             className="rounded-md bg-[var(--app-button)] px-3 py-1.5 text-sm text-[var(--app-button-text)]"
                         >
-                            Retry
+                            {t('session.retry')}
                         </button>
                     </div>
                 </div>
@@ -780,7 +788,7 @@ function SessionPage() {
         }
         return (
             <div className="flex-1 flex items-center justify-center p-4">
-                <LoadingState label="Loading session…" className="text-sm" />
+                <LoadingState label={t('loading.session')} className="text-sm" />
             </div>
         )
     }
@@ -788,6 +796,7 @@ function SessionPage() {
     return (
         <SessionChat
             api={api}
+            baseUrl={baseUrl}
             titleSuggestionAvailable={titleSuggestionAvailable}
             session={session}
             cursorChatOnDisk={cursorChatStoreStatus?.onDisk}
@@ -841,7 +850,8 @@ function SessionPage() {
 }
 
 function SessionDetailRoute() {
-    const { api } = useAppContext()
+    const { api, isSessionGuest = false, guestShareToken } = useAppContext()
+    const { t } = useTranslation()
     const pathname = useLocation({ select: location => location.pathname })
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
     const navigate = useNavigate()
@@ -879,17 +889,17 @@ function SessionDetailRoute() {
         if (!sessionNotFound) {
             return
         }
-        navigate({
-            to: '/sessions',
-            replace: true,
-            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
-        })
-    }, [navigate, sessionNotFound, sessionId])
+        if (isSessionGuest && guestShareToken) {
+            navigate({ to: '/shared-session/$shareToken', params: { shareToken: guestShareToken }, replace: true })
+        } else {
+            navigate({ to: '/sessions', replace: true })
+        }
+    }, [guestShareToken, isSessionGuest, navigate, sessionNotFound, sessionId])
 
     if (sessionNotFound) {
         return (
             <div className="flex-1 flex items-center justify-center p-4">
-                <LoadingState label="Session not found. Returning to sessions…" className="text-sm" />
+                <LoadingState label={isSessionGuest ? t('session.notFoundReturningToShare') : t('session.notFoundReturningToSessions')} className="text-sm" />
             </div>
         )
     }
@@ -1059,9 +1069,12 @@ const sessionsIndexRoute = createRoute({
 const sessionDetailRoute = createRoute({
     getParentRoute: () => sessionsRoute,
     path: '$sessionId',
-    validateSearch: (search: Record<string, unknown>): { outline?: boolean } => {
+    validateSearch: (search: Record<string, unknown>): { outline?: boolean; guest?: boolean; share?: string; lang?: 'en' | 'zh-CN' } => {
         const outline = search.outline === true || search.outline === 'true'
-        return outline ? { outline: true } : {}
+        const guest = search.guest === true || search.guest === 'true'
+        const share = typeof search.share === 'string' && search.share.length > 0 ? search.share : undefined
+        const lang = search.lang === 'en' || search.lang === 'zh-CN' ? search.lang : undefined
+        return { ...(outline ? { outline: true } : {}), ...(guest ? { guest: true } : {}), ...(share ? { share } : {}), ...(lang ? { lang } : {}) }
     },
     component: SessionDetailRoute,
 })
@@ -1267,6 +1280,28 @@ const shareRoute = createRoute({
     component: SharePage,
 })
 
+const studioOwnerRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/studios/$studioId',
+    component: StudioOwnerPage,
+})
+
+const sharedSessionRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/shared-session/$shareToken',
+    validateSearch: (search: Record<string, unknown>): { lang?: 'en' | 'zh-CN' } => {
+        const lang = search.lang === 'en' || search.lang === 'zh-CN' ? search.lang : undefined
+        return lang ? { lang } : {}
+    },
+    component: SharedSessionPage,
+})
+
+const publicStudioRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/studio/$shareToken',
+    component: PublicStudioPage,
+})
+
 export const routeTree = rootRoute.addChildren([
     indexRoute,
     sessionsRoute.addChildren([
@@ -1293,6 +1328,9 @@ export const routeTree = rootRoute.addChildren([
         settingsAboutRoute,
     ]),
     shareRoute,
+    studioOwnerRoute,
+    publicStudioRoute,
+    sharedSessionRoute,
 ])
 
 type RouterHistory = Parameters<typeof createRouter>[0]['history']
