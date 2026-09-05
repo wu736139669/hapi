@@ -354,6 +354,16 @@ describe('SessionHeader', () => {
         expect(screen.queryByTestId('session-header-reasoning')).not.toBeInTheDocument()
     })
 
+    it('shows DSH model reasoning effort in the session header', () => {
+        renderHeader(baseSession({
+            metadata: { flavor: 'dsh', path: '/repo', host: 'machine' },
+            modelReasoningEffort: 'max',
+            effort: null
+        }))
+
+        expect(screen.getByTestId('session-header-reasoning')).toHaveTextContent('reasoning max')
+    })
+
     it('hides Pi reasoning metadata when the header reasoning setting is disabled', () => {
         localStorage.setItem('hapi-session-header-metadata', JSON.stringify({ reasoning: false }))
         renderHeader(baseSession({

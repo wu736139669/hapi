@@ -42,6 +42,9 @@ export const BUILTIN_SLASH_COMMANDS = {
         { name: 'always-approve', description: 'Toggle automatic tool approval', source: 'builtin' },
         { name: 'auto', description: 'Let Grok classify safe tool calls for automatic approval', source: 'builtin' },
     ],
+    dsh: [
+        { name: 'compact', description: 'Compact older conversation history', source: 'builtin' },
+    ],
     opencode: [
         { name: 'help', description: 'Show supported HAPI OpenCode slash commands', source: 'builtin' },
         { name: 'status', description: 'Show current OpenCode session config', source: 'builtin' },

@@ -60,6 +60,15 @@ export type DshModelSummary = {
     reasoningEfforts: Array<{ id: string; name: string; isDefault: boolean }>
 }
 
+export type DshCommandResult =
+    | { kind: 'success'; text?: string; sourceEventSeq?: number }
+    | { kind: 'error'; text: string }
+
+export type DshCommandExecution = {
+    commandId: string
+    result: DshCommandResult
+}
+
 export class DshWebRpcError extends Error {
     constructor(
         readonly method: string,
@@ -245,6 +254,53 @@ export class DshWebClient {
             ? { ...(typeof value.command.text === 'string' ? { text: value.command.text } : {}) }
             : undefined
         return { rpcId, ...(command ? { command } : {}) }
+    }
+
+    /**
+     * Execute a native DSH slash command without creating a model turn.
+     *
+     * DSH returns `undefined` when the line is not a known command (or has
+     * invalid command syntax); callers can then fall back to a normal prompt.
+     */
+    async executeCommand(
+        sessionId: string,
+        line: string,
+        signal?: AbortSignal
+    ): Promise<DshCommandExecution | undefined> {
+        const { value } = await this.call('commands/execute', {
+            args: {
+                agentId: sessionId,
+                line,
+                images: []
+            }
+        }, signal, 300_000)
+        if (value === undefined || value === null) return undefined
+        if (!isRecord(value) || !asString(value.commandId) || !isRecord(value.result)) {
+            throw new Error('DeepSeek Harness commands/execute returned an invalid execution')
+        }
+        const result = value.result
+        const kind = result.kind
+        if (kind === 'success') {
+            const sourceEventSeq = result.sourceEventSeq
+            if (sourceEventSeq !== undefined && asNumber(sourceEventSeq) === null) {
+                throw new Error('DeepSeek Harness commands/execute returned an invalid source event sequence')
+            }
+            return {
+                commandId: value.commandId as string,
+                result: {
+                    kind: 'success',
+                    ...(typeof result.text === 'string' ? { text: result.text } : {}),
+                    ...(sourceEventSeq !== undefined ? { sourceEventSeq: sourceEventSeq as number } : {})
+                }
+            }
+        }
+        if (kind === 'error' && typeof result.text === 'string') {
+            return {
+                commandId: value.commandId as string,
+                result: { kind: 'error', text: result.text }
+            }
+        }
+        throw new Error('DeepSeek Harness commands/execute returned an invalid command result')
     }
 
     async cancel(sessionId: string, signal?: AbortSignal): Promise<void> {

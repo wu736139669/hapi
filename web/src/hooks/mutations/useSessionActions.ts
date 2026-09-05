@@ -190,8 +190,8 @@ export function useSessionActions(
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }
-            if (agentFlavor !== 'codex' && agentFlavor !== 'opencode') {
-                throw new Error('Model reasoning effort is only supported for Codex and OpenCode sessions')
+            if (agentFlavor !== 'codex' && agentFlavor !== 'dsh' && agentFlavor !== 'opencode') {
+                throw new Error('Model reasoning effort is only supported for Codex, DeepSeek Harness, and OpenCode sessions')
             }
             if (agentFlavor === 'codex' && !codexCollaborationModeSupported) {
                 throw new Error('Model reasoning effort is only supported for remote sessions')

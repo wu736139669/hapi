@@ -194,6 +194,11 @@ export function shouldApplyDshPermissionPreset(
         && requested !== nativeCurrent
 }
 
+/** Native DSH commands must never be merged into a model prompt batch. */
+export function isDshSlashCommand(text: string): boolean {
+    return /^\s*\/[a-z0-9:_-]+(?:\s|$)/i.test(text)
+}
+
 function resolveRequestedModel(
     requested: string,
     models: readonly DshModelSummary[],
@@ -820,6 +825,13 @@ export async function runDsh(opts: {
         session.onUserMessage((message, localId) => {
             const text = formatMessageWithAttachments(message.content.text, message.content.attachments)
             const deliveryMode = message.meta?.deliveryMode ?? 'queue'
+            if (isDshSlashCommand(message.content.text)) {
+                // Native commands (notably /compact) are direct DSH RPCs. Keep
+                // them isolated so they retain FIFO order and never get merged
+                // with adjacent prompts or steered into an active turn.
+                queue.pushIsolated(text, { deliveryMode }, localId)
+                return
+            }
             if (thinking && deliveryMode === 'steer') {
                 void submitSteer(text, localId).catch((error) => {
                     logger.debug('[dsh] Native steer submission failed; restoring queue item:', error)
@@ -839,6 +851,28 @@ export async function runDsh(opts: {
             if (!batch) break
 
             try {
+                if (isDshSlashCommand(batch.message)) {
+                    thinking = true
+                    syncKeepAlive()
+                    const execution = await client.executeCommand(
+                        nativeSessionId!,
+                        batch.message,
+                        loopAbort.signal
+                    )
+                    if (execution) {
+                        session.emitMessagesConsumed(batch.items.flatMap((item) => item.localId ? [item.localId] : []))
+                        thinking = false
+                        syncKeepAlive()
+                        if (execution.result.text) {
+                            session.sendSessionEvent({ type: 'message', message: execution.result.text })
+                        }
+                        session.sendSessionEvent({ type: 'ready' })
+                        continue
+                    }
+                    // Unknown/invalid DSH command lines return no execution;
+                    // preserve the existing pass-through behavior by sending
+                    // them as ordinary model text below.
+                }
                 const requestedRpcId = randomUUID()
                 ownedRpcIds.add(requestedRpcId)
                 const completion = new Promise<void>((resolve, reject) => {

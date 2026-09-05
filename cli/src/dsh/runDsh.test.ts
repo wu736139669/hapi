@@ -1,12 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import {
     dshAnswerFromHapi,
+    isDshSlashCommand,
     parseDshQuestions,
     questionFingerprint,
     resolveDshQuestionRequest,
     shouldApplyDshPermissionPreset,
     toHapiQuestionInput
 } from './runDsh'
+
+describe('DeepSeek Harness slash commands', () => {
+    it('recognizes command lines without classifying ordinary prose', () => {
+        expect(isDshSlashCommand('/compact')).toBe(true)
+        expect(isDshSlashCommand('  /compact now')).toBe(true)
+        expect(isDshSlashCommand('/foo:bar')).toBe(true)
+        expect(isDshSlashCommand('please run /compact')).toBe(false)
+        expect(isDshSlashCommand(' /')).toBe(false)
+    })
+})
 
 describe('DeepSeek Harness permission preset resume', () => {
     it('does not resend the permission command when the native preset already matches', () => {

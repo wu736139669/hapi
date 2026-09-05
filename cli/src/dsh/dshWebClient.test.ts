@@ -66,6 +66,53 @@ describe('DshWebClient', () => {
         expect(error).toMatchObject({ method: 'host.describe', code: 'failed' })
     })
 
+    it('executes native slash commands and preserves success/error results', async () => {
+        const requests: Array<{ method: string; payload: unknown }> = []
+        const client = new DshWebClient('http://127.0.0.1:3080', (async (_input, init) => {
+            const request = JSON.parse(String(init?.body)) as { rpcId: string; method: string; payload: unknown }
+            requests.push(request)
+            const value = request.method === 'commands/execute'
+                ? {
+                    commandId: 'cmd-1',
+                    result: { kind: 'success', text: 'Compacted 2 history items.', sourceEventSeq: 7 }
+                }
+                : undefined
+            return new Response(JSON.stringify({
+                type: 'server-response',
+                rpcId: request.rpcId,
+                result: { ok: true, value }
+            }), { status: 200, headers: { 'content-type': 'application/json' } })
+        }) as typeof fetch)
+
+        await expect(client.executeCommand('session-1', '/compact')).resolves.toEqual({
+            commandId: 'cmd-1',
+            result: { kind: 'success', text: 'Compacted 2 history items.', sourceEventSeq: 7 }
+        })
+        expect(requests[0]).toMatchObject({
+            method: 'commands/execute',
+            payload: { args: { agentId: 'session-1', line: '/compact', images: [] } }
+        })
+    })
+
+    it('returns undefined for a DSH line that is not a native command', async () => {
+        const client = new DshWebClient('http://127.0.0.1:3080', rpcFetch({ 'commands/execute': undefined }))
+        await expect(client.executeCommand('session-1', '/unknown')).resolves.toBeUndefined()
+    })
+
+    it('preserves native command failures as settled error results', async () => {
+        const client = new DshWebClient('http://127.0.0.1:3080', rpcFetch({
+            'commands/execute': {
+                commandId: 'cmd-2',
+                result: { kind: 'error', text: 'Compaction is unavailable because the agent is busy.' }
+            }
+        }))
+
+        await expect(client.executeCommand('session-1', '/compact')).resolves.toEqual({
+            commandId: 'cmd-2',
+            result: { kind: 'error', text: 'Compaction is unavailable because the agent is busy.' }
+        })
+    })
+
     it('discovers the model catalog from an existing native session', async () => {
         const client = new DshWebClient('http://127.0.0.1:3080', rpcFetch({
             'host.describe': {
