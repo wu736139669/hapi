@@ -1335,6 +1335,9 @@ async function mergeSingleDuplicateCodexSessionGroup(options: {
             latestActivity = Math.max(latestActivity, copied.invokedAt ?? copied.createdAt)
         }
 
+        // Preserve indexed token history when deduplication removes a source
+        // session. The usage ledger is independent of the session row.
+        options.store.usage.transferSession(source.sessionId, canonical.sessionId)
         if (engine) {
             await engine.deleteSession(source.sessionId)
         } else {

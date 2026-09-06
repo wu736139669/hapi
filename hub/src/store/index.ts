@@ -52,7 +52,9 @@ export {
     WorkGraphValidationError
 } from './workGraph'
 
-const SCHEMA_VERSION: number = 25
+// Usage history is a durable namespace ledger.  Keep it independent from
+// session lifetime so deleting a session cannot erase historical totals.
+const SCHEMA_VERSION: number = 26
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -364,6 +366,7 @@ export class Store {
             22: () => this.migrateFromV22ToV23(),
             23: () => this.migrateFromV23ToV24(),
             24: () => this.migrateFromV24ToV25(),
+            25: () => this.migrateFromV25ToV26(),
         })
 
         if (currentVersion === 0) {
@@ -530,6 +533,7 @@ export class Store {
                 ON session_scratchlist(session_id, created_at DESC);
 
             CREATE TABLE IF NOT EXISTS usage_events (
+                namespace TEXT NOT NULL DEFAULT 'default',
                 session_id TEXT NOT NULL,
                 source_key TEXT NOT NULL,
                 source_seq INTEGER NOT NULL,
@@ -545,19 +549,22 @@ export class Store {
                 last_output_tokens INTEGER,
                 last_cache_read_tokens INTEGER,
                 last_cache_creation_tokens INTEGER,
-                PRIMARY KEY (session_id, source_key),
-                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                PRIMARY KEY (session_id, source_key)
             );
             CREATE INDEX IF NOT EXISTS idx_usage_events_session_created
                 ON usage_events(session_id, created_at, source_seq);
             CREATE INDEX IF NOT EXISTS idx_usage_events_created
                 ON usage_events(created_at);
+            CREATE INDEX IF NOT EXISTS idx_usage_events_order
+                ON usage_events(created_at, source_seq, session_id, source_key);
+            CREATE INDEX IF NOT EXISTS idx_usage_events_namespace_order
+                ON usage_events(namespace, created_at, source_seq, session_id, source_key);
 
             CREATE TABLE IF NOT EXISTS usage_scan_state (
+                namespace TEXT NOT NULL DEFAULT 'default',
                 session_id TEXT PRIMARY KEY,
                 message_epoch INTEGER NOT NULL DEFAULT 0,
-                last_seq INTEGER NOT NULL DEFAULT 0,
-                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                last_seq INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS events (
@@ -1056,6 +1063,98 @@ export class Store {
         if (messageColumns.size > 0 && !messageColumns.has('delivery_state')) {
             this.db.exec("ALTER TABLE messages ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'queued'")
         }
+    }
+
+    /** v25→v26: make usage history independent from session deletion. */
+    private migrateFromV25ToV26(): void {
+        this.db.exec(`
+            DROP TABLE IF EXISTS usage_events_v26;
+            DROP TABLE IF EXISTS usage_scan_state_v26;
+
+            CREATE TABLE usage_events_v26 (
+                namespace TEXT NOT NULL DEFAULT 'default',
+                session_id TEXT NOT NULL,
+                source_key TEXT NOT NULL,
+                source_seq INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                agent TEXT NOT NULL,
+                model TEXT,
+                kind TEXT NOT NULL CHECK (kind IN ('delta', 'cumulative')),
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                last_input_tokens INTEGER,
+                last_output_tokens INTEGER,
+                last_cache_read_tokens INTEGER,
+                last_cache_creation_tokens INTEGER,
+                PRIMARY KEY (session_id, source_key)
+            );
+            INSERT INTO usage_events_v26 (
+                namespace,
+                session_id,
+                source_key,
+                source_seq,
+                created_at,
+                agent,
+                model,
+                kind,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_creation_tokens,
+                last_input_tokens,
+                last_output_tokens,
+                last_cache_read_tokens,
+                last_cache_creation_tokens
+            )
+            SELECT
+                COALESCE(s.namespace, 'default'),
+                e.session_id,
+                e.source_key,
+                e.source_seq,
+                e.created_at,
+                e.agent,
+                e.model,
+                e.kind,
+                e.input_tokens,
+                e.output_tokens,
+                e.cache_read_tokens,
+                e.cache_creation_tokens,
+                e.last_input_tokens,
+                e.last_output_tokens,
+                e.last_cache_read_tokens,
+                e.last_cache_creation_tokens
+            FROM usage_events AS e
+            LEFT JOIN sessions AS s ON s.id = e.session_id;
+            DROP TABLE usage_events;
+            ALTER TABLE usage_events_v26 RENAME TO usage_events;
+            CREATE INDEX idx_usage_events_session_created
+                ON usage_events(session_id, created_at, source_seq);
+            CREATE INDEX idx_usage_events_created
+                ON usage_events(created_at);
+            CREATE INDEX idx_usage_events_order
+                ON usage_events(created_at, source_seq, session_id, source_key);
+            CREATE INDEX idx_usage_events_namespace_order
+                ON usage_events(namespace, created_at, source_seq, session_id, source_key);
+
+            CREATE TABLE usage_scan_state_v26 (
+                namespace TEXT NOT NULL DEFAULT 'default',
+                session_id TEXT PRIMARY KEY,
+                message_epoch INTEGER NOT NULL DEFAULT 0,
+                last_seq INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO usage_scan_state_v26 (namespace, session_id, message_epoch, last_seq)
+            SELECT
+                COALESCE(s.namespace, 'default'),
+                state.session_id,
+                state.message_epoch,
+                state.last_seq
+            FROM usage_scan_state AS state
+            LEFT JOIN sessions AS s ON s.id = state.session_id;
+            DROP TABLE usage_scan_state;
+            ALTER TABLE usage_scan_state_v26 RENAME TO usage_scan_state;
+        `)
     }
 
     /**
