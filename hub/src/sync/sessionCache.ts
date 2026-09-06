@@ -1123,8 +1123,11 @@ export class SessionCache {
         if (options.deleteOldSession) {
             this.store.workGraph.reassignNotifySession(namespace, oldSessionId, newSessionId)
         }
+        // Usage is a durable ledger. Transfer any indexed rows before a
+        // session merge can delete the source, even when no message moved in
+        // this merge attempt.
+        this.store.usage.transferSession(oldSessionId, newSessionId)
         if (movedMessages.moved > 0) {
-            this.store.usage.transferSession(oldSessionId, newSessionId)
             if (!options.deleteOldSession) {
                 this.publisher.emit({ type: 'messages-invalidated', sessionId: oldSessionId, namespace })
             }
