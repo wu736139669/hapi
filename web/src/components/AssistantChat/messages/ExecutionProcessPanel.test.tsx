@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 import {
     ExecutionProcessPanel,
@@ -21,6 +21,7 @@ function renderPanel() {
 describe('ExecutionProcessPanel', () => {
     afterEach(() => {
         cleanup()
+        vi.restoreAllMocks()
         localStorage.clear()
     })
 
@@ -110,6 +111,19 @@ describe('ExecutionProcessPanel', () => {
         expect(panel).toHaveAttribute('data-expanded', 'true')
         expect(panel).toHaveStyle({ height: '22rem' })
         expect(screen.getByRole('button', { name: 'Collapse execution process' })).toHaveAttribute('aria-expanded', 'true')
+    })
+
+    it('announces the expand toggle so the chat viewport can preserve its anchor', () => {
+        const dispatchEvent = vi.spyOn(window, 'dispatchEvent')
+        renderPanel()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Expand execution process' }))
+
+        expect(dispatchEvent).toHaveBeenCalled()
+        const event = dispatchEvent.mock.calls[0]?.[0]
+        expect(event).toBeInstanceOf(CustomEvent)
+        expect((event as CustomEvent).type).toBe('hapi-execution-process-toggle')
+        expect((event as CustomEvent<{ expanded: boolean }>).detail).toEqual({ expanded: true })
     })
 
     it('follows newly appended process modules while the inner view is at the bottom', () => {

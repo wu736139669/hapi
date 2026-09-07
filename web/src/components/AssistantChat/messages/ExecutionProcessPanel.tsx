@@ -8,6 +8,11 @@ const NON_EXECUTION_PROCESS_TOOL_NAMES = new Set(['GeneratedImage', 'CodexPermis
 const EXECUTION_PROCESS_HEIGHT = '11rem'
 const EXECUTION_PROCESS_EXPANDED_HEIGHT = '22rem'
 const EXECUTION_PROCESS_MAX_HEIGHT = 'calc(var(--tg-viewport-stable-height, var(--app-viewport-height, 100dvh)) - 9rem)'
+export const EXECUTION_PROCESS_TOGGLE_EVENT = 'hapi-execution-process-toggle'
+
+export type ExecutionProcessToggleDetail = {
+    readonly expanded: boolean
+}
 
 type MessagePartForExecutionProcess = {
     readonly type: string
@@ -83,6 +88,13 @@ export function ExecutionProcessPanel(props: { children: ReactNode }) {
     const expandLabel = expanded
         ? t('toolGroup.executionProcess.collapse')
         : t('toolGroup.executionProcess.expand')
+    const nextExpanded = !expanded
+    const handleToggle = () => {
+        window.dispatchEvent(new CustomEvent<ExecutionProcessToggleDetail>(EXECUTION_PROCESS_TOGGLE_EVENT, {
+            detail: { expanded: nextExpanded }
+        }))
+        setExpanded(nextExpanded)
+    }
 
     useLayoutEffect(() => {
         const scrollSurface = scrollSurfaceRef.current
@@ -123,7 +135,7 @@ export function ExecutionProcessPanel(props: { children: ReactNode }) {
                             ? 'bg-[var(--app-bg)]'
                             : 'text-[var(--app-fg)]/60 hover:text-[var(--app-fg)]'
                     }`}
-                    onClick={() => setExpanded((value) => !value)}
+                    onClick={handleToggle}
                 >
                     <ExecutionProcessExpandIcon expanded={expanded} />
                 </button>

@@ -15,6 +15,7 @@ import {
 import { HappyAssistantMessage } from '@/components/AssistantChat/messages/AssistantMessage'
 import { HappyUserMessage } from '@/components/AssistantChat/messages/UserMessage'
 import { HappySystemMessage } from '@/components/AssistantChat/messages/SystemMessage'
+import { EXECUTION_PROCESS_TOGGLE_EVENT } from '@/components/AssistantChat/messages/ExecutionProcessPanel'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
@@ -564,6 +565,8 @@ export function HappyThread(props: {
     const shareTurnIdRef = useRef(0)
     const topSentinelRef = useRef<HTMLDivElement | null>(null)
     const pendingScrollRef = useRef<PendingScrollRestore | null>(null)
+    const executionProcessToggleAnchorRef = useRef<ScrollAnchor | null>(null)
+    const executionProcessToggleFrameRef = useRef<number | null>(null)
     const isLoadingMoreRef = useRef(props.isLoadingMoreMessages)
     const hasMoreMessagesRef = useRef(props.hasMoreMessages)
     const isSyncingTailRef = useRef(props.isSyncingTail)
@@ -639,6 +642,35 @@ export function HappyThread(props: {
         sessionIdRef.current = props.sessionId
     }, [props.sessionId])
 
+    useEffect(() => {
+        const handleExecutionProcessToggle = () => {
+            const viewport = viewportRef.current
+            if (!viewport) return
+
+            executionProcessToggleAnchorRef.current = captureScrollAnchor(viewport)
+            autoScrollEnabledRef.current = false
+            clearExecutionProcessToggleFrame()
+            executionProcessToggleFrameRef.current = window.requestAnimationFrame(() => {
+                executionProcessToggleFrameRef.current = window.requestAnimationFrame(() => {
+                    executionProcessToggleFrameRef.current = null
+                    const restoreViewport = viewportRef.current
+                    const anchor = executionProcessToggleAnchorRef.current
+                    executionProcessToggleAnchorRef.current = null
+                    if (!restoreViewport || !anchor) return
+                    restoreScrollAnchor(restoreViewport, anchor)
+                    lastScrollTopRef.current = restoreViewport.scrollTop
+                })
+            })
+        }
+
+        window.addEventListener(EXECUTION_PROCESS_TOGGLE_EVENT, handleExecutionProcessToggle)
+        return () => {
+            window.removeEventListener(EXECUTION_PROCESS_TOGGLE_EVENT, handleExecutionProcessToggle)
+            clearExecutionProcessToggleFrame()
+            executionProcessToggleAnchorRef.current = null
+        }
+    }, [clearExecutionProcessToggleFrame])
+
     const isInitialScrollSettling = useCallback(() => {
         return initialScrollSessionRef.current === sessionIdRef.current && Date.now() < initialScrollDeadlineRef.current
     }, [])
@@ -661,6 +693,13 @@ export function HappyThread(props: {
         if (failureRetryTimerRef.current !== null) {
             window.clearTimeout(failureRetryTimerRef.current)
             failureRetryTimerRef.current = null
+        }
+    }, [])
+
+    const clearExecutionProcessToggleFrame = useCallback(() => {
+        if (executionProcessToggleFrameRef.current !== null) {
+            window.cancelAnimationFrame(executionProcessToggleFrameRef.current)
+            executionProcessToggleFrameRef.current = null
         }
     }, [])
 
