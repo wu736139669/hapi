@@ -55,7 +55,7 @@ export function getExecutionProcessGroupPaths(
 }
 
 function ExecutionProcessExpandIcon(props: { expanded: boolean }) {
-    return props.expanded ? (
+    return (
         <svg
             xmlns="http://www.w3.org/2000/svg"
             width="18"
@@ -67,25 +67,9 @@ function ExecutionProcessExpandIcon(props: { expanded: boolean }) {
             strokeLinecap="round"
             strokeLinejoin="round"
             aria-hidden="true"
-        >
-            <path d="m7 14 5 5 5-5" />
-            <path d="m7 10 5-5 5 5" />
-        </svg>
-    ) : (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
+            className={`transition-transform duration-200 ${props.expanded ? 'rotate-180' : ''}`}
         >
             <path d="m7 10 5 5 5-5" />
-            <path d="m7 14 5-5 5 5" />
         </svg>
     )
 }
