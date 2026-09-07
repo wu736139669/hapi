@@ -74,6 +74,23 @@ bun run gen:fixtures    # Regenerate shared/fixtures/ from web pipeline
 cd android && ./gradlew :core:protocol:test  # Android protocol conformance
 ```
 
+## Local binary deployment
+
+When installing a rebuilt executable into `~/.hapi/bin/hapi`, never copy over
+the path in place while HAPI hub, runner, or sessions are running. macOS can
+invalidate the executing Mach-O code pages and terminate newly spawned HAPI
+processes with `SIGKILL` before their session webhook arrives.
+
+Install through a temporary file followed by an atomic rename:
+
+```bash
+cp -p cli/dist-exe/bun-darwin-arm64/hapi ~/.hapi/bin/.hapi-install-atomic-$$
+chmod 755 ~/.hapi/bin/.hapi-install-atomic-$$
+mv -f ~/.hapi/bin/.hapi-install-atomic-$$ ~/.hapi/bin/hapi
+```
+
+After replacement, verify `~/.hapi/bin/hapi --version` and `hapi runner status`.
+
 iOS tests run in CI (`ios.yml`: macOS `swift test`); no local Xcode/Swift toolchain assumed.
 
 ## Key source dirs
