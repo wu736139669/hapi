@@ -85,30 +85,27 @@
 }
 
 .hapi-execution-process {
-    border: 1px solid color-mix(in srgb, #64748b 18%, var(--app-border));
-    background: linear-gradient(135deg, color-mix(in srgb, #64748b 5%, transparent), transparent 55%), var(--app-tool-group-bg);
-    box-shadow: 0 8px 24px color-mix(in srgb, #0f172a 8%, transparent), inset 0 1px 0 color-mix(in srgb, white 28%, transparent);
+    background: linear-gradient(120deg, color-mix(in srgb, #f1d58a 18%, var(--app-tool-group-bg)), color-mix(in srgb, #ead08a 7%, var(--app-tool-group-bg)) 55%, var(--app-tool-group-bg));
+    box-shadow: 10px 12px 28px color-mix(in srgb, #8c7440 13%, transparent), -4px -4px 14px color-mix(in srgb, #fff4c7 20%, transparent);
 }
 
 .hapi-execution-process__header {
-    border-bottom: 1px solid color-mix(in srgb, #64748b 14%, var(--app-border));
-    background: color-mix(in srgb, #64748b 4%, transparent);
+    background: linear-gradient(105deg, color-mix(in srgb, #f5df9d 12%, transparent), transparent 72%);
 }
 
 .hapi-execution-process__expand {
-    border: 1px solid color-mix(in srgb, #64748b 16%, var(--app-border));
-    background: color-mix(in srgb, #64748b 4%, transparent);
+    background: color-mix(in srgb, #d9bd70 10%, transparent);
     color: var(--app-hint);
 }
 
 .hapi-execution-process__expand:hover {
-    background: color-mix(in srgb, #64748b 9%, transparent);
+    background: color-mix(in srgb, #d9bd70 20%, transparent);
     color: var(--app-fg);
 }
 
 .hapi-execution-process__body {
     overflow-x: hidden;
-    background-image: linear-gradient(color-mix(in srgb, #64748b 3%, transparent) 1px, transparent 1px);
+    background-image: linear-gradient(color-mix(in srgb, #d9bd70 3%, transparent) 1px, transparent 1px);
     background-size: 100% 28px;
 }
 

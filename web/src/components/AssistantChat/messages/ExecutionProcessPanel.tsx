@@ -68,14 +68,8 @@ function ExecutionProcessExpandIcon(props: { expanded: boolean }) {
             strokeLinejoin="round"
             aria-hidden="true"
         >
-            <path d="M8 3v5H3" />
-            <path d="m3 3 5 5" />
-            <path d="M16 3v5h5" />
-            <path d="m21 3-5 5" />
-            <path d="M8 21v-5H3" />
-            <path d="m3 21 5-5" />
-            <path d="M16 21v-5h5" />
-            <path d="m21 21-5-5" />
+            <path d="m7 14 5 5 5-5" />
+            <path d="m7 10 5-5 5 5" />
         </svg>
     ) : (
         <svg
@@ -90,14 +84,8 @@ function ExecutionProcessExpandIcon(props: { expanded: boolean }) {
             strokeLinejoin="round"
             aria-hidden="true"
         >
-            <path d="M8 3H3v5" />
-            <path d="m3 3 5 5" />
-            <path d="M16 3h5v5" />
-            <path d="m21 3-5 5" />
-            <path d="M8 21H3v-5" />
-            <path d="m3 21 5-5" />
-            <path d="M16 21h5v-5" />
-            <path d="m21 21-5-5" />
+            <path d="m7 10 5 5 5-5" />
+            <path d="m7 14 5-5 5 5" />
         </svg>
     )
 }
