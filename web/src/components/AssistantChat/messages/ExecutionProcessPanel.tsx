@@ -149,8 +149,8 @@ export function ExecutionProcessPanel(props: { children: ReactNode }) {
                     aria-pressed={expanded}
                     className={`hapi-execution-process__expand flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
                         expanded
-                            ? 'bg-[var(--app-bg)] text-[var(--app-link)]'
-                            : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
+                            ? 'bg-[var(--app-bg)]'
+                            : 'text-[var(--app-fg)]/60 hover:text-[var(--app-fg)]'
                     }`}
                     onClick={() => setExpanded((value) => !value)}
                 >

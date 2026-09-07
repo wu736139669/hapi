@@ -86,14 +86,16 @@
 
 .hapi-execution-process {
     position: relative;
+    --hapi-execution-accent: #6378ff;
+    --hapi-execution-cyan: #22d3ee;
     border: 1px solid color-mix(in srgb, var(--app-link) 28%, var(--app-border));
-    background: linear-gradient(135deg, color-mix(in srgb, var(--app-link) 8%, transparent), transparent 45%), var(--app-tool-group-bg);
-    box-shadow: 0 10px 30px color-mix(in srgb, var(--app-link) 8%, transparent), inset 0 1px 0 color-mix(in srgb, white 30%, transparent);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--hapi-execution-accent) 10%, transparent), color-mix(in srgb, var(--hapi-execution-cyan) 3%, transparent) 45%), var(--app-tool-group-bg);
+    box-shadow: 0 10px 30px color-mix(in srgb, var(--hapi-execution-accent) 12%, transparent), inset 0 1px 0 color-mix(in srgb, white 30%, transparent);
 }
 
 .hapi-execution-process__header {
-    border-bottom: 1px solid color-mix(in srgb, var(--app-link) 18%, var(--app-border));
-    background: linear-gradient(90deg, color-mix(in srgb, var(--app-link) 10%, transparent), transparent 70%);
+    border-bottom: 1px solid color-mix(in srgb, var(--hapi-execution-accent) 24%, var(--app-border));
+    background: linear-gradient(90deg, color-mix(in srgb, var(--hapi-execution-accent) 12%, transparent), transparent 70%);
 }
 
 .hapi-execution-process__signal {
@@ -101,22 +103,23 @@
     height: 7px;
     flex: 0 0 auto;
     border-radius: 999px;
-    background: var(--app-link);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-link) 15%, transparent), 0 0 12px color-mix(in srgb, var(--app-link) 70%, transparent);
+    background: var(--hapi-execution-cyan);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--hapi-execution-accent) 20%, transparent), 0 0 12px color-mix(in srgb, var(--hapi-execution-cyan) 75%, transparent);
 }
 
 .hapi-execution-process__expand {
-    border: 1px solid color-mix(in srgb, var(--app-link) 25%, var(--app-border));
-    background: color-mix(in srgb, var(--app-link) 7%, transparent);
-    color: var(--app-link);
+    border: 1px solid color-mix(in srgb, var(--hapi-execution-accent) 45%, var(--app-border));
+    background: color-mix(in srgb, var(--hapi-execution-accent) 10%, transparent);
+    color: var(--hapi-execution-accent);
 }
 
 .hapi-execution-process__expand:hover {
-    background: color-mix(in srgb, var(--app-link) 16%, transparent);
+    background: color-mix(in srgb, var(--hapi-execution-accent) 20%, transparent);
 }
 
 .hapi-execution-process__body {
-    background-image: linear-gradient(color-mix(in srgb, var(--app-link) 4%, transparent) 1px, transparent 1px);
+    overflow-x: hidden;
+    background-image: linear-gradient(color-mix(in srgb, var(--hapi-execution-accent) 5%, transparent) 1px, transparent 1px);
     background-size: 100% 28px;
 }
 
