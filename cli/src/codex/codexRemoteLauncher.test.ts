@@ -92,6 +92,8 @@ const harness = vi.hoisted(() => ({
     emitRunningChildTurnBeforeSuppressedParent: false,
     emitCompletedChildTurnBeforeSuppressedParent: false,
     emitTurnAbortedOnInterrupt: false,
+    capacityErrorsRemaining: 0,
+    capacityErrorRetryAfterMs: null as number | null,
     bridgeOptions: [] as unknown[]
 }));
 
@@ -325,6 +327,25 @@ vi.mock('./codexAppServerClient', () => {
                 };
                 harness.notifications.push({ method: 'model/safetyBuffering/updated', params: notification });
                 this.notificationHandler?.('model/safetyBuffering/updated', notification);
+                return { turn: { id: turnId } };
+            }
+
+            if (harness.capacityErrorsRemaining > 0) {
+                harness.capacityErrorsRemaining -= 1;
+                const overloaded = {
+                    threadId,
+                    turnId,
+                    error: {
+                        message: 'Selected model is at capacity. Please try a different model.',
+                        codexErrorInfo: 'server_overloaded'
+                    },
+                    willRetry: false,
+                    ...(harness.capacityErrorRetryAfterMs !== null
+                        ? { retryAfterMs: harness.capacityErrorRetryAfterMs }
+                        : {})
+                };
+                harness.notifications.push({ method: 'error', params: overloaded });
+                this.notificationHandler?.('error', overloaded);
                 return { turn: { id: turnId } };
             }
 
@@ -1477,6 +1498,8 @@ describe('codexRemoteLauncher', () => {
         harness.emitRunningChildTurnBeforeSuppressedParent = false;
         harness.emitCompletedChildTurnBeforeSuppressedParent = false;
         harness.emitTurnAbortedOnInterrupt = false;
+        harness.capacityErrorsRemaining = 0;
+        harness.capacityErrorRetryAfterMs = null;
         harness.bridgeOptions = [];
     });
 
@@ -2107,7 +2130,7 @@ describe('codexRemoteLauncher', () => {
         expect(session.thinking).toBe(false);
     });
 
-    it('does not retry an explicitly non-retryable error even when its text is retryable', async () => {
+    it('does not retry an explicitly non-retryable fatal error', async () => {
         harness.suppressTurnCompletion = true;
         const { session, sessionEvents } = createSessionStub(['first message']);
 
@@ -2119,7 +2142,7 @@ describe('codexRemoteLauncher', () => {
         harness.dispatchNotification?.('error', {
             threadId: 'thread-1',
             turnId: 'turn-1',
-            error: { message: 'Selected model is at capacity' },
+            error: { message: 'permission denied' },
             willRetry: false
         });
 
@@ -2127,9 +2150,27 @@ describe('codexRemoteLauncher', () => {
         expect(harness.startTurnMessages).toEqual(['first message']);
         expect(sessionEvents).toContainEqual({
             type: 'message',
-            message: 'Task failed: Selected model is at capacity'
+            message: 'Task failed: permission denied'
         });
         expect(sessionEvents.some((event) => String(event.message ?? '').includes('retrying same conversation'))).toBe(false);
+        expect(session.thinking).toBe(false);
+    });
+
+    it('retries a server-overloaded model on the same thread after the advertised delay', async () => {
+        harness.capacityErrorsRemaining = 1;
+        harness.capacityErrorRetryAfterMs = 0;
+        const { session, sessionEvents } = createSessionStub(['first message']);
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.startThreadIds).toEqual(['thread-1']);
+        expect(harness.startTurnMessages).toEqual(['first message', 'first message']);
+        expect(sessionEvents).toContainEqual({
+            type: 'message',
+            message: 'Task failed: Selected model is at capacity. Please try a different model.; retrying same conversation (1/3)'
+        });
+        expect(sessionEvents.filter((event) => event.type === 'ready').length).toBeGreaterThanOrEqual(1);
         expect(session.thinking).toBe(false);
     });
 
