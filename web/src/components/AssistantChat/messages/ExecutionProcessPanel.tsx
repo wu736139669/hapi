@@ -137,9 +137,8 @@ export function ExecutionProcessPanel(props: { children: ReactNode }) {
             aria-label={title}
         >
             <header className="hapi-execution-process__header flex h-11 shrink-0 items-center justify-between gap-3 px-3">
-                <h2 className="flex min-w-0 items-center gap-2 truncate text-sm font-semibold tracking-wide text-[var(--app-fg)]">
-                    <span className="hapi-execution-process__signal" aria-hidden="true" />
-                    <span className="truncate">{title}</span>
+                <h2 className="min-w-0 truncate text-sm font-semibold tracking-wide text-[var(--app-fg)]">
+                    {title}
                 </h2>
                 <button
                     type="button"
