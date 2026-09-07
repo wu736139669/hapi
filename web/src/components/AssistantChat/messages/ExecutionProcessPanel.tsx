@@ -129,16 +129,17 @@ export function ExecutionProcessPanel(props: { children: ReactNode }) {
         <section
             data-hapi-execution-process="true"
             data-expanded={expanded ? 'true' : 'false'}
-            className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[20px] border border-[var(--app-border)] bg-[var(--app-tool-group-bg)] shadow-none"
+            className="hapi-execution-process flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[20px]"
             style={{
                 height: expanded ? EXECUTION_PROCESS_EXPANDED_HEIGHT : EXECUTION_PROCESS_HEIGHT,
                 maxHeight: EXECUTION_PROCESS_MAX_HEIGHT
             }}
             aria-label={title}
         >
-            <header className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-[var(--app-border)] px-3">
-                <h2 className="min-w-0 truncate text-sm font-semibold text-[var(--app-fg)]">
-                    {title}
+            <header className="hapi-execution-process__header flex h-11 shrink-0 items-center justify-between gap-3 px-3">
+                <h2 className="flex min-w-0 items-center gap-2 truncate text-sm font-semibold tracking-wide text-[var(--app-fg)]">
+                    <span className="hapi-execution-process__signal" aria-hidden="true" />
+                    <span className="truncate">{title}</span>
                 </h2>
                 <button
                     type="button"
@@ -146,7 +147,7 @@ export function ExecutionProcessPanel(props: { children: ReactNode }) {
                     title={expandLabel}
                     aria-expanded={expanded}
                     aria-pressed={expanded}
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
+                    className={`hapi-execution-process__expand flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] ${
                         expanded
                             ? 'bg-[var(--app-bg)] text-[var(--app-link)]'
                             : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
@@ -159,7 +160,7 @@ export function ExecutionProcessPanel(props: { children: ReactNode }) {
             <div
                 ref={scrollSurfaceRef}
                 data-hapi-nested-scroll="true"
-                className="app-scroll-y min-h-0 flex-1 overflow-y-auto px-2 py-2"
+                className="hapi-execution-process__body app-scroll-y min-h-0 flex-1 overflow-y-auto px-2 py-2"
                 onScroll={handleScroll}
             >
                 {props.children}
