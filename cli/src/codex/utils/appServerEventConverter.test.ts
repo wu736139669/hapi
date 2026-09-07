@@ -710,6 +710,33 @@ describe('AppServerEventConverter', () => {
         }]);
     });
 
+    it('normalizes wrapped task_complete errors into retryable task failures', () => {
+        const converter = new AppServerEventConverter();
+
+        const completed = converter.handleNotification('codex/event/task_complete', {
+            msg: {
+                type: 'task_complete',
+                thread_id: 'thread-1',
+                turn_id: 'turn-1',
+                error: {
+                    message: 'Selected model is at capacity. Please try a different model.',
+                    codex_error_info: 'server_overloaded'
+                },
+                retry_after_ms: 0
+            }
+        });
+
+        expect(completed).toEqual([{
+            type: 'task_failed',
+            thread_id: 'thread-1',
+            turn_id: 'turn-1',
+            error: 'Selected model is at capacity. Please try a different model.',
+            codex_error_info: 'server_overloaded',
+            retry_after_ms: 0,
+            terminal_source: 'wrapped_task_complete'
+        }]);
+    });
+
     it('ignores wrapped terminal lifecycle events without turn_id', () => {
         const converter = new AppServerEventConverter();
 

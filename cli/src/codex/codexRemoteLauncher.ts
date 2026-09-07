@@ -90,6 +90,8 @@ const SAME_THREAD_RETRYABLE_ERROR_PATTERNS = [
     'selected model is at capacity',
     'codex thread entered systemerror'
 ];
+const SAME_THREAD_SERVER_OVERLOADED_ERROR_INFO = 'serveroverloaded';
+const SAME_THREAD_CAPACITY_RETRY_DELAYS_MS = [7_000, 15_000, 30_000] as const;
 const CONTEXT_COMPACT_RETRYABLE_ERROR_PATTERNS = [
     'ran out of room in the model',
     'context window',
@@ -146,6 +148,34 @@ function isSameThreadRetryableCodexError(error: string | null): boolean {
     }
     const normalized = error.toLowerCase();
     return SAME_THREAD_RETRYABLE_ERROR_PATTERNS.some((pattern) => normalized.includes(pattern));
+}
+
+function isServerOverloadedCodexError(msg: Record<string, unknown>, error: string | null): boolean {
+    const errorInfo = normalizePolicyToken(msg.codex_error_info ?? msg.codexErrorInfo);
+    return errorInfo === SAME_THREAD_SERVER_OVERLOADED_ERROR_INFO
+        || error?.toLowerCase().includes('selected model is at capacity') === true;
+}
+
+function retryDelayMsForCodexFailure(msg: Record<string, unknown>, attempt: number): number {
+    const explicitMilliseconds = msg.retry_after_ms ?? msg.retryAfterMs;
+    if (typeof explicitMilliseconds === 'number' && Number.isFinite(explicitMilliseconds)) {
+        return Math.max(0, Math.min(5 * 60 * 1000, explicitMilliseconds));
+    }
+
+    const explicitSeconds = msg.retry_after_seconds ?? msg.retryAfterSeconds;
+    if (typeof explicitSeconds === 'number' && Number.isFinite(explicitSeconds)) {
+        return Math.max(0, Math.min(5 * 60, explicitSeconds)) * 1000;
+    }
+
+    return SAME_THREAD_CAPACITY_RETRY_DELAYS_MS[Math.min(Math.max(attempt - 1, 0), SAME_THREAD_CAPACITY_RETRY_DELAYS_MS.length - 1)] ?? 0;
+}
+
+function formatRetryDelay(delayMs: number): string {
+    if (delayMs <= 0) {
+        return '';
+    }
+    const seconds = Math.max(1, Math.ceil(delayMs / 1000));
+    return ` in ${seconds} second${seconds === 1 ? '' : 's'}`;
 }
 
 function normalizePolicyToken(value: unknown): string {
@@ -1855,6 +1885,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         let sameThreadRetryAttempt = 0;
         let sameThreadCompactAttempt = 0;
         let recoveryInFlight = false;
+        let sameThreadRetryTimer: ReturnType<typeof setTimeout> | null = null;
+        let sameThreadRetryGeneration = 0;
         let lastFinalizedTurnId: string | null = null;
         let deferredThreadStatusFailure: {
             event: Record<string, unknown>;
@@ -2249,6 +2281,51 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             }
             recoveryInFlight = false;
             wakeLoop();
+        };
+
+        const clearSameThreadRetry = () => {
+            if (sameThreadRetryTimer) {
+                clearTimeout(sameThreadRetryTimer);
+                sameThreadRetryTimer = null;
+            }
+            sameThreadRetryGeneration += 1;
+            if (recoveryInFlight && !compactRecovery && !deferredThreadStatusFailure) {
+                recoveryInFlight = false;
+                wakeLoop();
+            }
+        };
+
+        const scheduleSameThreadRetry = (messageToRetry: QueuedMessage, delayMs: number) => {
+            if (sameThreadRetryTimer) {
+                clearTimeout(sameThreadRetryTimer);
+            }
+            const generation = ++sameThreadRetryGeneration;
+            const signal = this.abortController.signal;
+            recoveryInFlight = true;
+            const runRetry = () => {
+                if (generation !== sameThreadRetryGeneration) {
+                    return;
+                }
+                sameThreadRetryTimer = null;
+                if (signal.aborted || this.shouldExit) {
+                    recoveryInFlight = false;
+                    pending = null;
+                    activeMessage = null;
+                    wakeLoop();
+                    return;
+                }
+                pending = messageToRetry;
+                recoveryInFlight = false;
+                wakeLoop();
+            };
+
+            if (delayMs <= 0) {
+                runRetry();
+                return;
+            }
+
+            sameThreadRetryTimer = setTimeout(runRetry, delayMs);
+            sameThreadRetryTimer.unref?.();
         };
 
         const failCompactRecovery = (recovery: typeof compactRecovery, message: string) => {
@@ -2898,7 +2975,10 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
 
             const isThreadStatusFailure = msgType === 'task_failed' && msg.terminal_source === 'thread_status';
             const error = msgType === 'task_failed' ? asString(msg.error) : null;
+            const isServerOverloadedFailure = msgType === 'task_failed'
+                && isServerOverloadedCodexError(msg, error);
             const explicitlyNonRetryable = msgType === 'task_failed'
+                && !isServerOverloadedFailure
                 && (msg.retryable === false || isPolicyBlockedCodexFailure(msg, error));
 
             if (deferredThreadStatusFailure && isTerminalEvent && !isThreadStatusFailure) {
@@ -2975,10 +3055,14 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             const shouldRetrySameThread = msgType === 'task_failed'
                 && !explicitlyNonRetryable
                 && !shouldCompactAndRetrySameThread
-                && isSameThreadRetryableCodexError(error)
+                && (isSameThreadRetryableCodexError(error) || isServerOverloadedFailure)
                 && Boolean(activeMessage)
                 && Boolean(this.currentThreadId)
                 && sameThreadRetryAttempt < SAME_THREAD_MAX_RETRIES;
+
+            const retryDelayMs = shouldRetrySameThread && isServerOverloadedFailure
+                ? retryDelayMsForCodexFailure(msg, sameThreadRetryAttempt + 1)
+                : 0;
 
             const suppressReadyForThisTerminalEvent = isTerminalEvent
                 ? consumeInterruptedTurnReadySuppression(eventTurnId)
@@ -3025,10 +3109,14 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     }
                 } else if (shouldRetrySameThread) {
                     sameThreadRetryAttempt += 1;
-                    pending = activeMessage;
+                    const messageToRetry = activeMessage;
+                    if (messageToRetry) {
+                        scheduleSameThreadRetry(messageToRetry, retryDelayMs);
+                    }
                     logger.debug(
                         `[Codex] Retrying retryable failure on same thread ` +
-                        `(attempt ${sameThreadRetryAttempt}/${SAME_THREAD_MAX_RETRIES}): ${error ?? 'unknown error'}`
+                        `(attempt ${sameThreadRetryAttempt}/${SAME_THREAD_MAX_RETRIES}, ` +
+                        `delay=${retryDelayMs}ms): ${error ?? 'unknown error'}`
                     );
                 }
                 this.currentTurnId = null;
@@ -3074,8 +3162,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     session.sendSessionEvent({ type: 'message', message: retryMessage });
                 } else if (shouldRetrySameThread) {
                     const retryMessage = error
-                        ? `Task failed: ${error}; retrying same conversation (${sameThreadRetryAttempt}/${SAME_THREAD_MAX_RETRIES})`
-                        : `Task failed; retrying same conversation (${sameThreadRetryAttempt}/${SAME_THREAD_MAX_RETRIES})`;
+                        ? `Task failed: ${error}; retrying same conversation${formatRetryDelay(retryDelayMs)} (${sameThreadRetryAttempt}/${SAME_THREAD_MAX_RETRIES})`
+                        : `Task failed; retrying same conversation${formatRetryDelay(retryDelayMs)} (${sameThreadRetryAttempt}/${SAME_THREAD_MAX_RETRIES})`;
                     messageBuffer.addMessage(retryMessage, 'status');
                     session.sendSessionEvent({ type: 'message', message: retryMessage });
                 } else {
@@ -3683,6 +3771,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
 
         const resetCurrentTurnState = () => {
             clearDeferredThreadStatusFailure();
+            clearSameThreadRetry();
             cancelSafetyBufferingRequest('Session reset');
             setTurnInFlight(false);
             allowAnonymousTerminalEvent = false;
@@ -4270,6 +4359,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
 
         failPendingAgentStarts('spawn_agent did not return an agent id before the Codex session ended');
         clearDeferredThreadStatusFailure();
+        clearSameThreadRetry();
         cancelSafetyBufferingRequest('Session ended');
         cancelAllPendingThrottledAgentRunUpdates();
         // Stop reconciliation: the launcher is leaving; no pending steer may

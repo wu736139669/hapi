@@ -543,7 +543,21 @@ export class AppServerEventConverter {
                 return [];
             }
 
-            const event: ConvertedEvent = { ...msgScope, type: msgType };
+            const errorRecord = asRecord(msg.error);
+            const error = asString(msg.error) ?? asString(msg.message) ?? asString(errorRecord?.message);
+            const codexErrorInfo = extractCodexErrorInfo(msg, errorRecord);
+            const retryable = asBoolean(msg.will_retry ?? msg.willRetry ?? errorRecord?.will_retry ?? errorRecord?.willRetry);
+            const retryAfterMs = asNumber(msg.retry_after_ms ?? msg.retryAfterMs ?? errorRecord?.retry_after_ms ?? errorRecord?.retryAfterMs);
+            // Older Codex runtimes report an overloaded turn as task_complete
+            // with an embedded error object. Treat that as a failure so the
+            // launcher can apply the same retry policy as canonical failures.
+            const hasEmbeddedError = msg.error !== undefined
+                || msg.codexErrorInfo !== undefined
+                || msg.codex_error_info !== undefined;
+            const normalizedMsgType = msgType === 'task_complete' && hasEmbeddedError && error
+                ? 'task_failed'
+                : msgType;
+            const event: ConvertedEvent = { ...msgScope, type: normalizedMsgType };
             if (turnId) {
                 event.turn_id = turnId;
             }
@@ -551,10 +565,21 @@ export class AppServerEventConverter {
             if (threadId) {
                 event.thread_id = threadId;
             }
-            if (msgType === 'task_failed') {
-                const error = asString(msg.error ?? msg.message ?? asRecord(msg.error)?.message);
+            if (normalizedMsgType === 'task_failed' && msgType === 'task_complete') {
+                event.terminal_source = 'wrapped_task_complete';
+            }
+            if (normalizedMsgType === 'task_failed') {
                 if (error) {
                     event.error = error;
+                }
+                if (codexErrorInfo) {
+                    event.codex_error_info = codexErrorInfo;
+                }
+                if (retryable !== null) {
+                    event.retryable = retryable;
+                }
+                if (retryAfterMs !== null) {
+                    event.retry_after_ms = retryAfterMs;
                 }
             }
             return [event];
@@ -759,13 +784,20 @@ export class AppServerEventConverter {
                 return events;
             }
 
-            if (status === 'failed' || status === 'error') {
+            if (status === 'failed' || status === 'error' || errorMessage) {
                 const codexErrorInfo = extractCodexErrorInfo(paramsRecord, turnError);
+                const retryAfterMs = asNumber(
+                    paramsRecord.retry_after_ms
+                    ?? paramsRecord.retryAfterMs
+                    ?? turnError?.retry_after_ms
+                    ?? turnError?.retryAfterMs
+                );
                 events.push(scoped({
                     type: 'task_failed',
                     ...(turnId ? { turn_id: turnId } : {}),
                     terminal_source: 'turn_completed',
                     ...(codexErrorInfo ? { codex_error_info: codexErrorInfo } : {}),
+                    ...(retryAfterMs !== null ? { retry_after_ms: retryAfterMs } : {}),
                     ...(errorMessage ? { error: errorMessage } : {})
                 }));
                 return events;
@@ -842,11 +874,18 @@ export class AppServerEventConverter {
             const message = asString(paramsRecord.message) ?? asString(errorRecord?.message);
             if (message) {
                 const codexErrorInfo = extractCodexErrorInfo(paramsRecord, errorRecord);
+                const retryAfterMs = asNumber(
+                    paramsRecord.retry_after_ms
+                    ?? paramsRecord.retryAfterMs
+                    ?? errorRecord?.retry_after_ms
+                    ?? errorRecord?.retryAfterMs
+                );
                 events.push(scoped({
                     type: 'task_failed',
                     terminal_source: 'error',
                     ...(retryable !== null ? { retryable } : {}),
                     ...(codexErrorInfo ? { codex_error_info: codexErrorInfo } : {}),
+                    ...(retryAfterMs !== null ? { retry_after_ms: retryAfterMs } : {}),
                     error: message
                 }));
             }
