@@ -5,6 +5,8 @@ import { isRequestUserInputToolName } from '@/components/ToolCard/requestUserInp
 import { useTranslation } from '@/lib/use-translation'
 
 const NON_EXECUTION_PROCESS_TOOL_NAMES = new Set(['GeneratedImage', 'CodexPermission'])
+const EXECUTION_PROCESS_HEIGHT = '11rem'
+const EXECUTION_PROCESS_EXPANDED_HEIGHT = '22rem'
 const EXECUTION_PROCESS_MAX_HEIGHT = 'calc(var(--tg-viewport-stable-height, var(--app-viewport-height, 100dvh)) - 9rem)'
 
 type MessagePartForExecutionProcess = {
@@ -129,7 +131,7 @@ export function ExecutionProcessPanel(props: { children: ReactNode }) {
             data-expanded={expanded ? 'true' : 'false'}
             className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[20px] border border-[var(--app-border)] bg-[var(--app-tool-group-bg)] shadow-none"
             style={{
-                height: expanded ? '44rem' : '22rem',
+                height: expanded ? EXECUTION_PROCESS_EXPANDED_HEIGHT : EXECUTION_PROCESS_HEIGHT,
                 maxHeight: EXECUTION_PROCESS_MAX_HEIGHT
             }}
             aria-label={title}

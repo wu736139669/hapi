@@ -94,7 +94,7 @@ describe('ExecutionProcessPanel', () => {
 
         expect(screen.getByRole('heading', { name: 'Execution process' })).toBeInTheDocument()
         expect(panel).toHaveAttribute('data-expanded', 'false')
-        expect(panel).toHaveStyle({ height: '22rem' })
+        expect(panel).toHaveStyle({ height: '11rem' })
         expect(panel?.style.maxHeight).toBe('calc(var(--tg-viewport-stable-height, var(--app-viewport-height, 100dvh)) - 9rem)')
         expect(scrollSurface).toHaveClass('overflow-y-auto')
         expect(screen.getByText('Terminal')).toBeInTheDocument()
@@ -108,7 +108,7 @@ describe('ExecutionProcessPanel', () => {
         fireEvent.click(button)
 
         expect(panel).toHaveAttribute('data-expanded', 'true')
-        expect(panel).toHaveStyle({ height: '44rem' })
+        expect(panel).toHaveStyle({ height: '22rem' })
         expect(screen.getByRole('button', { name: 'Collapse execution process' })).toHaveAttribute('aria-expanded', 'true')
     })
 
