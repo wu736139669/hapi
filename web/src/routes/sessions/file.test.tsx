@@ -179,16 +179,27 @@ describe('FilePage markdown preview', () => {
     it('opens an interactive HTML copy in a new tab with responsive viewport metadata', async () => {
         activePath = encodeBase64(htmlPath)
         activeContent = encodedHtml
+        const previewDocument = document.implementation.createHTMLDocument('about:blank')
+        const previewWindow = {
+            close: vi.fn(),
+            document: previewDocument,
+            opener: window,
+        } as unknown as Window
+        const openMock = vi.spyOn(window, 'open').mockReturnValue(previewWindow)
         renderWithProviders()
 
         await screen.findByTitle('HTML preview for index.html')
-        const link = screen.getByRole('link', { name: 'Open in new tab' })
-        expect(link).toHaveAttribute('target', '_blank')
-        expect(link).toHaveAttribute('rel', 'noopener noreferrer')
-        const url = link.getAttribute('href')
-        expect(url).toContain('data:text/html;charset=utf-8,')
-        expect(decodeURIComponent(String(url).split(',').slice(1).join(','))).toContain(
+        fireEvent.click(screen.getByRole('button', { name: 'Open in new tab' }))
+
+        expect(openMock).toHaveBeenCalledWith('about:blank', '_blank')
+        const frame = previewDocument.querySelector('iframe')
+        expect(frame?.getAttribute('sandbox')).toBe('allow-scripts allow-forms')
+        expect(frame?.getAttribute('referrerpolicy')).toBe('no-referrer')
+        expect(frame?.getAttribute('srcdoc')).toContain('<h1>Hello HAPI</h1>')
+        expect(frame?.getAttribute('srcdoc')).toContain(
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
         )
+        expect(previewWindow.opener).toBeNull()
+        openMock.mockRestore()
     })
 })

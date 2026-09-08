@@ -235,6 +235,42 @@ function ExternalLinkIcon(props: { className?: string }) {
     )
 }
 
+/**
+ * Open an interactive copy without navigating to a data URL. Chrome blocks
+ * top-level data URL navigations in some PWA/extension contexts and leaves an
+ * empty tab behind. An about:blank document is opened by the user gesture,
+ * then the HTML is mounted inside a sandboxed srcdoc iframe. The sandbox
+ * gives the preview an opaque origin, so project scripts cannot access HAPI's
+ * DOM or authenticated API context.
+ */
+function openHtmlPreview(content: string, title: string): void {
+    const previewWindow = window.open('about:blank', '_blank')
+    if (!previewWindow) return
+
+    try {
+        // Detach the opener before any project content is mounted. The outer
+        // document only contains the sandboxed preview iframe.
+        previewWindow.opener = null
+        const previewDocument = previewWindow.document
+        previewDocument.open()
+        previewDocument.write(
+            '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{height:100%;margin:0}iframe{display:block;width:100%;height:100%;border:0;background:#fff}</style></head><body></body></html>'
+        )
+        previewDocument.close()
+        previewDocument.title = title
+
+        const frame = previewDocument.createElement('iframe')
+        frame.setAttribute('sandbox', 'allow-scripts allow-forms')
+        frame.setAttribute('referrerpolicy', 'no-referrer')
+        frame.srcdoc = content
+        previewDocument.body.appendChild(frame)
+    } catch {
+        // A browser may close the popup while it is being initialized. Avoid
+        // leaving a blank tab around in that case.
+        previewWindow.close()
+    }
+}
+
 function HtmlPreview(props: {
     content: string
     title: string
@@ -242,34 +278,22 @@ function HtmlPreview(props: {
     openLabel: string
 }) {
     const preparedContent = useMemo(() => prepareHtmlDocument(props.content), [props.content])
-    // Keep this as a real link instead of calling window.open(). Browsers and
-    // installed PWAs can open a window for window.open() before navigating it,
-    // leaving a blank tab when the data URL is blocked as a popup. A user-
-    // initiated anchor navigation is handled consistently while the data URL
-    // still gets an opaque origin (so the preview cannot access HAPI's DOM or
-    // authenticated API context). Scripts are intentionally enabled only in
-    // this explicitly opened copy; the embedded preview remains sandboxed.
-    const previewUrl = useMemo(
-        () => `data:text/html;charset=utf-8,${encodeURIComponent(preparedContent)}`,
-        [preparedContent]
-    )
 
     return (
         <div className="overflow-hidden rounded-lg border border-[var(--app-border)] bg-white shadow-sm">
             <div className="flex items-center gap-2 border-b border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-[var(--app-hint)]">
                 <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500/70" aria-hidden="true" />
                 <span className="min-w-0 flex-1 truncate">{props.safetyLabel}</span>
-                <a
-                    href={previewUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                <button
+                    type="button"
+                    onClick={() => openHtmlPreview(preparedContent, props.title)}
                     className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)]"
                     title={props.openLabel}
                     aria-label={props.openLabel}
                 >
                     <ExternalLinkIcon />
                     <span className="hidden sm:inline">{props.openLabel}</span>
-                </a>
+                </button>
             </div>
             <iframe
                 title={props.title}
