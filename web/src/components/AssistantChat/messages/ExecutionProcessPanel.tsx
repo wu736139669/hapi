@@ -3,17 +3,12 @@ import { isObject } from '@hapi/protocol'
 import { isAskUserQuestionToolName } from '@/components/ToolCard/askUserQuestion'
 import { isRequestUserInputToolName } from '@/components/ToolCard/requestUserInput'
 import { useTranslation } from '@/lib/use-translation'
+import { EXECUTION_PROCESS_TOGGLE_EVENT, type ExecutionProcessToggleDetail } from './executionProcessEvents'
 
 const NON_EXECUTION_PROCESS_TOOL_NAMES = new Set(['GeneratedImage', 'CodexPermission'])
 const EXECUTION_PROCESS_HEIGHT = '11rem'
 const EXECUTION_PROCESS_EXPANDED_HEIGHT = '22rem'
 const EXECUTION_PROCESS_MAX_HEIGHT = 'calc(var(--tg-viewport-stable-height, var(--app-viewport-height, 100dvh)) - 9rem)'
-export const EXECUTION_PROCESS_TOGGLE_EVENT = 'hapi-execution-process-toggle'
-
-export type ExecutionProcessToggleDetail = {
-    readonly expanded: boolean
-}
-
 type MessagePartForExecutionProcess = {
     readonly type: string
     readonly toolName?: string

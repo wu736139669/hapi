@@ -15,7 +15,7 @@ import {
 import { HappyAssistantMessage } from '@/components/AssistantChat/messages/AssistantMessage'
 import { HappyUserMessage } from '@/components/AssistantChat/messages/UserMessage'
 import { HappySystemMessage } from '@/components/AssistantChat/messages/SystemMessage'
-import { EXECUTION_PROCESS_TOGGLE_EVENT } from '@/components/AssistantChat/messages/ExecutionProcessPanel'
+import { EXECUTION_PROCESS_TOGGLE_EVENT } from '@/components/AssistantChat/messages/executionProcessEvents'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
@@ -642,6 +642,13 @@ export function HappyThread(props: {
         sessionIdRef.current = props.sessionId
     }, [props.sessionId])
 
+    const clearExecutionProcessToggleFrame = useCallback(() => {
+        if (executionProcessToggleFrameRef.current !== null) {
+            window.cancelAnimationFrame(executionProcessToggleFrameRef.current)
+            executionProcessToggleFrameRef.current = null
+        }
+    }, [])
+
     useEffect(() => {
         const handleExecutionProcessToggle = () => {
             const viewport = viewportRef.current
@@ -693,13 +700,6 @@ export function HappyThread(props: {
         if (failureRetryTimerRef.current !== null) {
             window.clearTimeout(failureRetryTimerRef.current)
             failureRetryTimerRef.current = null
-        }
-    }, [])
-
-    const clearExecutionProcessToggleFrame = useCallback(() => {
-        if (executionProcessToggleFrameRef.current !== null) {
-            window.cancelAnimationFrame(executionProcessToggleFrameRef.current)
-            executionProcessToggleFrameRef.current = null
         }
     }, [])
 
