@@ -1,10 +1,12 @@
 import { MessagePrimitive, useAuiState } from '@assistant-ui/react'
+import { useState } from 'react'
 import { getEventPresentation } from '@/chat/presentation'
 import type { AgentEvent } from '@/chat/types'
 import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
 import { getConversationMessageAnchorId } from '@/chat/outline'
 import { MessageTimestamp } from '@/components/AssistantChat/messages/MessageTimestamp'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
+import { useHappyChatContext } from '@/components/AssistantChat/context'
 
 function formatTokenDelta(event: AgentEvent | undefined): string | null {
     if (!event || event.type !== 'compact-summary') return null
@@ -16,6 +18,8 @@ function formatTokenDelta(event: AgentEvent | undefined): string | null {
 }
 
 export function HappySystemMessage() {
+    const ctx = useHappyChatContext()
+    const [retrying, setRetrying] = useState(false)
     const role = useAuiState((s) => s.message.role)
     const messageId = useAuiState((s) => s.message.id)
     const text = useAuiState((s) => {
@@ -35,6 +39,8 @@ export function HappySystemMessage() {
     })
 
     if (role !== 'system') return null
+
+    const canRetryCapacity = text.includes('Selected model is at capacity') && Boolean(ctx.onRetryLastMessage)
 
     // Pi compaction summaries are real content, not status: render them as an
     // independent block (header with token delta + the summary markdown)
@@ -62,12 +68,30 @@ export function HappySystemMessage() {
 
     return (
         <MessagePrimitive.Root id={getConversationMessageAnchorId(messageId)} className="scroll-mt-4 py-1">
-            <div className="mx-auto w-fit max-w-[92%] px-2 text-center text-xs text-[var(--app-hint)] opacity-80">
+            <div className="mx-auto flex w-fit max-w-[92%] items-center gap-3 rounded-full px-3 py-1.5 text-xs text-[var(--app-hint)] opacity-90">
                 <span className="inline-flex items-center gap-1">
                     {icon ? <span aria-hidden="true">{icon}</span> : null}
                     <span>{text}</span>
                     <MessageTimestamp className="text-[10px]" />
                 </span>
+                {canRetryCapacity ? (
+                    <button
+                        type="button"
+                        disabled={retrying}
+                        className="rounded-full bg-[var(--app-secondary-bg)] px-3 py-1 text-xs text-[var(--app-fg)] transition-opacity hover:opacity-80 disabled:cursor-wait disabled:opacity-50"
+                        onClick={async () => {
+                            if (!ctx.onRetryLastMessage || retrying) return
+                            setRetrying(true)
+                            try {
+                                await ctx.onRetryLastMessage(text)
+                            } finally {
+                                setRetrying(false)
+                            }
+                        }}
+                    >
+                        {retrying ? 'Retrying…' : 'Retry'}
+                    </button>
+                ) : null}
             </div>
         </MessagePrimitive.Root>
     )
