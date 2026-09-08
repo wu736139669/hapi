@@ -1882,6 +1882,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         };
 
         let activeMessage: QueuedMessage | null = null;
+        let lastRetryableMessage: QueuedMessage | null = null;
         let sameThreadRetryAttempt = 0;
         let sameThreadCompactAttempt = 0;
         let recoveryInFlight = false;
@@ -2294,6 +2295,24 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 wakeLoop();
             }
         };
+
+        session.client.rpcHandlerManager.registerHandler(
+            RPC_METHODS.RetryCodexTurn,
+            async () => {
+                const messageToRetry = activeMessage ?? lastRetryableMessage;
+                if (!messageToRetry || !this.currentThreadId) {
+                    return { retried: false, error: 'No retryable Codex turn is available' };
+                }
+                clearSameThreadRetry();
+                sameThreadRetryAttempt = 0;
+                sameThreadCompactAttempt = 0;
+                lastRetryableMessage = null;
+                pending = messageToRetry;
+                recoveryInFlight = false;
+                wakeLoop();
+                return { retried: true };
+            }
+        );
 
         const scheduleSameThreadRetry = (messageToRetry: QueuedMessage, delayMs: number) => {
             if (sameThreadRetryTimer) {
@@ -3167,6 +3186,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     messageBuffer.addMessage(retryMessage, 'status');
                     session.sendSessionEvent({ type: 'message', message: retryMessage });
                 } else {
+                    if (isServerOverloadedFailure && activeMessage) {
+                        lastRetryableMessage = activeMessage;
+                    }
                     const visibleError = error && isPolicyBlockedCodexFailure(msg, error)
                         ? `${error}\n\nTrusted Access: ${CYBER_POLICY_TRUSTED_ACCESS_URL}\nLearn more: ${SAFETY_BUFFERING_LEARN_MORE_URL}`
                         : error;
@@ -3224,6 +3246,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 recoveryInFlight = false;
                 clearCompactRecovery(compactRecovery);
                 activeMessage = null;
+                lastRetryableMessage = null;
             }
 
             if (msgType === 'agent_reasoning_section_break') {
@@ -4129,6 +4152,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
 
             if (!isRetryMessage) {
                 messageBuffer.addMessage(message.message, 'user');
+                lastRetryableMessage = null;
             }
             activeMessage = message;
             const isGoalCommand = parseGoalCommand(message.message) !== null;

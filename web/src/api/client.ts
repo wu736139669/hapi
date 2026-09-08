@@ -718,6 +718,13 @@ export class ApiClient {
         })
     }
 
+    async retryCodexTurn(sessionId: string): Promise<{ retried: boolean; error?: string }> {
+        return await this.request<{ retried: boolean; error?: string }>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/retry-codex-turn`,
+            { method: 'POST' }
+        )
+    }
+
     async forkConversation(sessionId: string, messageLocalId?: string): Promise<{ sessionId: string }> {
         return await this.request<{ sessionId: string }>(
             `/api/sessions/${encodeURIComponent(sessionId)}/fork`,

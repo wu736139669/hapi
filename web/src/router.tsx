@@ -822,8 +822,8 @@ function SessionPage() {
             onUploadSessionResolved={handleSessionResolved}
             onViewModeChange={setViewMode}
             onRetryMessage={retryMessage}
-            onRetryLastMessage={async (text) => {
-                await sendMessage(text)
+            onRetryCodexTurn={async () => {
+                await api.retryCodexTurn(sessionId)
             }}
             autocompleteSuggestions={getAutocompleteSuggestions}
             availableSlashCommands={slashCommands}

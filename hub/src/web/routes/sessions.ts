@@ -355,6 +355,15 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         return c.json({ ok: true })
     })
 
+    app.post('/sessions/:id/retry-codex-turn', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        if (sessionResult instanceof Response) return sessionResult
+        const result = await engine.retryCodexTurn(sessionResult.sessionId)
+        return c.json(result, result.retried ? 200 : 409)
+    })
+
     app.post('/sessions/:id/fork', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) {

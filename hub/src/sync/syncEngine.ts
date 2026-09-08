@@ -1105,6 +1105,19 @@ export class SyncEngine {
         }
     }
 
+    async retryCodexTurn(sessionId: string): Promise<{ retried: boolean; error?: string }> {
+        const session = this.getSession(sessionId)
+        if (!session) return { retried: false, error: 'Session not found' }
+        if (session.agentState?.controlledByUser === true) {
+            return { retried: false, error: 'Retry is only available for remote sessions' }
+        }
+        try {
+            return await this.rpcGateway.retryCodexTurn(sessionId)
+        } catch (error) {
+            return { retried: false, error: error instanceof Error ? error.message : 'Retry failed' }
+        }
+    }
+
     sweepImmediateQueuedOnSessionEnd(sessionId: string, invokedAt: number): void {
         this.messageService.sweepImmediateQueuedOnSessionEnd(sessionId, invokedAt)
     }

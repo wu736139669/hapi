@@ -48,6 +48,7 @@ export const RPC_METHODS = {
     ListAgyModels: 'listAgyModels',
     /** Deliver one queued message into the active turn (Pi / Codex / Cursor). */
     SteerQueuedMessage: 'steer-queued-message',
+    RetryCodexTurn: 'retry-codex-turn',
     ForkConversation: 'fork-conversation',
     RewindConversation: 'rewind-conversation',
 } as const

@@ -16,7 +16,7 @@ export type HappyChatContextValue = {
     disabled: boolean
     onRefresh: () => void
     onRetryMessage?: (localId: string) => void
-    onRetryLastMessage?: (text: string) => Promise<void> | void
+    onRetryCodexTurn?: () => Promise<void> | void
     historyActionPending?: boolean
     onForkConversation?: (messageLocalId?: string) => Promise<void>
     onRewindConversation?: (messageLocalId: string) => Promise<void>

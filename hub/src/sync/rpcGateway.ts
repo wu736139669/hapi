@@ -475,6 +475,13 @@ export class RpcGateway {
         }
     }
 
+    async retryCodexTurn(sessionId: string): Promise<{ retried: boolean; error?: string }> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.RetryCodexTurn, {}) as {
+            retried: boolean
+            error?: string
+        }
+    }
+
     async forkConversation(
         sessionId: string,
         params: { messageLocalId?: string }

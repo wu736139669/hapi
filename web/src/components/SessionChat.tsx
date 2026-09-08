@@ -524,7 +524,7 @@ type SessionChatProps = {
     onUploadSessionResolved?: (sessionId: string) => void
     onViewModeChange: (mode: 'tail' | 'history') => void
     onRetryMessage?: (localId: string) => void
-    onRetryLastMessage?: (text: string) => Promise<void> | void
+    onRetryCodexTurn?: () => Promise<void> | void
     autocompleteSuggestions?: (query: string) => Promise<Suggestion[]>
     availableSlashCommands?: readonly SlashCommand[]
     // The latest send the hub rejected (4xx/5xx/network).  When set, the
@@ -1845,15 +1845,7 @@ function SessionChatInner(props: SessionChatProps) {
                         disabled={sessionInactive}
                         onRefresh={props.onRefresh}
                         onRetryMessage={props.onRetryMessage}
-                        onRetryLastMessage={props.onRetryLastMessage ? (() => {
-                            const latestUserMessage = [...normalizedMessages].reverse().find(
-                                (message) => message.role === 'user' && Boolean(message.originalText || message.content.text)
-                            )
-                            const text = latestUserMessage?.role === 'user'
-                                ? (latestUserMessage.originalText ?? latestUserMessage.content.text)
-                                : null
-                            if (text) return props.onRetryLastMessage!(text)
-                        }) : undefined}
+                        onRetryCodexTurn={props.onRetryCodexTurn}
                         historyActionPending={historyActionPending}
                         onForkConversation={isSessionGuest || controlledByUser ? undefined : onForkConversation}
                         onRewindConversation={isSessionGuest || controlledByUser ? undefined : onRewindConversation}
