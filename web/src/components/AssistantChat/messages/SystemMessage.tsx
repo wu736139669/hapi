@@ -41,7 +41,9 @@ export function HappySystemMessage() {
 
     if (role !== 'system') return null
 
-    const canRetryCapacity = text.includes('Selected model is at capacity') && Boolean(ctx.onRetryCodexTurn)
+    const canRetryCapacity = text.includes('Selected model is at capacity')
+        && ctx.retryableCodexTurnMessageId === messageId
+        && Boolean(ctx.onRetryCodexTurn)
     const retryDelayMatch = text.match(/retrying same conversation in (\d+) seconds?/i)
     const parsedRetrySeconds = retryDelayMatch ? Number(retryDelayMatch[1]) : null
 

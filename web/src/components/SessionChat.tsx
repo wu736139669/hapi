@@ -18,6 +18,7 @@ import type {
 import type { ChatBlock, NormalizedMessage } from '@/chat/types'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
+import { getRetryableCodexTurnMessageId } from '@/chat/codexRetry'
 import { reduceChatBlocks } from '@/chat/reducer'
 import { reconcileChatBlocks } from '@/chat/reconcile'
 import { buildConversationOutline } from '@/chat/outline'
@@ -1299,6 +1300,11 @@ function SessionChatInner(props: SessionChatProps) {
         return normalized
     }, [visibleMessages])
 
+    const retryableCodexTurnMessageId = useMemo(
+        () => getRetryableCodexTurnMessageId(normalizedMessages, props.session.thinking),
+        [normalizedMessages, props.session.thinking]
+    )
+
     const goalStateSourceMessages = useMemo(
         () => buildGoalStateMessages(props.messages),
         [props.messages]
@@ -1846,6 +1852,7 @@ function SessionChatInner(props: SessionChatProps) {
                         onRefresh={props.onRefresh}
                         onRetryMessage={props.onRetryMessage}
                         onRetryCodexTurn={props.onRetryCodexTurn}
+                        retryableCodexTurnMessageId={retryableCodexTurnMessageId}
                         historyActionPending={historyActionPending}
                         onForkConversation={isSessionGuest || controlledByUser ? undefined : onForkConversation}
                         onRewindConversation={isSessionGuest || controlledByUser ? undefined : onRewindConversation}

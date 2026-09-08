@@ -475,6 +475,7 @@ export function HappyThread(props: {
     onRefresh: () => void
     onRetryMessage?: (localId: string) => void
     onRetryCodexTurn?: () => Promise<void> | void
+    retryableCodexTurnMessageId?: string | null
     historyActionPending?: boolean
     onForkConversation?: (messageLocalId?: string) => Promise<void>
     onRewindConversation?: (messageLocalId: string) => Promise<void>
@@ -1653,6 +1654,7 @@ export function HappyThread(props: {
             onRefresh: props.onRefresh,
             onRetryMessage: props.onRetryMessage,
             onRetryCodexTurn: props.onRetryCodexTurn,
+            retryableCodexTurnMessageId: props.retryableCodexTurnMessageId,
             historyActionPending: props.historyActionPending,
             onForkConversation: props.onForkConversation,
             onRewindConversation: props.onRewindConversation,
