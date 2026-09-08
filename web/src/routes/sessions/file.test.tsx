@@ -20,6 +20,7 @@ const fileSize = 1024
 const fileModified = 1_784_175_060_000
 let activePath = encodedPath
 let activeContent = encodedContent
+let activeDiff: { success: boolean; stdout?: string; error?: string } = { success: true, stdout: '' }
 
 vi.mock('@tanstack/react-router', () => ({
     useParams: () => ({ sessionId: 'session-1' }),
@@ -32,7 +33,7 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('@/lib/app-context', () => ({
     useAppContext: () => ({
         api: {
-            getGitDiffFile: vi.fn(async () => ({ success: true, stdout: '' })),
+            getGitDiffFile: vi.fn(async () => activeDiff),
             readSessionFile: vi.fn(async () => ({
                 success: true,
                 content: activeContent,
@@ -87,6 +88,7 @@ describe('FilePage markdown preview', () => {
         window.sessionStorage.clear()
         activePath = encodedPath
         activeContent = encodedContent
+        activeDiff = { success: true, stdout: '' }
     })
 
     it('renders markdown preview by default and toggles to source', async () => {
@@ -155,5 +157,19 @@ describe('FilePage markdown preview', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Source' }))
         expect(screen.getByRole('code')).toHaveTextContent(sampleHtml)
         expect(screen.queryByTitle('HTML preview for index.html')).not.toBeInTheDocument()
+    })
+
+    it('does not show a Git diff error above an HTML preview', async () => {
+        activePath = encodeBase64(htmlPath)
+        activeContent = encodedHtml
+        activeDiff = {
+            success: false,
+            error: 'Command failed: git diff --no-ext-diff -- path\nwarning: Not a git repository.\nUse --no-index to compare two paths outside a working tree.'
+        }
+        renderWithProviders()
+
+        expect(await screen.findByTitle('HTML preview for index.html')).toBeInTheDocument()
+        expect(screen.queryByText(/Diff 不可用/)).not.toBeInTheDocument()
+        expect(screen.queryByText(/Not a git repository/)).not.toBeInTheDocument()
     })
 })

@@ -378,6 +378,12 @@ export default function FilePage() {
     const diffErrorMessage = diffError ? formatDiffError(diffError, t) : null
     const fileErrorMessage = fileError ? formatReadFileError(fileError, t) : null
     const fileMetadata = formatFileMetadata(fileContentResult?.size, fileContentResult?.modified, locale)
+    // HTML/Markdown previews do not depend on Git. A non-repository (or a
+    // file outside the repository) can still make the parallel diff request
+    // fail, but surfacing Git's verbose usage text above a valid preview is
+    // misleading and overwhelms the actual file content.
+    const showDiffError = Boolean(diffErrorMessage)
+        && !(displayMode === 'file' && (htmlFile || markdownFile))
 
     return (
         <div className="flex h-full min-h-0 flex-col">
@@ -487,7 +493,7 @@ export default function FilePage() {
 
             <div ref={fileScrollRef} data-hapi-file-scroll="true" className="app-scroll-y flex-1 min-h-0">
                 <div className="mx-auto w-full max-w-content p-4">
-                    {diffErrorMessage ? (
+                    {showDiffError ? (
                         <div className="mb-3 rounded-md bg-amber-500/10 p-2 text-xs text-[var(--app-hint)]">
                             {diffErrorMessage}
                         </div>
