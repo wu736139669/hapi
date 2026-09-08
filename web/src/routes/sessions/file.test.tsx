@@ -13,13 +13,18 @@ const sampleMarkdown = '# Heading\n\n| Col A | Col B |\n| --- | --- |\n| one | t
 const filePath = 'docs/README.md'
 const encodedPath = encodeBase64(filePath)
 const encodedContent = encodeBase64(sampleMarkdown)
+const htmlPath = 'public/index.html'
+const sampleHtml = '<!doctype html><html><body><h1>Hello HAPI</h1></body></html>'
+const encodedHtml = encodeBase64(sampleHtml)
 const fileSize = 1024
 const fileModified = 1_784_175_060_000
+let activePath = encodedPath
+let activeContent = encodedContent
 
 vi.mock('@tanstack/react-router', () => ({
     useParams: () => ({ sessionId: 'session-1' }),
     useSearch: () => ({
-        path: encodedPath,
+        path: activePath,
         staged: undefined,
     }),
 }))
@@ -30,7 +35,7 @@ vi.mock('@/lib/app-context', () => ({
             getGitDiffFile: vi.fn(async () => ({ success: true, stdout: '' })),
             readSessionFile: vi.fn(async () => ({
                 success: true,
-                content: encodedContent,
+                content: activeContent,
                 size: fileSize,
                 modified: fileModified,
             })),
@@ -80,6 +85,8 @@ describe('FilePage markdown preview', () => {
         vi.clearAllMocks()
         window.localStorage.clear()
         window.sessionStorage.clear()
+        activePath = encodedPath
+        activeContent = encodedContent
     })
 
     it('renders markdown preview by default and toggles to source', async () => {
@@ -133,5 +140,20 @@ describe('FilePage markdown preview', () => {
         })
         const secondScrollRegion = document.querySelector('[data-hapi-file-scroll="true"]') as HTMLElement
         expect(secondScrollRegion.scrollTop).toBe(123)
+    })
+
+    it('renders HTML files in a sandboxed preview and allows switching to source', async () => {
+        activePath = encodeBase64(htmlPath)
+        activeContent = encodedHtml
+        renderWithProviders()
+
+        const iframe = await screen.findByTitle('HTML preview for index.html')
+        expect(iframe).toHaveAttribute('sandbox', '')
+        expect(iframe).toHaveAttribute('srcdoc', sampleHtml)
+        expect(screen.getByText('Preview sandbox · scripts disabled')).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Source' }))
+        expect(screen.getByRole('code')).toHaveTextContent(sampleHtml)
+        expect(screen.queryByTitle('HTML preview for index.html')).not.toBeInTheDocument()
     })
 })

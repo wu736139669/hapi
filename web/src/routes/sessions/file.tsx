@@ -183,6 +183,31 @@ function resolveImageMimeType(path: string): string | null {
     return IMAGE_MIME_BY_EXTENSION[ext] ?? null
 }
 
+function isHtmlFile(path: string): boolean {
+    const parts = path.split('.')
+    if (parts.length <= 1) return false
+    const ext = parts[parts.length - 1]?.toLowerCase()
+    return ext === 'html' || ext === 'htm'
+}
+
+function HtmlPreview(props: { content: string; title: string; safetyLabel: string }) {
+    return (
+        <div className="overflow-hidden rounded-lg border border-[var(--app-border)] bg-white shadow-sm">
+            <div className="flex items-center gap-2 border-b border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-[var(--app-hint)]">
+                <span className="h-2 w-2 rounded-full bg-emerald-500/70" aria-hidden="true" />
+                <span>{props.safetyLabel}</span>
+            </div>
+            <iframe
+                title={props.title}
+                srcDoc={props.content}
+                sandbox=""
+                referrerPolicy="no-referrer"
+                className="block h-[min(72dvh,720px)] min-h-[360px] w-full bg-white"
+            />
+        </div>
+    )
+}
+
 function getUtf8ByteLength(value: string): number {
     return new TextEncoder().encode(value).length
 }
@@ -218,6 +243,7 @@ export default function FilePage() {
     const fileName = filePath.split('/').pop() || filePath || t('file.page.fallbackName')
     const imageMimeType = useMemo(() => resolveImageMimeType(filePath), [filePath])
     const markdownFile = useMemo(() => isMarkdownFile(filePath), [filePath])
+    const htmlFile = useMemo(() => isHtmlFile(filePath), [filePath])
 
     const diffQuery = useQuery({
         queryKey: queryKeys.gitFileDiff(sessionId, filePath, staged),
@@ -261,6 +287,8 @@ export default function FilePage() {
     const language = useMemo(() => imageMimeType ? undefined : resolveLanguage(filePath), [filePath, imageMimeType])
     const [markdownMode, setMarkdownMode] = useState<MarkdownPreviewMode>(getInitialMarkdownPreviewMode)
     const showMarkdownSource = !markdownFile || markdownMode === 'source'
+    const [htmlMode, setHtmlMode] = useState<'source' | 'preview'>('preview')
+    const showHtmlSource = !htmlFile || htmlMode === 'source'
     const highlighted = useShikiHighlighter(
         imageMimeType || (markdownFile && !showMarkdownSource) ? '' : decodedContent,
         language
@@ -394,7 +422,7 @@ export default function FilePage() {
                 </div>
             </div>
 
-            {diffContent || (markdownFile && displayMode === 'file') ? (
+            {diffContent || ((markdownFile || htmlFile) && displayMode === 'file') ? (
                 <div className="bg-[var(--app-bg)]">
                     <div className="mx-auto w-full max-w-content px-3 py-2 flex items-center gap-2 border-b border-[var(--app-divider)]">
                         {diffContent ? (
@@ -434,6 +462,25 @@ export default function FilePage() {
                                 </button>
                             </>
                         ) : null}
+                        {htmlFile && displayMode === 'file' ? (
+                            <>
+                                {diffContent || markdownFile ? <span className="mx-1 h-4 w-px bg-[var(--app-divider)]" aria-hidden="true" /> : null}
+                                <button
+                                    type="button"
+                                    onClick={() => setHtmlMode('source')}
+                                    className={`rounded px-3 py-1 text-xs font-semibold ${showHtmlSource ? 'bg-[var(--app-button)] text-[var(--app-button-text)] opacity-80' : 'bg-[var(--app-subtle-bg)] text-[var(--app-hint)]'}`}
+                                >
+                                    {t('file.page.tab.source')}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setHtmlMode('preview')}
+                                    className={`rounded px-3 py-1 text-xs font-semibold ${!showHtmlSource ? 'bg-[var(--app-button)] text-[var(--app-button-text)] opacity-80' : 'bg-[var(--app-subtle-bg)] text-[var(--app-hint)]'}`}
+                                >
+                                    {t('file.page.tab.preview')}
+                                </button>
+                            </>
+                        ) : null}
                     </div>
                 </div>
             ) : null}
@@ -468,7 +515,13 @@ export default function FilePage() {
                             </div>
                         ) : (
                             decodedContent ? (
-                                markdownFile && !showMarkdownSource ? (
+                                htmlFile && !showHtmlSource ? (
+                                    <HtmlPreview
+                                        content={decodedContent}
+                                        title={t('file.page.htmlPreviewTitle', { name: fileName })}
+                                        safetyLabel={t('file.page.htmlPreviewSafety')}
+                                    />
+                                ) : markdownFile && !showMarkdownSource ? (
                                     <div className="markdown-content">
                                         {canCopyContent ? (
                                             <div className="mb-3 overflow-hidden rounded-md">
