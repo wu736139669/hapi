@@ -562,6 +562,7 @@ export default {
   'file.page.tab.preview': 'Preview',
   'file.page.htmlPreviewTitle': 'HTML preview for {name}',
   'file.page.htmlPreviewSafety': 'Preview sandbox · scripts disabled',
+  'file.page.htmlPreviewOpenInNewTab': 'Open in new tab',
   'file.page.missingPath': 'No file path provided.',
   'file.page.binary': 'This looks like a binary file. It cannot be displayed.',
   'file.page.imagePreviewAlt': 'Image preview for {name}',

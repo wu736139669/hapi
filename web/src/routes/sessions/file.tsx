@@ -190,16 +190,87 @@ function isHtmlFile(path: string): boolean {
     return ext === 'html' || ext === 'htm'
 }
 
-function HtmlPreview(props: { content: string; title: string; safetyLabel: string }) {
+const RESPONSIVE_VIEWPORT_META = '<meta name="viewport" content="width=device-width, initial-scale=1">'
+
+/** Add a mobile viewport without changing a document that already declares one. */
+function prepareHtmlDocument(content: string): string {
+    if (/<meta\b[^>]*name\s*=\s*["']viewport["']/i.test(content)) {
+        return content
+    }
+
+    const headTag = content.match(/<head\b[^>]*>/i)
+    if (headTag?.index !== undefined) {
+        const end = headTag.index + headTag[0].length
+        return `${content.slice(0, end)}\n${RESPONSIVE_VIEWPORT_META}${content.slice(end)}`
+    }
+
+    const htmlTag = content.match(/<html\b[^>]*>/i)
+    if (htmlTag?.index !== undefined) {
+        const end = htmlTag.index + htmlTag[0].length
+        return `${content.slice(0, end)}\n<head>${RESPONSIVE_VIEWPORT_META}</head>${content.slice(end)}`
+    }
+
+    return `<!doctype html><html><head>${RESPONSIVE_VIEWPORT_META}</head><body>${content}</body></html>`
+}
+
+function ExternalLinkIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+            aria-hidden="true"
+        >
+            <path d="M14 3h7v7" />
+            <path d="M10 14 21 3" />
+            <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
+        </svg>
+    )
+}
+
+function HtmlPreview(props: {
+    content: string
+    title: string
+    safetyLabel: string
+    openLabel: string
+}) {
+    const preparedContent = useMemo(() => prepareHtmlDocument(props.content), [props.content])
+
+    const openInNewTab = useCallback(() => {
+        // A data URL gets an opaque origin, so the opened document cannot
+        // access the HAPI page's DOM or authenticated API context. Unlike the
+        // sandboxed iframe, scripts in this explicitly opened copy are allowed
+        // to run and reproduce the file's normal browser interactions.
+        const url = `data:text/html;charset=utf-8,${encodeURIComponent(preparedContent)}`
+        window.open(url, '_blank', 'noopener,noreferrer')
+    }, [preparedContent])
+
     return (
         <div className="overflow-hidden rounded-lg border border-[var(--app-border)] bg-white shadow-sm">
             <div className="flex items-center gap-2 border-b border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-[var(--app-hint)]">
-                <span className="h-2 w-2 rounded-full bg-emerald-500/70" aria-hidden="true" />
-                <span>{props.safetyLabel}</span>
+                <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500/70" aria-hidden="true" />
+                <span className="min-w-0 flex-1 truncate">{props.safetyLabel}</span>
+                <button
+                    type="button"
+                    onClick={openInNewTab}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)]"
+                    title={props.openLabel}
+                    aria-label={props.openLabel}
+                >
+                    <ExternalLinkIcon />
+                    <span className="hidden sm:inline">{props.openLabel}</span>
+                </button>
             </div>
             <iframe
                 title={props.title}
-                srcDoc={props.content}
+                srcDoc={preparedContent}
                 sandbox=""
                 referrerPolicy="no-referrer"
                 className="block h-[min(72dvh,720px)] min-h-[360px] w-full bg-white"
@@ -526,6 +597,7 @@ export default function FilePage() {
                                         content={decodedContent}
                                         title={t('file.page.htmlPreviewTitle', { name: fileName })}
                                         safetyLabel={t('file.page.htmlPreviewSafety')}
+                                        openLabel={t('file.page.htmlPreviewOpenInNewTab')}
                                     />
                                 ) : markdownFile && !showMarkdownSource ? (
                                     <div className="markdown-content">

@@ -151,7 +151,10 @@ describe('FilePage markdown preview', () => {
 
         const iframe = await screen.findByTitle('HTML preview for index.html')
         expect(iframe).toHaveAttribute('sandbox', '')
-        expect(iframe).toHaveAttribute('srcdoc', sampleHtml)
+        expect(iframe.getAttribute('srcdoc')).toContain('<h1>Hello HAPI</h1>')
+        expect(iframe.getAttribute('srcdoc')).toContain(
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        )
         expect(screen.getByText('Preview sandbox · scripts disabled')).toBeInTheDocument()
 
         fireEvent.click(screen.getByRole('button', { name: 'Source' }))
@@ -171,5 +174,27 @@ describe('FilePage markdown preview', () => {
         expect(await screen.findByTitle('HTML preview for index.html')).toBeInTheDocument()
         expect(screen.queryByText(/Diff 不可用/)).not.toBeInTheDocument()
         expect(screen.queryByText(/Not a git repository/)).not.toBeInTheDocument()
+    })
+
+    it('opens an interactive HTML copy in a new tab with responsive viewport metadata', async () => {
+        activePath = encodeBase64(htmlPath)
+        activeContent = encodedHtml
+        const openMock = vi.spyOn(window, 'open').mockImplementation(() => null)
+        renderWithProviders()
+
+        await screen.findByTitle('HTML preview for index.html')
+        fireEvent.click(screen.getByRole('button', { name: 'Open in new tab' }))
+
+        expect(openMock).toHaveBeenCalledWith(
+            expect.stringContaining('data:text/html;charset=utf-8,'),
+            '_blank',
+            'noopener,noreferrer'
+        )
+        const url = openMock.mock.calls[0]?.[0]
+        expect(typeof url).toBe('string')
+        expect(decodeURIComponent(String(url).split(',').slice(1).join(','))).toContain(
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        )
+        openMock.mockRestore()
     })
 })
