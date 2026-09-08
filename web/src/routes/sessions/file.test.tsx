@@ -179,22 +179,16 @@ describe('FilePage markdown preview', () => {
     it('opens an interactive HTML copy in a new tab with responsive viewport metadata', async () => {
         activePath = encodeBase64(htmlPath)
         activeContent = encodedHtml
-        const openMock = vi.spyOn(window, 'open').mockImplementation(() => null)
         renderWithProviders()
 
         await screen.findByTitle('HTML preview for index.html')
-        fireEvent.click(screen.getByRole('button', { name: 'Open in new tab' }))
-
-        expect(openMock).toHaveBeenCalledWith(
-            expect.stringContaining('data:text/html;charset=utf-8,'),
-            '_blank',
-            'noopener,noreferrer'
-        )
-        const url = openMock.mock.calls[0]?.[0]
-        expect(typeof url).toBe('string')
+        const link = screen.getByRole('link', { name: 'Open in new tab' })
+        expect(link).toHaveAttribute('target', '_blank')
+        expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+        const url = link.getAttribute('href')
+        expect(url).toContain('data:text/html;charset=utf-8,')
         expect(decodeURIComponent(String(url).split(',').slice(1).join(','))).toContain(
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
         )
-        openMock.mockRestore()
     })
 })

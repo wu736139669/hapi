@@ -242,31 +242,34 @@ function HtmlPreview(props: {
     openLabel: string
 }) {
     const preparedContent = useMemo(() => prepareHtmlDocument(props.content), [props.content])
-
-    const openInNewTab = useCallback(() => {
-        // A data URL gets an opaque origin, so the opened document cannot
-        // access the HAPI page's DOM or authenticated API context. Unlike the
-        // sandboxed iframe, scripts in this explicitly opened copy are allowed
-        // to run and reproduce the file's normal browser interactions.
-        const url = `data:text/html;charset=utf-8,${encodeURIComponent(preparedContent)}`
-        window.open(url, '_blank', 'noopener,noreferrer')
-    }, [preparedContent])
+    // Keep this as a real link instead of calling window.open(). Browsers and
+    // installed PWAs can open a window for window.open() before navigating it,
+    // leaving a blank tab when the data URL is blocked as a popup. A user-
+    // initiated anchor navigation is handled consistently while the data URL
+    // still gets an opaque origin (so the preview cannot access HAPI's DOM or
+    // authenticated API context). Scripts are intentionally enabled only in
+    // this explicitly opened copy; the embedded preview remains sandboxed.
+    const previewUrl = useMemo(
+        () => `data:text/html;charset=utf-8,${encodeURIComponent(preparedContent)}`,
+        [preparedContent]
+    )
 
     return (
         <div className="overflow-hidden rounded-lg border border-[var(--app-border)] bg-white shadow-sm">
             <div className="flex items-center gap-2 border-b border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-[var(--app-hint)]">
                 <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500/70" aria-hidden="true" />
                 <span className="min-w-0 flex-1 truncate">{props.safetyLabel}</span>
-                <button
-                    type="button"
-                    onClick={openInNewTab}
+                <a
+                    href={previewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)]"
                     title={props.openLabel}
                     aria-label={props.openLabel}
                 >
                     <ExternalLinkIcon />
                     <span className="hidden sm:inline">{props.openLabel}</span>
-                </button>
+                </a>
             </div>
             <iframe
                 title={props.title}
