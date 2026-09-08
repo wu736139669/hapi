@@ -243,7 +243,7 @@ function ExternalLinkIcon(props: { className?: string }) {
  * gives the preview an opaque origin, so project scripts cannot access HAPI's
  * DOM or authenticated API context.
  */
-function openHtmlPreview(content: string, title: string): void {
+function openHtmlPreview(content: string, title: string, backLabel: string): void {
     const previewWindow = window.open('about:blank', '_blank')
     if (!previewWindow) return
 
@@ -254,10 +254,24 @@ function openHtmlPreview(content: string, title: string): void {
         const previewDocument = previewWindow.document
         previewDocument.open()
         previewDocument.write(
-            '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{height:100%;margin:0}iframe{display:block;width:100%;height:100%;border:0;background:#fff}</style></head><body></body></html>'
+            '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{height:100%;margin:0}body{display:flex;flex-direction:column;background:#f7f7f5;color:#252525;font:13px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}header{display:flex;align-items:center;gap:10px;flex:0 0 44px;padding:0 14px;background:#f1f1ed;box-shadow:0 1px 8px rgba(0,0,0,.08)}header button{border:0;border-radius:7px;padding:6px 10px;background:transparent;color:#444;cursor:pointer;font:inherit}header button:hover{background:#e5e5df}header span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#777}iframe{display:block;flex:1;min-height:0;width:100%;border:0;background:#fff}</style></head><body></body></html>'
         )
         previewDocument.close()
         previewDocument.title = title
+
+        const toolbar = previewDocument.createElement('header')
+        const backButton = previewDocument.createElement('button')
+        backButton.type = 'button'
+        backButton.textContent = `← ${backLabel}`
+        backButton.addEventListener('click', () => {
+            previewWindow.close()
+            if (!previewWindow.closed) previewWindow.history.back()
+        })
+        toolbar.appendChild(backButton)
+        const titleLabel = previewDocument.createElement('span')
+        titleLabel.textContent = title
+        toolbar.appendChild(titleLabel)
+        previewDocument.body.appendChild(toolbar)
 
         const frame = previewDocument.createElement('iframe')
         frame.setAttribute('sandbox', 'allow-scripts allow-forms')
@@ -276,6 +290,7 @@ function HtmlPreview(props: {
     title: string
     safetyLabel: string
     openLabel: string
+    backLabel: string
 }) {
     const preparedContent = useMemo(() => prepareHtmlDocument(props.content), [props.content])
 
@@ -286,7 +301,7 @@ function HtmlPreview(props: {
                 <span className="min-w-0 flex-1 truncate">{props.safetyLabel}</span>
                 <button
                     type="button"
-                    onClick={() => openHtmlPreview(preparedContent, props.title)}
+                    onClick={() => openHtmlPreview(preparedContent, props.title, props.backLabel)}
                     className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)]"
                     title={props.openLabel}
                     aria-label={props.openLabel}
@@ -625,6 +640,7 @@ export default function FilePage() {
                                         title={t('file.page.htmlPreviewTitle', { name: fileName })}
                                         safetyLabel={t('file.page.htmlPreviewSafety')}
                                         openLabel={t('file.page.htmlPreviewOpenInNewTab')}
+                                        backLabel={t('file.page.htmlPreviewBackToHapi')}
                                     />
                                 ) : markdownFile && !showMarkdownSource ? (
                                     <div className="markdown-content">

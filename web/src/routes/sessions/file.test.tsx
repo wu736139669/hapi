@@ -182,6 +182,7 @@ describe('FilePage markdown preview', () => {
         const previewDocument = document.implementation.createHTMLDocument('about:blank')
         const previewWindow = {
             close: vi.fn(),
+            closed: true,
             document: previewDocument,
             opener: window,
         } as unknown as Window
@@ -193,6 +194,9 @@ describe('FilePage markdown preview', () => {
 
         expect(openMock).toHaveBeenCalledWith('about:blank', '_blank')
         const frame = previewDocument.querySelector('iframe')
+        const backButton = previewDocument.querySelector('header button')
+        expect(backButton?.textContent).toBe('← Back to HAPI')
+        expect(previewDocument.querySelector('header span')?.textContent).toBe('HTML preview for index.html')
         expect(frame?.getAttribute('sandbox')).toBe('allow-scripts allow-forms')
         expect(frame?.getAttribute('referrerpolicy')).toBe('no-referrer')
         expect(frame?.getAttribute('srcdoc')).toContain('<h1>Hello HAPI</h1>')

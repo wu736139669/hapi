@@ -562,6 +562,7 @@ export default {
   'file.page.htmlPreviewTitle': '{name} HTML 预览',
   'file.page.htmlPreviewSafety': '预览沙箱 · 已禁用脚本',
   'file.page.htmlPreviewOpenInNewTab': '在新窗口打开',
+  'file.page.htmlPreviewBackToHapi': '返回 HAPI',
   'file.page.missingPath': '未提供文件路径。',
   'file.page.binary': '该文件看起来是二进制文件，无法显示。',
   'file.page.imagePreviewAlt': '{name} 图片预览',
