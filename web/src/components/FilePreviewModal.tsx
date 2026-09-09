@@ -142,7 +142,7 @@ function FilePreviewModal(props: { request: FilePreviewRequest; onClose: () => v
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="hapi-file-preview-title"
-                className="flex h-[100dvh] w-full flex-col overflow-hidden bg-[var(--app-bg)] shadow-2xl sm:h-[min(92dvh,900px)] sm:max-w-6xl sm:rounded-2xl"
+                className="flex h-[100dvh] w-full flex-col overflow-hidden bg-[var(--app-bg)] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-2xl sm:h-[min(92dvh,900px)] sm:max-w-6xl sm:rounded-2xl"
                 onMouseDown={(event) => event.stopPropagation()}
             >
                 <header className="flex shrink-0 items-center gap-3 border-b border-[var(--app-divider)] bg-[var(--app-bg)] px-3 py-2.5 sm:px-4">
