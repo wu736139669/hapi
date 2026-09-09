@@ -34,6 +34,7 @@ import { VoiceErrorBanner } from '@/components/VoiceErrorBanner'
 import { RunnerVersionSkewBanner } from '@/components/RunnerVersionSkewBanner'
 import { LoadingState } from '@/components/LoadingState'
 import { ToastContainer } from '@/components/ToastContainer'
+import { FilePreviewHost } from '@/components/FilePreviewModal'
 import { PwaUpdateProvider } from '@/lib/pwa-update-context'
 import { ToastProvider, useToast } from '@/lib/toast-context'
 import type { SyncEvent } from '@/types/api'
@@ -412,7 +413,7 @@ function AppInner() {
     })
 
     if (isSessionGuest && effectiveApi && effectiveToken) {
-        return <AppContextProvider value={{ api: effectiveApi, token: effectiveToken, baseUrl, titleSuggestionAvailable, isSessionGuest: true, guestShareToken: guestAuth.shareToken ?? undefined }}><div className="h-full min-h-0 flex flex-col"><Outlet /></div></AppContextProvider>
+        return <AppContextProvider value={{ api: effectiveApi, token: effectiveToken, baseUrl, titleSuggestionAvailable, isSessionGuest: true, guestShareToken: guestAuth.shareToken ?? undefined }}><FilePreviewHost><div className="h-full min-h-0 flex flex-col"><Outlet /></div></FilePreviewHost></AppContextProvider>
     }
 
     if (pathname.startsWith('/shared-session/')) {
@@ -510,6 +511,7 @@ function AppInner() {
 
     return (
         <AppContextProvider value={{ api: effectiveApi!, token: effectiveToken!, baseUrl, titleSuggestionAvailable }}>
+            <FilePreviewHost>
             <VoiceProvider>
                 <PwaUpdateBannerWithStatusOffset
                     isSyncing={isSyncing}
@@ -532,6 +534,7 @@ function AppInner() {
                 <ToastContainer />
                 <InstallPrompt />
             </VoiceProvider>
+            </FilePreviewHost>
         </AppContextProvider>
     )
 }
