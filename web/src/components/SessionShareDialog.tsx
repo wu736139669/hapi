@@ -43,7 +43,7 @@ export function SessionShareDialog(props: Props) {
           <DialogTitle>{t("sessionShare.title")}</DialogTitle>
           <DialogDescription>{t("sessionShare.description")}</DialogDescription>
         </DialogHeader>
-        {props.shareUrl && props.accessCode ? (
+        {props.shareUrl ? (
           <div className="space-y-4 text-sm">
             <div>
               <div className="mb-1 text-xs text-[var(--app-hint)]">
@@ -61,13 +61,19 @@ export function SessionShareDialog(props: Props) {
               <div className="mb-1 text-xs text-[var(--app-hint)]">
                 {t("sessionShare.code")}
               </div>
-              <button
-                type="button"
-                onClick={() => void copy(props.accessCode!)}
-                className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-secondary-bg)] p-3 text-center font-mono text-2xl tracking-[0.3em] text-[var(--app-fg)]"
-              >
-                {props.accessCode}
-              </button>
+              {props.accessCode ? (
+                <button
+                  type="button"
+                  onClick={() => void copy(props.accessCode!)}
+                  className="w-full rounded-lg border border-[var(--app-border)] bg-[var(--app-secondary-bg)] p-3 text-center font-mono text-2xl tracking-[0.3em] text-[var(--app-fg)]"
+                >
+                  {props.accessCode}
+                </button>
+              ) : (
+                <div className="rounded-lg border border-[var(--app-border)] bg-[var(--app-secondary-bg)] p-3 text-center text-xs text-[var(--app-hint)]">
+                  {t("sessionShare.codeUnavailable")}
+                </div>
+              )}
             </div>
             <div className="flex items-center justify-between gap-3">
               <span className="text-xs text-[var(--app-hint)]">

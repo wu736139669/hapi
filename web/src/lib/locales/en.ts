@@ -1282,6 +1282,7 @@ export default {
   'sessionShare.description': 'Anyone with the link and access code can use this session.',
   'sessionShare.link': 'Share link',
   'sessionShare.code': 'Access code (6 digits)',
+  'sessionShare.codeUnavailable': 'The code is shown only when the share is created. Create a new share to generate a new code.',
   'sessionShare.copyHint': 'Click the link or code to copy',
   'sessionShare.copied': 'Copied',
   'sessionShare.revoke': 'Revoke share',

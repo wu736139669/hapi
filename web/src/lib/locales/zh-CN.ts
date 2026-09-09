@@ -1281,6 +1281,7 @@ export default {
   'sessionShare.description': '对方打开链接后，输入访问码即可操作当前会话。',
   'sessionShare.link': '分享链接',
   'sessionShare.code': '访问码（6 位）',
+  'sessionShare.codeUnavailable': '访问码只在创建分享时显示。重新创建分享即可生成新的访问码。',
   'sessionShare.copyHint': '点击链接或访问码复制',
   'sessionShare.copied': '已复制',
   'sessionShare.revoke': '撤销分享',

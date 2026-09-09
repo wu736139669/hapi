@@ -240,6 +240,40 @@ export function SessionHeader(props: {
     const [sessionShareCode, setSessionShareCode] = useState<string | null>(null)
     const [sessionShareUrl, setSessionShareUrl] = useState<string | null>(null)
 
+    const buildSessionShareUrl = (shareToken: string): string => {
+        const configuredHub = props.baseUrl && props.baseUrl !== window.location.origin
+            ? props.baseUrl
+            : new URLSearchParams(window.location.search).get('hub')
+        const shareParams = new URLSearchParams()
+        if (configuredHub) shareParams.set('hub', configuredHub)
+        shareParams.set('lang', locale)
+        const shareQuery = shareParams.toString() ? `?${shareParams.toString()}` : ''
+        return `${window.location.origin}/shared-session/${encodeURIComponent(shareToken)}${shareQuery}`
+    }
+
+    // Rehydrate an existing share after a reload. The access code is never
+    // stored in the database, so it can be revoked here but is only shown
+    // again when the share is created or regenerated.
+    useEffect(() => {
+        let cancelled = false
+        setSessionShare(null)
+        setSessionShareCode(null)
+        setSessionShareUrl(null)
+        if (!api || isSessionGuest || typeof api.getSessionShare !== 'function') return () => { cancelled = true }
+
+        void api.getSessionShare(session.id)
+            .then(({ share }) => {
+                if (cancelled || !share) return
+                setSessionShare(share)
+                setSessionShareUrl(buildSessionShareUrl(share.shareToken))
+            })
+            .catch(() => {
+                // A missing share is not an error for the session header.
+            })
+
+        return () => { cancelled = true }
+    }, [api, isSessionGuest, locale, props.baseUrl, session.id])
+
     const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, setPinMode, deleteSession, isPending } = useSessionActions(
         actionApi,
         session.id,
@@ -425,12 +459,7 @@ export function SessionHeader(props: {
         setIsCreatingSessionShare(true)
         try {
             const result = await api.createSessionShare(session.id)
-            const configuredHub = props.baseUrl && props.baseUrl !== window.location.origin ? props.baseUrl : new URLSearchParams(window.location.search).get('hub')
-            const shareParams = new URLSearchParams()
-            if (configuredHub) shareParams.set('hub', configuredHub)
-            shareParams.set('lang', locale)
-            const shareQuery = shareParams.toString() ? `?${shareParams.toString()}` : ''
-            const shareUrl = `${window.location.origin}/shared-session/${encodeURIComponent(result.share.shareToken)}${shareQuery}`
+            const shareUrl = buildSessionShareUrl(result.share.shareToken)
             setSessionShare(result.share)
             setSessionShareCode(result.accessCode)
             setSessionShareUrl(shareUrl)
