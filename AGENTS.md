@@ -76,20 +76,37 @@ cd android && ./gradlew :core:protocol:test  # Android protocol conformance
 
 ## Local binary deployment
 
-When installing a rebuilt executable into `~/.hapi/bin/hapi`, never copy over
-the path in place while HAPI hub, runner, or sessions are running. macOS can
-invalidate the executing Mach-O code pages and terminate newly spawned HAPI
-processes with `SIGKILL` before their session webhook arrives.
+The macOS all-in-one executable is ad-hoc signed. **Do not overwrite
+`~/.hapi/bin/hapi` in place, even with an atomic rename.** macOS caches the
+Mach-O code signature by executable path/mtime; replacing that path can make
+the embedded signature disagree with the cached signature and kill every new
+process with `OS_REASON_CODESIGNING` / `embedded signature doesn't match
+attached signature` (often exit 137). A plain `cp` also loses the signed
+mtime.
 
-Install through a temporary file followed by an atomic rename:
+Safe deployment sequence:
 
-```bash
-cp -p cli/dist-exe/bun-darwin-arm64/hapi ~/.hapi/bin/.hapi-install-atomic-$$
-chmod 755 ~/.hapi/bin/.hapi-install-atomic-$$
-mv -f ~/.hapi/bin/.hapi-install-atomic-$$ ~/.hapi/bin/hapi
-```
+1. Build the executable.
+2. Remove Bun's linker signature, then apply a fresh ad-hoc signature:
 
-After replacement, verify `~/.hapi/bin/hapi --version` and `hapi runner status`.
+   ```bash
+   codesign --remove-signature cli/dist-exe/bun-darwin-arm64/hapi 2>/dev/null || true
+   codesign --force --sign - cli/dist-exe/bun-darwin-arm64/hapi
+   codesign --verify --deep --strict cli/dist-exe/bun-darwin-arm64/hapi
+   ```
+
+3. Copy with `cp -p` to a **new, versioned filename** under `~/.hapi/bin/`;
+   never reuse a previous executable pathname. Verify and run `--help` from
+   that versioned path.
+4. Point `~/.hapi/bin/hapi` at the versioned file with a symlink. Keep the
+   previous versioned file for rollback; do not delete it while sessions are
+   running.
+5. Restart the launch agent, then check `curl -fsS
+   http://127.0.0.1:3006/health`, `~/.hapi/bin/hapi --version`, and `hapi
+   runner status`. If health fails, restore the previous symlink before doing
+   anything else.
+
+`docs/local-deployment.md` contains the same rationale and rollback checklist.
 
 iOS tests run in CI (`ios.yml`: macOS `swift test`); no local Xcode/Swift toolchain assumed.
 
