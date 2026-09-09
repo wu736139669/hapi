@@ -1159,6 +1159,13 @@ export class SyncEngine {
             // back to the durable last prompt in that case.
             return await retryLastUserPrompt(sessionId)
         } catch (error) {
+            // A runner that predates RetryCodexTurn (or a briefly
+            // disconnected CLI socket) reports a missing RPC handler. The
+            // durable prompt fallback still works in that situation and is
+            // preferable to surfacing a dead-end toast to the user.
+            if (error instanceof RpcTargetMissingError) {
+                return await retryLastUserPrompt(sessionId)
+            }
             return { retried: false, error: error instanceof Error ? error.message : 'Retry failed' }
         }
     }
