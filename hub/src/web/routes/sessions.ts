@@ -358,10 +358,16 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
     app.post('/sessions/:id/retry-codex-turn', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) return engine
-        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        // A capacity failure can leave the CLI disconnected before the user
+        // clicks Retry. SyncEngine.retryCodexTurn reopens the session and
+        // requeues the last prompt when needed, so this endpoint must not
+        // reject inactive sessions at the guard layer.
+        const sessionResult = requireSessionFromParam(c, engine)
         if (sessionResult instanceof Response) return sessionResult
         const result = await engine.retryCodexTurn(sessionResult.sessionId)
-        return c.json(result, result.retried ? 200 : 409)
+        // Keep retry outcomes in-band so the web client can show the reason
+        // instead of swallowing a 409 as a no-op.
+        return c.json(result)
     })
 
     app.post('/sessions/:id/fork', async (c) => {

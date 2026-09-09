@@ -1105,14 +1105,59 @@ export class SyncEngine {
         }
     }
 
-    async retryCodexTurn(sessionId: string): Promise<{ retried: boolean; error?: string }> {
+    async retryCodexTurn(sessionId: string): Promise<{ retried: boolean; error?: string; sessionId?: string }> {
         const session = this.getSession(sessionId)
         if (!session) return { retried: false, error: 'Session not found' }
+        if (this.resolveFlavor(session) !== 'codex') {
+            return { retried: false, error: 'Retry is only available for Codex sessions' }
+        }
         if (session.agentState?.controlledByUser === true) {
             return { retried: false, error: 'Retry is only available for remote sessions' }
         }
+
+        // The CLI keeps the original QueuedMessage in memory while it is
+        // connected. Once the process has gone idle and the session becomes
+        // inactive, that in-memory retry state is gone. Reopen the same
+        // Codex thread and enqueue the last user prompt as a durable fallback
+        // instead of returning a silent 409 to the web client.
+        const retryLastUserPrompt = async (targetSessionId: string): Promise<{ retried: boolean; error?: string; sessionId?: string }> => {
+            const messages = this.messageService.getMessages(targetSessionId, 200)
+            let prompt: string | undefined
+            for (let index = messages.length - 1; index >= 0; index -= 1) {
+                const roleWrapped = unwrapRoleWrappedRecordEnvelope(messages[index]?.content)
+                if (roleWrapped?.role !== 'user') continue
+                prompt = extractUserMessageText(roleWrapped.content)
+                if (prompt) break
+            }
+            if (!prompt) {
+                return { retried: false, error: 'No previous Codex prompt is available to retry' }
+            }
+
+            try {
+                await this.sendMessage(targetSessionId, { text: prompt, deliveryMode: 'queue' })
+                return { retried: true, sessionId: targetSessionId }
+            } catch (error) {
+                return { retried: false, error: error instanceof Error ? error.message : 'Failed to queue Codex retry' }
+            }
+        }
+
+        if (!session.active) {
+            const resumed = await this.resumeSession(sessionId, session.namespace)
+            if (resumed.type === 'error') {
+                return { retried: false, error: resumed.message }
+            }
+            return await retryLastUserPrompt(resumed.sessionId)
+        }
+
         try {
-            return await this.rpcGateway.retryCodexTurn(sessionId)
+            const result = await this.rpcGateway.retryCodexTurn(sessionId)
+            if (result.retried || result.error !== 'No retryable Codex turn is available') {
+                return result
+            }
+            // Older runners and terminal event paths can lose the in-memory
+            // QueuedMessage even though the session is still active. Fall
+            // back to the durable last prompt in that case.
+            return await retryLastUserPrompt(sessionId)
         } catch (error) {
             return { retried: false, error: error instanceof Error ? error.message : 'Retry failed' }
         }

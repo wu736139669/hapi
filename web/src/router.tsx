@@ -823,7 +823,28 @@ function SessionPage() {
             onViewModeChange={setViewMode}
             onRetryMessage={retryMessage}
             onRetryCodexTurn={async () => {
-                await api.retryCodexTurn(sessionId)
+                try {
+                    const result = await api.retryCodexTurn(sessionId)
+                    if (!result.retried) {
+                        addToast({
+                            title: t('resume.failed.title'),
+                            body: result.error ?? t('dialog.error.default'),
+                            sessionId,
+                            url: `/sessions/${sessionId}`
+                        })
+                        return
+                    }
+                    if (result.sessionId && result.sessionId !== sessionId) {
+                        handleSessionResolved(result.sessionId)
+                    }
+                } catch (error) {
+                    addToast({
+                        title: t('resume.failed.title'),
+                        body: error instanceof Error ? error.message : t('dialog.error.default'),
+                        sessionId,
+                        url: `/sessions/${sessionId}`
+                    })
+                }
             }}
             autocompleteSuggestions={getAutocompleteSuggestions}
             availableSlashCommands={slashCommands}

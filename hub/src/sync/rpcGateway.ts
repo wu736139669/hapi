@@ -475,10 +475,11 @@ export class RpcGateway {
         }
     }
 
-    async retryCodexTurn(sessionId: string): Promise<{ retried: boolean; error?: string }> {
+    async retryCodexTurn(sessionId: string): Promise<{ retried: boolean; error?: string; sessionId?: string }> {
         return await this.sessionRpc(sessionId, RPC_METHODS.RetryCodexTurn, {}) as {
             retried: boolean
             error?: string
+            sessionId?: string
         }
     }
 
