@@ -30,6 +30,14 @@ function OpenInNewTabIcon() {
     )
 }
 
+function BackIcon() {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points="15 18 9 12 15 6" />
+        </svg>
+    )
+}
+
 function DownloadIcon() {
     return (
         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -40,7 +48,7 @@ function DownloadIcon() {
     )
 }
 
-function openInteractiveHtml(content: string, title: string): void {
+function openInteractiveHtml(content: string, title: string, backLabel: string): void {
     const previewWindow = window.open('about:blank', '_blank')
     if (!previewWindow) return
 
@@ -48,11 +56,19 @@ function openInteractiveHtml(content: string, title: string): void {
         previewWindow.opener = null
         const document = previewWindow.document
         document.open()
-        document.write('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{height:100%;margin:0}body{display:flex;flex-direction:column;background:#f7f7f5;color:#252525;font:13px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}header{display:flex;align-items:center;gap:10px;flex:0 0 44px;padding:0 14px;background:#f1f1ed;box-shadow:0 1px 8px rgba(0,0,0,.08)}header span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#777}iframe{display:block;flex:1;min-height:0;width:100%;border:0;background:#fff}</style></head><body></body></html>')
+        document.write('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{height:100%;margin:0}body{display:flex;flex-direction:column;background:#f7f7f5;color:#252525;font:13px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}header{display:flex;align-items:center;gap:10px;flex:0 0 44px;padding:0 14px;background:#f1f1ed;box-shadow:0 1px 8px rgba(0,0,0,.08)}header button{border:0;border-radius:7px;padding:6px 10px;background:transparent;color:#444;cursor:pointer;font:inherit}header button:hover{background:#e5e5df}header span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#777}iframe{display:block;flex:1;min-height:0;width:100%;border:0;background:#fff}</style></head><body></body></html>')
         document.close()
         document.title = title
 
         const header = document.createElement('header')
+        const backButton = document.createElement('button')
+        backButton.type = 'button'
+        backButton.textContent = `← ${backLabel}`
+        backButton.addEventListener('click', () => {
+            previewWindow.close()
+            if (!previewWindow.closed) previewWindow.history.back()
+        })
+        header.appendChild(backButton)
         const label = document.createElement('span')
         label.textContent = title
         header.appendChild(label)
@@ -113,7 +129,7 @@ function FilePreviewModal(props: { request: FilePreviewRequest; onClose: () => v
     }, [props.onClose])
 
     const openExternal = () => {
-        if (htmlFile && decoded.text) openInteractiveHtml(decoded.text, fileName)
+        if (htmlFile && decoded.text) openInteractiveHtml(decoded.text, fileName, t('file.page.htmlPreviewBackToHapi'))
     }
 
     return (
@@ -130,6 +146,17 @@ function FilePreviewModal(props: { request: FilePreviewRequest; onClose: () => v
                 onMouseDown={(event) => event.stopPropagation()}
             >
                 <header className="flex shrink-0 items-center gap-3 border-b border-[var(--app-divider)] bg-[var(--app-bg)] px-3 py-2.5 sm:px-4">
+                    <button
+                        type="button"
+                        onClick={props.onClose}
+                        className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md px-2 text-sm text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
+                        title={t('common.back')}
+                        aria-label={t('common.back')}
+                        autoFocus
+                    >
+                        <BackIcon />
+                        <span>{t('common.back')}</span>
+                    </button>
                     <div className="min-w-0 flex-1">
                         <div id="hapi-file-preview-title" className="truncate text-sm font-semibold text-[var(--app-fg)]">{fileName}</div>
                         <div className="truncate text-[11px] text-[var(--app-hint)]">{props.request.filePath}</div>
@@ -147,7 +174,7 @@ function FilePreviewModal(props: { request: FilePreviewRequest; onClose: () => v
                                 <span className="hidden sm:inline">{t('file.page.download')}</span>
                             </button>
                         ) : null}
-                        <button type="button" onClick={props.onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]" title={t('button.close')} aria-label={t('button.close')} autoFocus>
+                        <button type="button" onClick={props.onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]" title={t('button.close')} aria-label={t('button.close')}>
                             <CloseIcon className="h-4 w-4" />
                         </button>
                     </div>
