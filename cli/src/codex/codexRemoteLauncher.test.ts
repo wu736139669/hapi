@@ -2168,9 +2168,80 @@ describe('codexRemoteLauncher', () => {
         expect(harness.startTurnMessages).toEqual(['first message', 'first message']);
         expect(sessionEvents).toContainEqual({
             type: 'message',
-            message: 'Task failed: Selected model is at capacity. Please try a different model.; retrying same conversation (1/3)'
+            message: 'Task failed: Selected model is at capacity. Please try a different model.; retrying same conversation (1/6)'
         });
         expect(sessionEvents.filter((event) => event.type === 'ready').length).toBeGreaterThanOrEqual(1);
+        expect(session.thinking).toBe(false);
+    });
+
+    it('keeps retrying a capacity failure past the old three-attempt budget', async () => {
+        // Four consecutive capacity failures exceed the previous limit of 3.
+        // The advertised retryAfterMs keeps the test fast while still
+        // exercising the scheduled-retry path.
+        harness.capacityErrorsRemaining = 4;
+        harness.capacityErrorRetryAfterMs = 50;
+        const { session, sessionEvents } = createSessionStub(['first message']);
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.startTurnMessages).toEqual(Array(5).fill('first message'));
+        const retryMessages = sessionEvents
+            .filter((event) => event.type === 'message' && String(event.message).includes('retrying same conversation'))
+            .map((event) => event.message);
+        expect(retryMessages).toEqual([
+            'Task failed: Selected model is at capacity. Please try a different model.; retrying same conversation in 1 second (1/6)',
+            'Task failed: Selected model is at capacity. Please try a different model.; retrying same conversation in 1 second (2/6)',
+            'Task failed: Selected model is at capacity. Please try a different model.; retrying same conversation in 1 second (3/6)',
+            'Task failed: Selected model is at capacity. Please try a different model.; retrying same conversation in 1 second (4/6)'
+        ]);
+        expect(sessionEvents.filter((event) => event.type === 'message'
+            && String(event.message).startsWith('Task failed: Selected model is at capacity')
+            && !String(event.message).includes('retrying same conversation'))).toEqual([]);
+        expect(session.thinking).toBe(false);
+    });
+
+    it('holds the thinking state across a capacity backoff window', async () => {
+        // While a retry waits out its 7s backoff the turn must not look
+        // finished: previously thinking toggled off for the whole window, so
+        // the conversation appeared to have failed until the retry re-armed it.
+        harness.capacityErrorsRemaining = 1;
+        harness.capacityErrorRetryAfterMs = null;
+        const { session, thinkingChanges } = createSessionStub(['first message']);
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.startTurnMessages).toEqual(['first message', 'first message']);
+        expect(session.sessionId).toBe('thread-1');
+        // The failure that arms the retry must not report the turn as
+        // finished: only the successful retried turn may clear thinking.
+        expect(thinkingChanges[0]).toBe(true);
+        const firstOffIndex = thinkingChanges.indexOf(false);
+        const lastOnIndex = thinkingChanges.lastIndexOf(true);
+        expect(firstOffIndex).toBeGreaterThan(lastOnIndex);
+        expect(session.thinking).toBe(false);
+    }, 20_000);
+
+    it('stops retrying a capacity failure once the extended budget is exhausted', async () => {
+        // More failures than the budget allows: the last one must surface as a
+        // terminal failure instead of scheduling another retry.
+        harness.capacityErrorsRemaining = 8;
+        harness.capacityErrorRetryAfterMs = 0;
+        const { session, sessionEvents } = createSessionStub(['first message']);
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.startTurnMessages).toHaveLength(7);
+        const retryMessages = sessionEvents
+            .filter((event) => event.type === 'message' && String(event.message).includes('retrying same conversation'));
+        expect(retryMessages).toHaveLength(6);
+        expect(retryMessages.at(-1)?.message).toContain('(6/6)');
+        expect(sessionEvents).toContainEqual({
+            type: 'message',
+            message: 'Task failed: Selected model is at capacity. Please try a different model.'
+        });
         expect(session.thinking).toBe(false);
     });
 

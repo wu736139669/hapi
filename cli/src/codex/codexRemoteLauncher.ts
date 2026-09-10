@@ -91,12 +91,21 @@ const SAME_THREAD_RETRYABLE_ERROR_PATTERNS = [
     'codex thread entered systemerror'
 ];
 const SAME_THREAD_SERVER_OVERLOADED_ERROR_INFO = 'serveroverloaded';
-const SAME_THREAD_CAPACITY_RETRY_DELAYS_MS = [7_000, 15_000, 30_000] as const;
+// Capacity windows are upstream-wide and routinely outlast a single 52s
+// (7+15+30) budget: the Codex app itself keeps retrying for minutes, so a
+// short budget made hapi surface "Task failed: ... at capacity" while the
+// model was about to come back. Growing the exponent to ~9 minutes total
+// keeps hapi's retries on the same timescale as the client it wraps.
+const SAME_THREAD_CAPACITY_RETRY_DELAYS_MS = [7_000, 15_000, 30_000, 60_000, 120_000, 300_000] as const;
 const CONTEXT_COMPACT_RETRYABLE_ERROR_PATTERNS = [
     'ran out of room in the model',
     'context window',
     'clear earlier history'
 ];
+// Capacity/overload failures back off for minutes (see the table above), so
+// they get a budget sized to the table. Thread-systemerror recovery re-enters
+// the turn synchronously with no delay, so it keeps the original tight budget.
+const SAME_THREAD_MAX_CAPACITY_RETRIES = SAME_THREAD_CAPACITY_RETRY_DELAYS_MS.length;
 const SAME_THREAD_MAX_RETRIES = 3;
 const SAME_THREAD_MAX_COMPACT_RETRIES = 1;
 const SAME_THREAD_COMPACT_TIMEOUT_MS = 10 * 60 * 1000;
@@ -1888,6 +1897,11 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
         let recoveryInFlight = false;
         let sameThreadRetryTimer: ReturnType<typeof setTimeout> | null = null;
         let sameThreadRetryGeneration = 0;
+        // True while a retry is parked waiting for its backoff to elapse. The
+        // terminal event that armed the retry must not clear the session's
+        // thinking state, or the conversation looks finished for the whole
+        // backoff window (minutes, at the long end of the capacity table).
+        let pendingSameThreadRetry = false;
         let lastFinalizedTurnId: string | null = null;
         let deferredThreadStatusFailure: {
             event: Record<string, unknown>;
@@ -2290,6 +2304,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 sameThreadRetryTimer = null;
             }
             sameThreadRetryGeneration += 1;
+            pendingSameThreadRetry = false;
             if (recoveryInFlight && !compactRecovery && !deferredThreadStatusFailure) {
                 recoveryInFlight = false;
                 wakeLoop();
@@ -2326,6 +2341,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     return;
                 }
                 sameThreadRetryTimer = null;
+                pendingSameThreadRetry = false;
                 if (signal.aborted || this.shouldExit) {
                     recoveryInFlight = false;
                     pending = null;
@@ -2343,6 +2359,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 return;
             }
 
+            pendingSameThreadRetry = true;
             sameThreadRetryTimer = setTimeout(runRetry, delayMs);
             sameThreadRetryTimer.unref?.();
         };
@@ -3071,14 +3088,24 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 && Boolean(activeMessage)
                 && Boolean(this.currentThreadId)
                 && sameThreadCompactAttempt < SAME_THREAD_MAX_COMPACT_RETRIES;
+            const isCapacityRetryableFailure = isServerOverloadedFailure
+                || isSameThreadRetryableCodexError(error);
+            // Only capacity/overload failures earn the long budget; a
+            // thread-level systemError keeps its original tight retry budget.
+            const sameThreadRetryLimit = isServerOverloadedFailure
+                ? SAME_THREAD_MAX_CAPACITY_RETRIES
+                : SAME_THREAD_MAX_RETRIES;
             const shouldRetrySameThread = msgType === 'task_failed'
                 && !explicitlyNonRetryable
                 && !shouldCompactAndRetrySameThread
-                && (isSameThreadRetryableCodexError(error) || isServerOverloadedFailure)
+                && isCapacityRetryableFailure
                 && Boolean(activeMessage)
                 && Boolean(this.currentThreadId)
-                && sameThreadRetryAttempt < SAME_THREAD_MAX_RETRIES;
+                && sameThreadRetryAttempt < sameThreadRetryLimit;
 
+            // Only capacity/overload failures back off. A thread-level
+            // systemError is recovered by re-entering the turn immediately, so
+            // it must keep its original zero-delay retry.
             const retryDelayMs = shouldRetrySameThread && isServerOverloadedFailure
                 ? retryDelayMsForCodexFailure(msg, sameThreadRetryAttempt + 1)
                 : 0;
@@ -3134,7 +3161,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     }
                     logger.debug(
                         `[Codex] Retrying retryable failure on same thread ` +
-                        `(attempt ${sameThreadRetryAttempt}/${SAME_THREAD_MAX_RETRIES}, ` +
+                        `(attempt ${sameThreadRetryAttempt}/${sameThreadRetryLimit}, ` +
                         `delay=${retryDelayMs}ms): ${error ?? 'unknown error'}`
                     );
                 }
@@ -3181,8 +3208,8 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     session.sendSessionEvent({ type: 'message', message: retryMessage });
                 } else if (shouldRetrySameThread) {
                     const retryMessage = error
-                        ? `Task failed: ${error}; retrying same conversation${formatRetryDelay(retryDelayMs)} (${sameThreadRetryAttempt}/${SAME_THREAD_MAX_RETRIES})`
-                        : `Task failed; retrying same conversation${formatRetryDelay(retryDelayMs)} (${sameThreadRetryAttempt}/${SAME_THREAD_MAX_RETRIES})`;
+                        ? `Task failed: ${error}; retrying same conversation${formatRetryDelay(retryDelayMs)} (${sameThreadRetryAttempt}/${sameThreadRetryLimit})`
+                        : `Task failed; retrying same conversation${formatRetryDelay(retryDelayMs)} (${sameThreadRetryAttempt}/${sameThreadRetryLimit})`;
                     messageBuffer.addMessage(retryMessage, 'status');
                     session.sendSessionEvent({ type: 'message', message: retryMessage });
                 } else {
@@ -3213,9 +3240,11 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 setTurnInFlight(false);
                 this.conversationHistory.setBusy(false);
                 allowAnonymousTerminalEvent = false;
-                if (session.thinking) {
+                if (session.thinking && !pendingSameThreadRetry) {
                     logger.debug('thinking completed');
                     session.onThinkingChange(false);
+                } else if (session.thinking) {
+                    logger.debug('thinking held for same-thread retry');
                 }
                 diffProcessor.reset();
                 appServerEventConverter.reset();
@@ -3244,6 +3273,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 sameThreadRetryAttempt = 0;
                 sameThreadCompactAttempt = 0;
                 recoveryInFlight = false;
+                pendingSameThreadRetry = false;
                 clearCompactRecovery(compactRecovery);
                 activeMessage = null;
                 lastRetryableMessage = null;
@@ -4109,6 +4139,10 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 await runSteerReconciliation();
             }
             if (!pending && recoveryInFlight) {
+                // A same-thread retry parked in its backoff sets
+                // recoveryInFlight, so the loop waits here rather than tearing
+                // down the turn context (and the session's thinking state)
+                // while the retry is still on its way.
                 await waitForTurnOrRecovery(this.abortController.signal);
                 if (this.abortController.signal.aborted && !this.shouldExit) {
                     logger.debug('[codex]: Internal wait aborted while recovery was active; continuing');
@@ -4363,7 +4397,9 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     pendingAgentTracesByAgentId.clear();
                     cancelAllPendingThrottledAgentRunUpdates();
                     childAgentRuntimeById.clear();
-                    session.onThinkingChange(false);
+                    if (!pendingSameThreadRetry) {
+                        session.onThinkingChange(false);
+                    }
                     clearReadyAfterTurnTimer?.();
                     if (!suppressReadyAfterMessage) {
                         emitReadyIfIdle({
