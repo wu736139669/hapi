@@ -928,6 +928,7 @@ function SessionItem(props: {
     onTransferPersonalPinned?: (fromSessionId: string, toSessionId: string) => void
     projectLabel?: string
     machineLabel?: string
+    shared?: boolean
 }) {
     const { t } = useTranslation()
     const { addToast } = useToast()
@@ -945,7 +946,8 @@ function SessionItem(props: {
         onSetPersonalPinned,
         onTransferPersonalPinned,
         projectLabel,
-        machineLabel
+        machineLabel,
+        shared = false
     } = props
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
@@ -1074,6 +1076,7 @@ function SessionItem(props: {
                     inRunningSection={compact || inRunningSection}
                     projectLabel={projectLabel}
                     machineLabel={machineLabel}
+                    shared={shared}
                 />
             </button>
 
@@ -1213,6 +1216,7 @@ export function SessionList(props: {
     titleSuggestionAvailable?: boolean
     machineLabelsById?: Record<string, string>
     machinesById?: Record<string, Machine>
+    sharedSessionIds?: ReadonlySet<string>
     selectedSessionId?: string | null
     /** Compact directory/session index used while the detail sidebar is collapsed. */
     compact?: boolean
@@ -1226,6 +1230,7 @@ export function SessionList(props: {
         compact = false,
         machineLabelsById = {},
         machinesById = {},
+        sharedSessionIds = new Set<string>(),
         onNewSessionInDirectory
     } = props
     const { sessionPreviewLimit } = useSessionPreviewLimit()
@@ -1575,6 +1580,7 @@ export function SessionList(props: {
                                             inRunningSection
                                             projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
+                                            shared={sharedSessionIds.has(s.id)}
                                         />
                                     ))}
                                 </div>
@@ -1708,6 +1714,7 @@ export function SessionList(props: {
                                     showDetailedStatus={showDetailedStatus}
                                     onSetPersonalPinned={(pinned) => setPersonalPinned(s.id, pinned)}
                                     onTransferPersonalPinned={transferPersonalPinned}
+                                    shared={sharedSessionIds.has(s.id)}
                                 />
                             </div>
                         ))}
@@ -2079,6 +2086,7 @@ export function SessionList(props: {
                                             onTransferPersonalPinned={transferPersonalPinned}
                                             projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
+                                            shared={sharedSessionIds.has(s.id)}
                                         />
                                     ))}
                                 </div>
@@ -2134,6 +2142,7 @@ export function SessionList(props: {
                                             onTransferPersonalPinned={transferPersonalPinned}
                                             projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
+                                            shared={sharedSessionIds.has(s.id)}
                                         />
                                     ))}
                                 </div>

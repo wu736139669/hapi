@@ -423,6 +423,7 @@ export type SessionShare = {
 
 export type SessionShareCreateResponse = { share: SessionShare; accessCode: string }
 export type SessionShareExchangeResponse = { token: string; sessionId: string; share: SessionShare }
+export type SessionShareListItem = { share: SessionShare; session: SessionSummary | null }
 
 export type StudioAccessMode = 'view' | 'contribute'
 export type StudioPostKind = 'discussion' | 'suggestion'

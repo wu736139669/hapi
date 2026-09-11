@@ -119,6 +119,8 @@ export function SessionRowSummary(props: {
     projectLabel?: string
     /** Machine label shown next to the project name (pinned "in progress" rows). */
     machineLabel?: string
+    /** Whether the owner has an active collaborative share for this session. */
+    shared?: boolean
 }) {
     const {
         session: s,
@@ -133,6 +135,7 @@ export function SessionRowSummary(props: {
         inRunningSection = false,
         projectLabel,
         machineLabel,
+        shared = false,
     } = props
     const { t } = useTranslation()
     const sessionName = getSessionTitle(s)
@@ -173,6 +176,15 @@ export function SessionRowSummary(props: {
                     >
                         {sessionName}
                     </div>
+                    {shared ? (
+                        <span
+                            className={`shrink-0 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300 ${compact ? 'px-1 text-[9px]' : ''}`}
+                            title={t('sessionShare.active')}
+                            aria-label={t('sessionShare.active')}
+                        >
+                            {compact ? '↗' : t('sessionShare.activeShort')}
+                        </span>
+                    ) : null}
                     {s.active && s.thinking ? (
                         <LoaderIcon className={compact ? 'h-3 w-3 shrink-0 animate-spin-slow text-[var(--app-badge-success-text)]' : 'h-3.5 w-3.5 shrink-0 animate-spin-slow text-[var(--app-badge-success-text)]'} />
                     ) : urgentAttention && nestedTooltips && attentionId ? (

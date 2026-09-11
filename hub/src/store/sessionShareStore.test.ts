@@ -28,4 +28,37 @@ describe("SessionShareStore", () => {
     ).toBe(session.id);
     store.close();
   });
+
+  it("lists active shares by namespace without revoked shares", () => {
+    const store = new Store(":memory:");
+    const firstSession = store.sessions.getOrCreateSession(
+      "share-list-1",
+      { flavor: "claude" },
+      null,
+      "default",
+    );
+    const secondSession = store.sessions.getOrCreateSession(
+      "share-list-2",
+      { flavor: "codex" },
+      null,
+      "default",
+    );
+    const otherNamespaceSession = store.sessions.getOrCreateSession(
+      "share-list-other",
+      { flavor: "codex" },
+      null,
+      "other",
+    );
+
+    const first = store.sessionShares.createShare(firstSession.id, "default");
+    const second = store.sessionShares.createShare(secondSession.id, "default");
+    store.sessionShares.createShare(otherNamespaceSession.id, "other");
+    store.sessionShares.revokeById(first.share.id, "default");
+
+    expect(store.sessionShares.getActiveByNamespace("default").map((share) => share.id)).toEqual([
+      second.share.id,
+    ]);
+    expect(store.sessionShares.getActiveByNamespace("other")).toHaveLength(1);
+    store.close();
+  });
 });

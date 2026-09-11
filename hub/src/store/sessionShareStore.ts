@@ -103,6 +103,15 @@ export class SessionShareStore {
     return row ? mapRow(row) : null;
   }
 
+  getActiveByNamespace(namespace: string): StoredSessionShare[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM session_shares WHERE namespace = ? AND status = 'active' ORDER BY updated_at DESC",
+      )
+      .all(namespace) as SessionShareRow[];
+    return rows.map(mapRow);
+  }
+
   getActiveByToken(token: string): StoredSessionShare | null {
     const row = this.db
       .prepare(

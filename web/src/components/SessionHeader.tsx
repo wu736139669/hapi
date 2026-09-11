@@ -450,9 +450,12 @@ export function SessionHeader(props: {
         }
     }
 
-    const handleCreateSessionShare = async () => {
+    const handleCreateSessionShare = async (force = false) => {
         if (!api || isCreatingSessionShare) return
-        if (sessionShare && sessionShareCode && sessionShareUrl) {
+        // An active share remains valid after reload, but its raw access code
+        // is intentionally not recoverable (only the hash is persisted). Do
+        // not rotate the share just because the code is unavailable locally.
+        if (!force && sessionShare && sessionShareUrl) {
             setSessionShareOpen(true)
             return
         }
@@ -464,9 +467,17 @@ export function SessionHeader(props: {
             setSessionShareCode(result.accessCode)
             setSessionShareUrl(shareUrl)
             setSessionShareOpen(true)
+            await queryClient.invalidateQueries({ queryKey: queryKeys.sessionShares })
+            await queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
         } catch (error) {
             addToast({ title: t('sessionShare.createFailed'), body: error instanceof Error ? error.message : t('dialog.error.default'), sessionId: session.id, url: `/sessions/${session.id}` })
         } finally { setIsCreatingSessionShare(false) }
+    }
+
+    const handleRegenerateSessionShare = async () => {
+        if (!api || isCreatingSessionShare) return
+        if (!window.confirm(t('sessionShare.regenerateConfirm'))) return
+        await handleCreateSessionShare(true)
     }
 
     const handleRevokeSessionShare = async () => {
@@ -477,6 +488,8 @@ export function SessionHeader(props: {
             setSessionShare(null)
             setSessionShareCode(null)
             setSessionShareUrl(null)
+            await queryClient.invalidateQueries({ queryKey: queryKeys.sessionShares })
+            await queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
             addToast({
                 title: t('sessionShare.revoke'),
                 body: t('sessionShare.revoked'),
@@ -696,7 +709,7 @@ export function SessionHeader(props: {
                 menuId={menuId}
             /> : null}
 
-            <SessionShareDialog isOpen={sessionShareOpen} share={sessionShare} accessCode={sessionShareCode} shareUrl={sessionShareUrl} onClose={() => setSessionShareOpen(false)} onRevoke={api && sessionShare ? () => { void handleRevokeSessionShare() } : undefined} />
+            <SessionShareDialog isOpen={sessionShareOpen} share={sessionShare} accessCode={sessionShareCode} shareUrl={sessionShareUrl} onClose={() => setSessionShareOpen(false)} onRegenerate={api ? () => { void handleRegenerateSessionShare() } : undefined} isRegenerating={isCreatingSessionShare} onRevoke={api && sessionShare ? () => { void handleRevokeSessionShare() } : undefined} />
 
             {reopenError ? (
                 <ConfirmDialog

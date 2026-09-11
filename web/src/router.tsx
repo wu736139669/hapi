@@ -20,6 +20,7 @@ import {
 import { App } from '@/App'
 import { SessionChat } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
+import { SessionShareManagerDialog } from '@/components/SessionShareManagerDialog'
 import { NewSession } from '@/components/NewSession'
 import { WorkspaceBrowser } from '@/components/WorkspaceBrowser'
 import { LoadingState } from '@/components/LoadingState'
@@ -33,6 +34,7 @@ import { useMachineLabels } from '@/hooks/useMachineLabels'
 import { useSession } from '@/hooks/queries/useSession'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { useSessions } from '@/hooks/queries/useSessions'
+import { useSessionShares } from '@/hooks/queries/useSessionShares'
 import { useSlashCommands } from '@/hooks/queries/useSlashCommands'
 import { useSkills } from '@/hooks/queries/useSkills'
 import { getSessionTitle } from '@/lib/sessionTitle'
@@ -167,6 +169,30 @@ function SettingsIcon(props: { className?: string }) {
     )
 }
 
+function ShareIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+            aria-hidden="true"
+        >
+            <circle cx="18" cy="5" r="3" />
+            <circle cx="6" cy="12" r="3" />
+            <circle cx="18" cy="19" r="3" />
+            <path d="m8.6 13.5 6.8 4" />
+            <path d="m15.4 6.5-6.8 4" />
+        </svg>
+    )
+}
+
 function SessionsPage() {
     const { api, baseUrl, titleSuggestionAvailable = false, isSessionGuest = false } = useAppContext()
     const navigate = useNavigate()
@@ -175,6 +201,17 @@ function SessionsPage() {
     const { t } = useTranslation()
     const { addToast } = useToast()
     const { sessions, isLoading, error, refetch } = useSessions(isSessionGuest ? null : api)
+    const {
+        shares: sessionShares,
+        isLoading: sessionSharesLoading,
+        error: sessionSharesError,
+        refetch: refetchSessionShares,
+    } = useSessionShares(isSessionGuest ? null : api, !isSessionGuest)
+    const sharedSessionIds = useMemo(
+        () => new Set(sessionShares.map((item) => item.share.sessionId)),
+        [sessionShares]
+    )
+    const [sessionSharesOpen, setSessionSharesOpen] = useState(false)
     const [initializedHub, setInitializedHub] = useState<string | null>(null)
     const { machines } = useMachines(api, !isSessionGuest)
     const handleRefresh = useCallback(() => {
@@ -278,6 +315,20 @@ function SessionsPage() {
                             <div className="flex items-center gap-2">
                                 {!isSessionsIndex ? <button type="button" onClick={() => sidebarCollapse.setSidebarCollapsed(true)} className="hidden split:flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]" title={t('sessions.sidebar.collapse')} aria-label={t('sessions.sidebar.collapse')}><SidebarCollapseIcon direction="left" className="h-5 w-5" /></button> : null}
                                 {canBrowse ? <button type="button" onClick={() => navigate({ to: '/browse' })} className="p-1.5 rounded-full text-[var(--app-hint)]" title={t('browse.nav')}><FolderOpenIcon className="h-5 w-5" /></button> : null}
+                                <button
+                                    type="button"
+                                    onClick={() => setSessionSharesOpen(true)}
+                                    className="relative flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]"
+                                    title={t('sessionShare.manage')}
+                                    aria-label={t('sessionShare.manage')}
+                                >
+                                    <ShareIcon className="h-[18px] w-[18px]" />
+                                    {sessionShares.length > 0 ? (
+                                        <span className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-emerald-500 px-1 text-center text-[10px] leading-4 text-white">
+                                            {sessionShares.length > 99 ? '99+' : sessionShares.length}
+                                        </span>
+                                    ) : null}
+                                </button>
                                 <button type="button" onClick={() => navigate({ to: '/settings' })} className="p-1.5 rounded-full text-[var(--app-hint)]" title={t('settings.title')}><SettingsIcon className="h-5 w-5" /></button>
                                 <button type="button" onClick={() => navigate({ to: '/sessions/new' })} className="session-list-new-button flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)]" title={t('sessions.new')}><PlusIcon className="h-5 w-5" /></button>
                             </div>
@@ -286,6 +337,7 @@ function SessionsPage() {
                         titleSuggestionAvailable={titleSuggestionAvailable}
                         machineLabelsById={machineLabelsById}
                         machinesById={machinesById}
+                        sharedSessionIds={sharedSessionIds}
                     />
                 </div>
             </div>
@@ -303,6 +355,23 @@ function SessionsPage() {
                 </div>
             </div>
             </div>
+            <SessionShareManagerDialog
+                isOpen={sessionSharesOpen}
+                shares={sessionShares}
+                isLoading={sessionSharesLoading}
+                error={sessionSharesError}
+                api={api}
+                baseUrl={baseUrl}
+                onClose={() => setSessionSharesOpen(false)}
+                onSelectSession={(sessionId) => {
+                    setSessionSharesOpen(false)
+                    void navigate(getSessionListSelectionNavigation(sessionId))
+                }}
+                onRevoked={() => {
+                    void refetchSessionShares()
+                    void refetch()
+                }}
+            />
         </>
     )
 }

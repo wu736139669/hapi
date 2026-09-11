@@ -143,6 +143,24 @@ describe("session share routes", () => {
     };
     expect(createdBody.accessCode).toMatch(/^\d{6}$/);
 
+    const activeShares = await app.request("/api/session-shares", {
+      headers: { authorization: `Bearer ${owner}` },
+    });
+    expect(activeShares.status).toBe(200);
+    expect(await activeShares.json()).toMatchObject({
+      shares: [
+        {
+          share: {
+            id: createdBody.share.id,
+            sessionId: session.id,
+          },
+          session: {
+            id: session.id,
+          },
+        },
+      ],
+    });
+
     const exchanged = await app.request(
       `/api/public/session-shares/${createdBody.share.shareToken}/exchange`,
       {
@@ -169,6 +187,11 @@ describe("session share routes", () => {
       headers: { authorization: `Bearer ${guestToken}` },
     });
     expect(guestGlobal.status).toBe(403);
+
+    const guestShares = await app.request("/api/session-shares", {
+      headers: { authorization: `Bearer ${guestToken}` },
+    });
+    expect(guestShares.status).toBe(403);
 
     const forbiddenGuestConfigurationRequests = [
       { path: "permission-mode", body: { mode: "auto" } },
@@ -230,6 +253,11 @@ describe("session share routes", () => {
       },
     );
     expect(revoke.status).toBe(200);
+    const activeSharesAfterRevoke = await app.request("/api/session-shares", {
+      headers: { authorization: `Bearer ${owner}` },
+    });
+    expect(activeSharesAfterRevoke.status).toBe(200);
+    expect((await activeSharesAfterRevoke.json()) as { shares: unknown[] }).toEqual({ shares: [] });
     store.close();
   });
 

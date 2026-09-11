@@ -38,6 +38,7 @@ import type {
     StudioOwnerResponse,
     StudioPost,
     SessionShare,
+    SessionShareListItem,
     SessionShareCreateResponse,
     SessionShareExchangeResponse
 } from '@/types/api'
@@ -401,6 +402,10 @@ export class ApiClient {
 
     async createSessionShare(sessionId: string): Promise<SessionShareCreateResponse> {
         return await this.request<SessionShareCreateResponse>('/api/session-shares', { method: 'POST', body: JSON.stringify({ sessionId }) })
+    }
+
+    async getSessionShares(): Promise<{ shares: SessionShareListItem[] }> {
+        return await this.request<{ shares: SessionShareListItem[] }>('/api/session-shares')
     }
 
     async getSessionShare(sessionId: string): Promise<{ share: SessionShare | null }> {

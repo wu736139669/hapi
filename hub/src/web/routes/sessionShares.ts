@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { SignJWT } from "jose";
 import { z } from "zod";
+import { toSessionSummary } from '@hapi/protocol';
 import type { Store } from "../../store";
 import type { SyncEngine } from "../../sync/syncEngine";
 import type { WebAppEnv } from "../middleware/auth";
@@ -89,6 +90,28 @@ export function createSessionShareRoutes(options: {
       share: sharePayload(created.share),
       accessCode: created.accessCode,
     });
+  });
+
+  app.get("/session-shares", (c) => {
+    if (c.get("role") === "session-guest")
+      return c.json({ error: "Guest cannot manage shares" }, 403);
+    const engine = requireSyncEngine(c, options.getSyncEngine);
+    if (engine instanceof Response) return engine;
+
+    const sessionsById = new Map(
+      engine.getSessionsByNamespace(c.get("namespace")).map((session) => [session.id, session]),
+    );
+    const shares = options.store.sessionShares
+      .getActiveByNamespace(c.get("namespace"))
+      .map((share) => {
+        const session = sessionsById.get(share.sessionId);
+        return {
+          share: sharePayload(share),
+          session: session ? toSessionSummary(session) : null,
+        };
+      });
+    c.header("Cache-Control", "no-store");
+    return c.json({ shares });
   });
 
   app.get("/session-shares/session/:sessionId", (c) => {
