@@ -80,6 +80,7 @@ import StudioOwnerPage from '@/routes/studios/owner'
 import PublicStudioPage from '@/routes/studios/public'
 import SharedSessionPage from '@/routes/shared-session'
 import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed'
+import { useSessionListToolbar } from '@/hooks/useSessionListToolbar'
 
 
 function BackIcon(props: { className?: string }) {
@@ -200,6 +201,7 @@ function SessionsPage() {
     const matchRoute = useMatchRoute()
     const { t } = useTranslation()
     const { addToast } = useToast()
+    const { preferences: toolbarPreferences } = useSessionListToolbar()
     const { sessions, isLoading, error, refetch } = useSessions(isSessionGuest ? null : api)
     const {
         shares: sessionShares,
@@ -314,8 +316,8 @@ function SessionsPage() {
                         ) : (
                             <div className="flex items-center gap-2">
                                 {!isSessionsIndex ? <button type="button" onClick={() => sidebarCollapse.setSidebarCollapsed(true)} className="hidden split:flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]" title={t('sessions.sidebar.collapse')} aria-label={t('sessions.sidebar.collapse')}><SidebarCollapseIcon direction="left" className="h-5 w-5" /></button> : null}
-                                {canBrowse ? <button type="button" onClick={() => navigate({ to: '/browse' })} className="p-1.5 rounded-full text-[var(--app-hint)]" title={t('browse.nav')}><FolderOpenIcon className="h-5 w-5" /></button> : null}
-                                <button
+                                {canBrowse && toolbarPreferences.showBrowse && !toolbarPreferences.collapsed ? <button type="button" onClick={() => navigate({ to: '/browse' })} className="p-1.5 rounded-full text-[var(--app-hint)]" title={t('browse.nav')}><FolderOpenIcon className="h-5 w-5" /></button> : null}
+                                {toolbarPreferences.showShareManager && !toolbarPreferences.collapsed ? <button
                                     type="button"
                                     onClick={() => setSessionSharesOpen(true)}
                                     className="relative flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]"
@@ -328,7 +330,7 @@ function SessionsPage() {
                                             {sessionShares.length > 99 ? '99+' : sessionShares.length}
                                         </span>
                                     ) : null}
-                                </button>
+                                </button> : null}
                                 <button type="button" onClick={() => navigate({ to: '/settings' })} className="p-1.5 rounded-full text-[var(--app-hint)]" title={t('settings.title')}><SettingsIcon className="h-5 w-5" /></button>
                                 <button type="button" onClick={() => navigate({ to: '/sessions/new' })} className="session-list-new-button flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)]" title={t('sessions.new')}><PlusIcon className="h-5 w-5" /></button>
                             </div>

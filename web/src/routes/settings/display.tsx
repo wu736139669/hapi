@@ -11,6 +11,7 @@ import { usePinActiveSessions } from '@/hooks/usePinActiveSessions'
 import { MAX_SESSION_PREVIEW_LIMIT, MIN_SESSION_PREVIEW_LIMIT, normalizeSessionPreviewLimit, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
 import { useThemeColors, type ThemeColorKeyId } from '@/hooks/useThemeColors'
 import { useSessionHeaderMetadata, type SessionHeaderMetadataKey } from '@/hooks/useSessionHeaderMetadata'
+import { useSessionListToolbar } from '@/hooks/useSessionListToolbar'
 import { SettingsChoiceGroup, SettingsFieldLabel, SettingsPageContent, SettingsRow, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
 
 function MinusIcon() {
@@ -140,6 +141,7 @@ export default function SettingsDisplayPage() {
     const { showActiveSessionsOnly, setShowActiveSessionsOnly } = useShowActiveSessionsOnly()
     const { pinInProgressSessions, setPinInProgressSessions } = usePinInProgressSessions()
     const { pinActiveSessions, setPinActiveSessions } = usePinActiveSessions()
+    const { preferences: sessionToolbar, setPreference: setSessionToolbarPreference } = useSessionListToolbar()
     const { preferences: sessionHeaderMetadata, setPreference: setSessionHeaderMetadata } = useSessionHeaderMetadata()
     const sessionHeaderOptions: ReadonlyArray<{ key: SessionHeaderMetadataKey; labelKey: string }> = [
         { key: 'showLabels', labelKey: 'settings.display.sessionHeader.showLabels' },
@@ -184,6 +186,42 @@ export default function SettingsDisplayPage() {
                     value={sessionListStatusMode}
                     options={getSessionListStatusModeOptions().map((option) => ({ value: option.value, label: t(option.labelKey) }))}
                     onChange={setSessionListStatusMode}
+                />
+                <SettingsSwitch
+                    label={t('settings.display.sessionToolbar.collapsed')}
+                    description={t('settings.display.sessionToolbar.collapsed.desc')}
+                    checked={sessionToolbar.collapsed}
+                    onChange={(checked) => setSessionToolbarPreference('collapsed', checked)}
+                />
+                <SettingsSwitch
+                    label={t('settings.display.sessionToolbar.search')}
+                    description={t('settings.display.sessionToolbar.search.desc')}
+                    checked={sessionToolbar.showSearch}
+                    onChange={(checked) => setSessionToolbarPreference('showSearch', checked)}
+                />
+                <SettingsSwitch
+                    label={t('settings.display.sessionToolbar.dateFilter')}
+                    description={t('settings.display.sessionToolbar.dateFilter.desc')}
+                    checked={sessionToolbar.showDateFilter}
+                    onChange={(checked) => setSessionToolbarPreference('showDateFilter', checked)}
+                />
+                <SettingsSwitch
+                    label={t('settings.display.sessionToolbar.unreadFilter')}
+                    description={t('settings.display.sessionToolbar.unreadFilter.desc')}
+                    checked={sessionToolbar.showUnreadFilter}
+                    onChange={(checked) => setSessionToolbarPreference('showUnreadFilter', checked)}
+                />
+                <SettingsSwitch
+                    label={t('settings.display.sessionToolbar.share')}
+                    description={t('settings.display.sessionToolbar.share.desc')}
+                    checked={sessionToolbar.showShareManager}
+                    onChange={(checked) => setSessionToolbarPreference('showShareManager', checked)}
+                />
+                <SettingsSwitch
+                    label={t('settings.display.sessionToolbar.browse')}
+                    description={t('settings.display.sessionToolbar.browse.desc')}
+                    checked={sessionToolbar.showBrowse}
+                    onChange={(checked) => setSessionToolbarPreference('showBrowse', checked)}
                 />
             </SettingsSection>
 

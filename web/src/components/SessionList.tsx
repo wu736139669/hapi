@@ -46,6 +46,7 @@ import { SessionRowSummary } from '@/components/SessionRowSummary'
 import { Spinner } from '@/components/Spinner'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { useToast } from '@/lib/toast-context'
+import { useSessionListToolbar } from '@/hooks/useSessionListToolbar'
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
 
@@ -530,6 +531,24 @@ function SessionPreviewArrowIcon(props: { direction: 'up' | 'down'; className?: 
     )
 }
 
+function ToolbarCollapseIcon(props: { collapsed: boolean; className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+            aria-hidden="true"
+        >
+            {props.collapsed ? <path d="m6 9 6 6 6-6" /> : <path d="m6 15 6-6 6 6" />}
+        </svg>
+    )
+}
+
 export { getSessionTitle } from '@/lib/sessionTitle'
 
 export function normalizeSearch(value: string | null | undefined): string {
@@ -730,6 +749,8 @@ export function SessionListSearch(props: {
     onDateRangeChange: (start: string, end: string) => void
     expanded: boolean
     onExpandedChange: (expanded: boolean) => void
+    showSearch?: boolean
+    showDateFilter?: boolean
 }) {
     const { t } = useTranslation()
     const [datePickerOpen, setDatePickerOpen] = useState(false)
@@ -737,6 +758,8 @@ export function SessionListSearch(props: {
     const collapsedButtonRef = useRef<HTMLButtonElement>(null)
     const dateButtonRef = useRef<HTMLButtonElement>(null)
     const hasDateRange = Boolean(props.customStart && props.customEnd)
+    const showSearch = props.showSearch ?? true
+    const showDateFilter = props.showDateFilter ?? true
 
     useEffect(() => {
         if (props.expanded) {
@@ -814,6 +837,14 @@ export function SessionListSearch(props: {
 
     const searchLabel = t('sessions.search.open')
 
+    if (!showSearch) {
+        return showDateFilter ? (
+            <div className="relative flex items-center gap-1">
+                {renderDateFilter('standalone')}
+            </div>
+        ) : null
+    }
+
     if (!props.expanded) {
         const hasTextQuery = props.value.length > 0
         const collapsedLabel = hasTextQuery ? `${searchLabel}: ${props.value}` : searchLabel
@@ -861,7 +892,7 @@ export function SessionListSearch(props: {
                         </button>
                     ) : null}
                 </div>
-                {renderDateFilter('standalone')}
+                {showDateFilter ? renderDateFilter('standalone') : null}
             </div>
         )
     }
@@ -907,7 +938,7 @@ export function SessionListSearch(props: {
                 </button>
             ) : null}
             <div className="absolute inset-y-0 right-0 flex items-stretch">
-                {renderDateFilter('embedded')}
+                {showDateFilter ? renderDateFilter('embedded') : null}
             </div>
         </div>
     )
@@ -1240,6 +1271,7 @@ export function SessionList(props: {
     const [showUnreadOnly, setShowUnreadOnly] = useState(false)
     const { pinInProgressSessions } = usePinInProgressSessions()
     const { pinActiveSessions } = usePinActiveSessions()
+    const { preferences: toolbarPreferences, setPreference: setToolbarPreference } = useSessionListToolbar()
     const { personalPinnedSessionIds, setPersonalPinned, transferPersonalPinned } = usePersonalPinnedSessions()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
@@ -1820,15 +1852,27 @@ export function SessionList(props: {
         })
     }, [allGroups])
 
-    // The search control unmounts when the list empties; reset the expansion so
-    // it cannot suppress header actions (or re-expand on its own when sessions
-    // return) while no search control is rendered.
-    const showSearch = !compact && props.sessions.length > 0
+    // Optional controls can be hidden individually in Display settings, or
+    // folded into a compact toolbar on demand. Reset search expansion whenever
+    // the search control is not rendered so it cannot suppress other actions.
+    const toolbarExpanded = !compact && !toolbarPreferences.collapsed
+    const showSearch = toolbarExpanded && toolbarPreferences.showSearch && props.sessions.length > 0
+    const showDateFilter = toolbarExpanded && toolbarPreferences.showDateFilter && props.sessions.length > 0
+    const showUnreadFilter = toolbarExpanded && toolbarPreferences.showUnreadFilter
+    const showToolbarCollapse = !compact && props.sessions.length > 0
     useEffect(() => {
         if (!showSearch) setSearchExpanded(false)
     }, [showSearch])
+    useEffect(() => {
+        if (!toolbarPreferences.showSearch && searchQuery) setSearchQuery('')
+        if (!toolbarPreferences.showDateFilter && (customStart || customEnd)) {
+            setCustomStart('')
+            setCustomEnd('')
+        }
+        if (!toolbarPreferences.showUnreadFilter && showUnreadOnly) setShowUnreadOnly(false)
+    }, [customEnd, customStart, searchQuery, showUnreadOnly, toolbarPreferences.showDateFilter, toolbarPreferences.showSearch, toolbarPreferences.showUnreadFilter])
 
-    const showHeaderRow = showSearch || renderHeader || Boolean(props.headerActions)
+    const showHeaderRow = showSearch || showDateFilter || renderHeader || Boolean(props.headerActions) || showToolbarCollapse
 
     // Pull-to-refresh on the scrollable list. Touch-only gesture mirroring the
     // pull-to-load-older pattern in HappyThread; desktop has no overscroll
@@ -1924,7 +1968,7 @@ export function SessionList(props: {
             <div className="session-list-scrollbar-offset mx-auto w-full max-w-content shrink-0">
             {showHeaderRow ? (
                 <div className={cn('flex items-center gap-1 py-1', compact ? 'px-1' : 'px-2')}>
-                    {showSearch ? (
+                    {showSearch || showDateFilter ? (
                         <SessionListSearch
                             value={searchQuery}
                             onChange={setSearchQuery}
@@ -1937,6 +1981,8 @@ export function SessionList(props: {
                             }}
                             expanded={searchExpanded}
                             onExpandedChange={setSearchExpanded}
+                            showSearch={showSearch}
+                            showDateFilter={showDateFilter}
                         />
                     ) : null}
                     {!(showSearch && searchExpanded) ? (
@@ -1950,7 +1996,7 @@ export function SessionList(props: {
                                     onChange={setMachineFilter}
                                 />
                             ) : null}
-                            {!compact ? (
+                            {showUnreadFilter ? (
                             <button
                                 type="button"
                                 onClick={() => setShowUnreadOnly(!showUnreadOnly)}
@@ -1975,6 +2021,18 @@ export function SessionList(props: {
                                     )}
                                 />
                             </button>
+                            ) : null}
+                            {showToolbarCollapse ? (
+                                <button
+                                    type="button"
+                                    onClick={() => setToolbarPreference('collapsed', !toolbarPreferences.collapsed)}
+                                    aria-expanded={!toolbarPreferences.collapsed}
+                                    title={toolbarPreferences.collapsed ? t('sessions.toolbar.expand') : t('sessions.toolbar.collapse')}
+                                    aria-label={toolbarPreferences.collapsed ? t('sessions.toolbar.expand') : t('sessions.toolbar.collapse')}
+                                    className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                >
+                                    <ToolbarCollapseIcon collapsed={toolbarPreferences.collapsed} className="h-4 w-4" />
+                                </button>
                             ) : null}
                             {renderHeader ? (
                                 <button
