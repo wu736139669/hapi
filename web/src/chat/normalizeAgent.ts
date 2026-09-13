@@ -171,12 +171,17 @@ function normalizeCodexTokenUsage(value: unknown, data?: Record<string, unknown>
         // Codex `inputTokens` already includes cached input tokens; expose cache
         // hits for display, but use `context_tokens` to avoid double-counting.
         cache_creation_input_tokens: undefined,
-        cache_read_input_tokens: asNumber(
-            usageSource.cachedInputTokens
-            ?? usageSource.cached_input_tokens
-            ?? usageSource.cacheReadInputTokens
-            ?? usageSource.cache_read_input_tokens
-        ) ?? undefined,
+        // OpenCode's native cache counter is cumulative session accounting;
+        // never show it as the current context cache, even when the same
+        // payload also carries an explicit contextTokens value.
+        cache_read_input_tokens: isOpenCodeNativeUsage
+            ? undefined
+            : asNumber(
+                usageSource.cachedInputTokens
+                ?? usageSource.cached_input_tokens
+                ?? usageSource.cacheReadInputTokens
+                ?? usageSource.cache_read_input_tokens
+            ) ?? undefined,
         context_tokens: explicitContextTokens
             ?? asNumber(usageSource.contextTokens ?? usageSource.context_tokens)
             ?? inputTokens,
