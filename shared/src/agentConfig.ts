@@ -111,7 +111,6 @@ export function resolveHapiYoloPermissionMode(flavor: AgentFlavor): PermissionMo
         case 'kimi':
         case 'opencode':
             return 'yolo'
-        case 'dsh':
         case 'pi':
             return null
     }
