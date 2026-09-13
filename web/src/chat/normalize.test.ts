@@ -1313,6 +1313,59 @@ describe('normalizeDecryptedMessage', () => {
         })
     })
 
+    it('does not use OpenCode native cumulative accounting as context usage', () => {
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'token_count',
+                    model: 'opencode-go/deepseek-v4.1-flash',
+                    usageSchema: 'hapi.usage.v1',
+                    info: {
+                        total: {
+                            inputTokens: 29_950_475,
+                            outputTokens: 34_566,
+                            cachedInputTokens: 29_600_640
+                        }
+                    }
+                }
+            }
+        })
+
+        // OpenCode sends the live context in a separate usage_update event;
+        // this prompt accounting row must not make the composer show 30M.
+        expect(normalizeDecryptedMessage(message)).toBeNull()
+    })
+
+    it('keeps OpenCode context-only usage when contextTokens is explicit', () => {
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'codex',
+                data: {
+                    type: 'token_count',
+                    model: 'opencode-go/deepseek-v4.1-flash',
+                    usageSchema: 'hapi.usage.v1',
+                    info: {
+                        total: { inputTokens: 0, outputTokens: 0 },
+                        contextTokens: 406_267,
+                        modelContextWindow: 1_000_000
+                    }
+                }
+            }
+        })
+
+        expect(normalizeDecryptedMessage(message)).toMatchObject({
+            usage: {
+                input_tokens: 0,
+                output_tokens: 0,
+                context_tokens: 406_267,
+                context_window: 1_000_000
+            }
+        })
+    })
+
     it('normalizes Codex context_compacted as a compact event', () => {
         const message = makeMessage({
             role: 'agent',

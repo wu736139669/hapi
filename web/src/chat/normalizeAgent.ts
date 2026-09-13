@@ -124,6 +124,26 @@ function normalizeCodexTokenUsage(value: unknown, data?: Record<string, unknown>
     const info = isObject(value) ? value : null
     if (!info) return null
     const scope = data && isObject(data.scope) ? data.scope : null
+    // OpenCode's native prompt response exposes provider accounting under
+    // `info.tokens`. Those counters are cumulative billing totals (for
+    // example, `input=30M`, `cache.read=29M`), not the live context size.
+    // Context size is delivered separately by ACP `usage_update` events. Do
+    // not let a prompt accounting snapshot replace that context-only event in
+    // the status bar; otherwise a long OpenCode session appears to have a
+    // 30M-token context even though its actual context is ~400k.
+    const model = asString(data?.model)?.trim().toLowerCase() ?? ''
+    const isOpenCodeNativeUsage = data?.usageSchema === 'hapi.usage.v1'
+        && (data?.flavor === 'opencode' || model.startsWith('opencode-'))
+    const explicitContextTokens = asNumber(
+        info.contextTokens
+        ?? info.context_tokens
+    )
+    if (isOpenCodeNativeUsage && explicitContextTokens === null
+        && !isObject(info.last)
+        && !isObject(info.lastTokenUsage)
+        && !isObject(info.last_token_usage)) {
+        return null
+    }
     // Codex reports both:
     // - `total`: cumulative usage for the whole session (can be millions).
     // - `last`: current turn/request usage, which matches the live context bar.
@@ -157,12 +177,9 @@ function normalizeCodexTokenUsage(value: unknown, data?: Record<string, unknown>
             ?? usageSource.cacheReadInputTokens
             ?? usageSource.cache_read_input_tokens
         ) ?? undefined,
-        context_tokens: asNumber(
-            info.contextTokens
-            ?? info.context_tokens
-            ?? usageSource.contextTokens
-            ?? usageSource.context_tokens
-        ) ?? inputTokens,
+        context_tokens: explicitContextTokens
+            ?? asNumber(usageSource.contextTokens ?? usageSource.context_tokens)
+            ?? inputTokens,
         context_window: asNumber(info.modelContextWindow ?? info.model_context_window) ?? undefined,
         thread_id: asString(
             data?.thread_id
