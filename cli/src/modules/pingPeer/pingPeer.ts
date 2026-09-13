@@ -9,6 +9,7 @@
  */
 
 import axios, { type AxiosInstance } from 'axios'
+import { randomUUID } from 'node:crypto'
 import { extractAssistantPlainText, isObject } from '@hapi/protocol'
 import { normalizeSessionIdPrefix } from '@hapi/protocol/sessionCitation'
 import { configuration } from '@/configuration'
@@ -345,11 +346,16 @@ async function sendMessage(
     jwt: string,
     sessionId: string,
     message: string,
+    localId: string,
     http: AxiosInstance
 ): Promise<void> {
     const response = await http.post(
         `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages`,
-        { text: message },
+        // Peer handoffs are queued by the target launcher when it is already
+        // running. Keep a durable localId so the hub leaves invoked_at NULL
+        // until the CLI actually dispatches the queued item and acknowledges
+        // it via messages-consumed.
+        { text: message, localId },
         {
             headers: authHeaders(jwt),
             timeout: 30_000,
@@ -516,7 +522,7 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
     }
 
     onProgress?.(`sending message (${message.length} chars)...`)
-    await sendMessage(apiUrl, jwt, matched.id, message, http)
+    await sendMessage(apiUrl, jwt, matched.id, message, `peer-${randomUUID()}`, http)
 
     return {
         sessionId: matched.id,

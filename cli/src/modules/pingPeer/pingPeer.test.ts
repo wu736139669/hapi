@@ -80,7 +80,8 @@ describe('pingPeer', () => {
                     return { status: 200, data: { token: 'jwt' } }
                 }
                 if (url.endsWith(`/api/sessions/${sessionId}/messages`)) {
-                    expect(body).toEqual({ text: 'hello peer' })
+                    expect(body).toMatchObject({ text: 'hello peer' })
+                    expect((body as { localId?: unknown }).localId).toMatch(/^peer-[0-9a-f-]{36}$/)
                     return { status: 200, data: { ok: true } }
                 }
                 throw new Error(`unexpected POST ${url}`)
