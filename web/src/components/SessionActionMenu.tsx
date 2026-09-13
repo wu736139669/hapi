@@ -26,6 +26,7 @@ type SessionActionMenuProps = {
     onSetPinMode?: (mode: 'none' | 'project' | 'global') => void
     sessionPersonalPinned?: boolean
     onSetPersonalPinned?: (pinned: boolean) => void
+    onMarkUnread?: () => void
     onExport?: () => void
     onStudio?: () => void
     onSessionShare?: () => void

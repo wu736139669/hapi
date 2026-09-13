@@ -1,7 +1,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { ApiClient } from '@/api/client'
 import type { ClaudeLocalSessionSummary, CodexDuplicateSessionGroup, CodexLocalSessionSummary, DshLocalSessionSummary, Machine, PiLocalSessionSummary } from '@/types/api'
-import type { CodexCollaborationMode, GrokPermissionMode, PermissionMode, CopilotAgentMode } from '@hapi/protocol'
+import { CREATABLE_AGENT_FLAVORS, type CodexCollaborationMode, type GrokPermissionMode, type PermissionMode, type CopilotAgentMode } from '@hapi/protocol'
 import { codexModelAdvertisesFastTier } from '@/components/AssistantChat/codexFastMode'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useMachinePathsExists } from '@/hooks/useMachinePathsExists'
@@ -290,7 +290,7 @@ export function NewSession(props: {
         setCollaborationMode(draft.collaborationMode)
         setCopilotAgentMode(draft.copilotAgentMode)
         setYoloMode(draft.yoloMode)
-        setCodexFamilyPermissionMode(draft.codexFamilyPermissionMode)
+        setCodexFamilyPermissionMode(draft.codexFamilyPermissionMode ?? 'default')
         setGrokPermissionMode(draft.grokPermissionMode)
         setSessionType(draft.sessionType)
         setWorktreeName(draft.worktreeName)
@@ -1730,7 +1730,7 @@ export function NewSession(props: {
         setError(null)
         try {
             const existsResult = await checkPathsExists([trimmedDirectory])
-            const directoryExists = existsResult[trimmedDirectory]
+            const directoryExists = existsResult.exists?.[trimmedDirectory]
 
             if (sessionType === 'worktree' && directoryExists === false) {
                 haptic.notification('error')
@@ -2035,6 +2035,7 @@ export function NewSession(props: {
             />
             <AgentSelector
                 agent={agent}
+                agents={CREATABLE_AGENT_FLAVORS}
                 isDisabled={isFormDisabled}
                 onAgentChange={handleAgentChange}
             />

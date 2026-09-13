@@ -121,6 +121,8 @@ export function SessionRowSummary(props: {
     machineLabel?: string
     /** Whether the owner has an active collaborative share for this session. */
     shared?: boolean
+    /** Optional list version supplied by session-list tests/virtualized callers. */
+    lastSeenVersion?: number
 }) {
     const {
         session: s,

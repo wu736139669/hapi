@@ -6,12 +6,17 @@ import { DSH_PERMISSION_MODES } from '@hapi/protocol'
 import type { CommandDefinition } from './types'
 import { parseRemoteAgentCommandOptions } from './agentCommandOptions'
 
+export function parseDshCommandOptions(commandArgs: string[]) {
+    const options = parseRemoteAgentCommandOptions(commandArgs, DSH_PERMISSION_MODES)
+    return { ...options, startingMode: 'remote' as const }
+}
+
 export const dshCommand: CommandDefinition = {
     name: 'dsh',
     requiresRuntimeAssets: false,
     run: async ({ commandArgs }) => {
         try {
-            const options = parseRemoteAgentCommandOptions(commandArgs, DSH_PERMISSION_MODES)
+            const options = parseDshCommandOptions(commandArgs)
             await initializeToken()
             await maybeAutoStartServer()
             await authAndSetupMachineIfNeeded()

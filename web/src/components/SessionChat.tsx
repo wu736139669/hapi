@@ -4,10 +4,12 @@ import { useNavigate } from '@tanstack/react-router'
 import { PRESERVE_SESSION_SIDEBAR_SCROLL } from '@/lib/sessionNavigation'
 import { AssistantRuntimeProvider, useAui, useAuiState } from '@assistant-ui/react'
 import { DragDropZone } from '@/components/AssistantChat/DragDropZone'
-import type { ApiClient } from '@/api/client'
+import { ApiError, type ApiClient } from '@/api/client'
 import type {
+    AgyModelSummary,
     AttachmentMetadata,
     CodexCollaborationMode,
+    CodexModelSummary,
     CopilotAgentMode,
     DecryptedMessage,
     PermissionMode,
@@ -78,6 +80,7 @@ import {
     type AttachmentDraftInput,
 } from '@/lib/composer-attachment-drafts'
 import { useTranslation } from '@/lib/use-translation'
+import { queryKeys } from '@/lib/query-keys'
 import type { SendMessageAcceptance, SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
 import { handoffComposerDraft, transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { SessionHeader } from '@/components/SessionHeader'
@@ -120,6 +123,42 @@ import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
 import { useOptionalAppContext } from '@/lib/app-context'
 
 type SessionModelSelection = { provider: string; modelId: string } | string | null
+
+export function opencodeEffortOptionsInvalidationKey(
+    agentFlavor: string | null | undefined,
+    sessionId: string
+): readonly unknown[] | null {
+    return agentFlavor === 'opencode' ? queryKeys.sessionOpencodeReasoningEffortOptions(sessionId) : null
+}
+
+export function isRewindForkFallbackError(error: unknown): boolean {
+    return error instanceof ApiError && error.code === 'ambiguous_native_boundary_fork_safe'
+}
+
+export function buildAgyComposerModelOptions(
+    availableModels: AgyModelSummary[]
+): Array<{ value: string; label: string }> | undefined {
+    if (availableModels.length === 0) return undefined
+    return availableModels.map((model) => ({ value: model.modelId, label: model.name ?? model.modelId }))
+}
+
+export function shouldClearReasoningEffortForModelChange(args: {
+    agentFlavor: string | null | undefined
+    previousModelReasoningEffort: string | null
+    codexModels: readonly CodexModelSummary[]
+    model: SessionModelSelection
+}): boolean {
+    if (!args.previousModelReasoningEffort || args.agentFlavor === 'opencode') return false
+    return args.agentFlavor === 'codex' && supportsCodexReasoningEffort(args.codexModels, args.model, args.previousModelReasoningEffort) === false
+}
+
+export function mergeStagedAttachmentsInOrder(
+    attachments: readonly AttachmentMetadata[],
+    staged: readonly AttachmentMetadata[]
+): AttachmentMetadata[] {
+    const stagedById = new Map(staged.map((attachment) => [attachment.id, attachment]))
+    return attachments.map((attachment) => stagedById.get(attachment.id) ?? attachment)
+}
 
 export function resolvePiContextWindow(
     models: PiModelSummary[] | undefined,

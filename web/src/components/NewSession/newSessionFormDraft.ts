@@ -25,7 +25,8 @@ export type NewSessionFormDraft = {
     collaborationMode: CodexCollaborationMode
     copilotAgentMode: CopilotAgentMode
     yoloMode: boolean
-    nativePermissionMode: PermissionMode
+    codexFamilyPermissionMode?: PermissionMode
+    nativePermissionMode?: PermissionMode
     grokPermissionMode: GrokPermissionMode
     sessionType: SessionType
     worktreeName: string
@@ -74,6 +75,12 @@ export function loadNewSessionFormDraft(): NewSessionFormDraft | null {
                 ? normalizeCopilotAgentMode(parsed.copilotAgentMode)
                 : 'interactive',
             yoloMode: Boolean(parsed.yoloMode),
+            codexFamilyPermissionMode: (() => {
+                const modes = getLaunchPermissionModesForFlavor(restoredAgent)
+                const parsedMode = parsed.codexFamilyPermissionMode as PermissionMode | undefined
+                if (agentPreserved && parsedMode && modes.includes(parsedMode)) return parsedMode
+                return 'default'
+            })(),
             nativePermissionMode: (() => {
                 const modes = getLaunchPermissionModesForFlavor(restoredAgent)
                 const parsedMode = parsed.nativePermissionMode as PermissionMode | undefined

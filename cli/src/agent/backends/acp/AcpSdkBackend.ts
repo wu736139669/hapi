@@ -42,6 +42,7 @@ type OpenCodeNativePromptOptions = {
 
 type BunFetchInit = RequestInit & { timeout?: false };
 
+
 export type AcpModelDescriptor = {
     modelId: string;
     name?: string;
@@ -92,14 +93,21 @@ export class AcpSdkBackend implements AgentBackend {
     private initializeInFlight: Promise<void> | null = null;
     private setModeSupported: boolean | undefined = undefined;
     private isProcessingMessage = false;
-    private activePromptRequests = 0;
     private promptRequestInFlight = false;
+    /** Concurrent session/prompt requests (main prompt + soft steers). */
+    private activePromptRequests = 0;
+    /** Foreground prompt only; soft steers are excluded after Abort. */
+    private foregroundPromptRequests = 0;
+    /** Bumped by abortSoftSteers; stale finishes from cancelled requests are dropped. */
+    private promptRequestEpoch = 0;
+    /** Incremented for each foreground prompt turn, including retry-wrapped turns. */
+    private promptGeneration = 0;
     private responseCompleteResolvers: Array<() => void> = [];
     private lastSessionUpdateAt = 0;
     private latestUsageUpdate: AcpUsageUpdate | null = null;
-    private promptUsageCallback: ((msg: AgentMessage) => void) | null = null;
     private nativePromptAbortController: AbortController | null = null;
     private nativePromptAbortOptions: OpenCodeNativePromptOptions | null = null;
+    private promptUsageCallback: ((msg: AgentMessage) => void) | null = null;
     private usageUpdateListener: ((msg: AgentMessage) => void) | null = null;
     private sessionInfoUpdateListener: ((update: AcpSessionInfoUpdate) => void) | null = null;
     /** Fired on foreground ACP state / permission so launchers can bump hub thinking (#1470). */
@@ -403,17 +411,57 @@ export class AcpSdkBackend implements AgentBackend {
         // exposed as `unstable_setSessionModel` but the JSON-RPC method on the wire
         // is unprefixed). Errors (including JSON-RPC 'method not found') propagate
         // as rejections from the transport; the launcher's catch block handles them.
-        const response = await this.transport.sendRequest('session/set_model', {
-            sessionId,
-            modelId
-        });
+        let configOptionResponse: unknown;
+        let usedConfigOption = false;
+        if (opts?.flavor === 'opencode') {
+            // OpenCode's `session/set_model` response only carries an opaque
+            // `_meta` block with no `configOptions`, so the per-session
+            // thought_level options captured at session/new go stale after an
+            // inline switch. `session/set_config_option` with configId "model"
+            // (OpenCode's fixed id for the model picker) echoes fresh
+            // `configOptions` including thought_level for the new model.
+            try {
+                configOptionResponse = await this.transport.sendRequest('session/set_config_option', {
+                    sessionId,
+                    configId: 'model',
+                    value: modelId
+                });
+                usedConfigOption = true;
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                // Older OpenCode builds predate set_config_option — fall back to
+                // the legacy set_model path below. Any other error propagates to
+                // the launcher's existing catch handling.
+                if (!/method not found/i.test(message)) {
+                    throw error;
+                }
+            }
+        }
 
-        if (opts?.flavor === 'opencode' || opts?.flavor === 'grok') {
+        const response = usedConfigOption
+            ? configOptionResponse
+            : await this.transport.sendRequest('session/set_model', {
+                sessionId,
+                modelId
+            });
+
+        if (usedConfigOption) {
+            this.captureSessionMetadata(sessionId, response);
+        } else if (opts?.flavor === 'opencode' || opts?.flavor === 'grok') {
             // OpenCode's set_model response only carries an opaque `_meta` block,
             // not `availableModels`/`currentModelId`. Optimistically update the
             // cached currentModelId (the call succeeded, so the agent has switched)
             // while preserving the availableModels list captured from session/new.
             this.updateCurrentModelOptimistic(sessionId, modelId);
+            if (opts.flavor === 'opencode') {
+                const options = this.sessionConfigOptions.get(sessionId);
+                if (options) {
+                    this.sessionConfigOptions.set(
+                        sessionId,
+                        options.filter((option) => option.category !== 'thought_level')
+                    );
+                }
+            }
         } else {
             // For other flavors (e.g. Gemini), if the response carries metadata,
             // capture it. Missing fields are silently ignored.
@@ -667,7 +715,9 @@ export class AcpSdkBackend implements AgentBackend {
             textChunkMode: this.options.textChunkMode,
             flavor: this.options.flavor,
         });
-        this.beginPromptRequest();
+        this.promptGeneration++;
+        this.foregroundPromptRequests++;
+        const promptRequestEpoch = this.beginPromptRequest();
         this.lastSessionUpdateAt = Date.now();
         this.latestUsageUpdate = null;
         this.lastForwardedUsageUpdate = null;
@@ -735,7 +785,14 @@ export class AcpSdkBackend implements AgentBackend {
                 }
             } finally {
                 this.promptUsageCallback = null;
-                this.finishPromptRequest();
+                this.foregroundPromptRequests = Math.max(0, this.foregroundPromptRequests - 1);
+                if (promptRequestEpoch !== this.promptRequestEpoch) {
+                    this.activePromptRequests = Math.max(0, this.activePromptRequests - 1);
+                    this.isProcessingMessage = this.activePromptRequests > 0;
+                    if (!this.isProcessingMessage) this.notifyResponseComplete();
+                } else {
+                    this.finishPromptRequest(promptRequestEpoch);
+                }
             }
         }
     }
@@ -744,15 +801,12 @@ export class AcpSdkBackend implements AgentBackend {
         const nativeController = this.nativePromptAbortController;
         const nativeOptions = this.nativePromptAbortOptions;
         if (nativeController && nativeOptions) {
-            // OpenCode's ACP implementation does not expose session/cancel,
-            // but its native HTTP API does. Abort the server-side turn first,
-            // then release the local fetch so the launcher can leave remote
-            // mode without waiting for the provider response.
             const url = `${nativeOptions.baseUrl}/session/${encodeURIComponent(sessionId)}/abort?directory=${encodeURIComponent(nativeOptions.directory)}`;
             void fetch(url, { method: 'POST' }).catch(() => undefined);
             nativeController.abort();
             return;
         }
+
         if (!this.transport) {
             return;
         }
@@ -779,14 +833,14 @@ export class AcpSdkBackend implements AgentBackend {
             throw new Error('No active ACP prompt to soft-steer into');
         }
 
-        this.beginPromptRequest();
+        const promptRequestEpoch = this.beginPromptRequest();
         try {
             await this.transport.sendRequest('session/prompt', {
                 sessionId,
                 prompt: content
             }, { timeoutMs: Infinity });
         } finally {
-            this.finishPromptRequest();
+            this.finishPromptRequest(promptRequestEpoch);
         }
     }
 
@@ -807,11 +861,11 @@ export class AcpSdkBackend implements AgentBackend {
         }
 
         const transport = this.transport;
-        this.beginPromptRequest();
+        const promptRequestEpoch = this.beginPromptRequest();
         const request = transport.sendRequestWithDispatch('session/prompt', {
             sessionId,
             prompt: content
-        }, { timeoutMs: Infinity });
+        }, { timeoutMs: Infinity, dispatchTimeoutMs: 20_000 });
         const completed = (async () => {
             try {
                 await request.completed;
@@ -825,7 +879,7 @@ export class AcpSdkBackend implements AgentBackend {
                     await this.drainLateBuffers();
                     this.messageHandler?.drainBuffers();
                 } finally {
-                    this.finishPromptRequest();
+                    this.finishPromptRequest(promptRequestEpoch);
                 }
             }
         })();
@@ -945,6 +999,10 @@ export class AcpSdkBackend implements AgentBackend {
         return this.promptRequestInFlight;
     }
 
+    getPromptGeneration(): number {
+        return this.promptGeneration;
+    }
+
     getLastSessionUpdateAt(): number {
         return this.lastSessionUpdateAt;
     }
@@ -976,6 +1034,7 @@ export class AcpSdkBackend implements AgentBackend {
         this.messageHandler = null;
         this.activeSessionId = null;
         this.activePromptRequests = 0;
+        this.foregroundPromptRequests = 0;
         this.isProcessingMessage = false;
         this.sessionModelsMetadata.clear();
         this.initialAvailableCommands.clear();
@@ -1256,12 +1315,35 @@ export class AcpSdkBackend implements AgentBackend {
         return await responsePromise;
     }
 
-    private beginPromptRequest(): void {
+    private beginPromptRequest(): number {
         this.activePromptRequests++;
         this.isProcessingMessage = true;
+        return this.promptRequestEpoch;
     }
 
-    private finishPromptRequest(): void {
+    /**
+     * Force-settle soft-steer bookkeeping without waiting for the concurrent
+     * `session/prompt` to finish. Called on abort: the in-flight turn is
+     * cancelled anyway, so a pending soft steer may never complete; dropping
+     * its counter keeps {@link waitForResponseComplete} from blocking the next
+     * turn. Bumps the epoch so a stale finish from a cancelled request cannot
+     * decrement a newer prompt's counter.
+     */
+    abortSoftSteers(): void {
+        this.messageHandler?.drainBuffers();
+        this.messageHandler?.deactivate?.();
+        this.promptRequestEpoch++;
+        this.activePromptRequests = this.foregroundPromptRequests;
+        this.isProcessingMessage = this.activePromptRequests > 0;
+        if (!this.isProcessingMessage) {
+            this.notifyResponseComplete();
+        }
+    }
+
+    private finishPromptRequest(epoch: number): void {
+        if (epoch !== this.promptRequestEpoch) {
+            return;
+        }
         this.activePromptRequests = Math.max(0, this.activePromptRequests - 1);
         this.isProcessingMessage = this.activePromptRequests > 0;
         if (!this.isProcessingMessage) {
@@ -1307,37 +1389,28 @@ export class AcpSdkBackend implements AgentBackend {
     }
 
     private extractPromptUsage(response: unknown): AcpPromptUsage | null {
-        if (!isObject(response)) return null;
-        // ACP returns a top-level `usage` object. OpenCode's native HTTP
-        // prompt returns the same counters under `info.tokens` instead.
-        const usage = isObject(response.usage)
-            ? response.usage
-            : isObject(response.info) && isObject(response.info.tokens)
-                ? response.info.tokens
-                : null;
-        if (!usage) return null;
-        const inputTokens = this.asFiniteNumber(usage.inputTokens ?? usage.input_tokens ?? usage.input);
-        const outputTokens = this.asFiniteNumber(usage.outputTokens ?? usage.output_tokens ?? usage.output);
+        if (!isObject(response) || !isObject(response.usage)) return null;
+        const usage = response.usage;
+        const inputTokens = this.asFiniteNumber(usage.inputTokens ?? usage.input_tokens);
+        const outputTokens = this.asFiniteNumber(usage.outputTokens ?? usage.output_tokens);
         if (inputTokens === null || outputTokens === null) return null;
 
         return {
             inputTokens,
             outputTokens,
-            totalTokens: this.asFiniteNumber(usage.totalTokens ?? usage.total_tokens ?? usage.total) ?? undefined,
-            thoughtTokens: this.asFiniteNumber(usage.thoughtTokens ?? usage.thought_tokens ?? usage.reasoning) ?? undefined,
+            totalTokens: this.asFiniteNumber(usage.totalTokens ?? usage.total_tokens) ?? undefined,
+            thoughtTokens: this.asFiniteNumber(usage.thoughtTokens ?? usage.thought_tokens) ?? undefined,
             cacheReadTokens: this.asFiniteNumber(
                 usage.cachedReadTokens
                 ?? usage.cached_read_tokens
                 ?? usage.cachedInputTokens
                 ?? usage.cached_input_tokens
-                ?? (isObject(usage.cache) ? usage.cache.read : undefined)
             ) ?? undefined,
             cacheCreationTokens: this.asFiniteNumber(
                 usage.cachedWriteTokens
                 ?? usage.cached_write_tokens
                 ?? usage.cacheCreationInputTokens
                 ?? usage.cache_creation_input_tokens
-                ?? (isObject(usage.cache) ? usage.cache.write : undefined)
             ) ?? undefined
         };
     }

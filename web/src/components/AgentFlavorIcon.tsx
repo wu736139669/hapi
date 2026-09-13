@@ -21,7 +21,6 @@ const FLAVOR_LOGOS: Record<string, IconType> = {
     agy: AntigravityColor,
     claude: ClaudeColor,
     codex: CodexColor,
-    dsh: DeepSeekColor,
     cursor: CursorMono,
     dsh: DeepSeekColor,
     gemini: GeminiColor,

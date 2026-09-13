@@ -174,6 +174,11 @@ export function getPermissionModesForFlavor(flavor?: string | null): readonly Pe
     return CLAUDE_PERMISSION_MODES
 }
 
+/** New Codex sessions use the native shared runtime, without HAPI Safe Yolo. */
+export function getLaunchPermissionModesForFlavor(flavor?: string | null): readonly PermissionMode[] {
+    return getPermissionModesForFlavor(flavor).filter(mode => flavor !== 'codex' || mode !== 'safe-yolo')
+}
+
 export function getPermissionModeOptionsForFlavor(flavor?: string | null): PermissionModeOption[] {
     return getPermissionModesForFlavor(flavor).map((mode) => ({
         mode,
