@@ -1389,28 +1389,39 @@ export class AcpSdkBackend implements AgentBackend {
     }
 
     private extractPromptUsage(response: unknown): AcpPromptUsage | null {
-        if (!isObject(response) || !isObject(response.usage)) return null;
-        const usage = response.usage;
-        const inputTokens = this.asFiniteNumber(usage.inputTokens ?? usage.input_tokens);
-        const outputTokens = this.asFiniteNumber(usage.outputTokens ?? usage.output_tokens);
+        if (!isObject(response)) return null;
+        // ACP responses expose usage as `usage`; OpenCode's native HTTP
+        // endpoint returns the equivalent counters under `info.tokens`.
+        // Normalize both wire shapes so native variant prompts contribute to
+        // the same token dashboard as regular ACP prompts.
+        const usage = isObject(response.usage)
+            ? response.usage
+            : isObject(response.info) && isObject(response.info.tokens)
+                ? response.info.tokens
+                : null;
+        if (!usage) return null;
+        const inputTokens = this.asFiniteNumber(usage.inputTokens ?? usage.input_tokens ?? usage.input);
+        const outputTokens = this.asFiniteNumber(usage.outputTokens ?? usage.output_tokens ?? usage.output);
         if (inputTokens === null || outputTokens === null) return null;
 
         return {
             inputTokens,
             outputTokens,
-            totalTokens: this.asFiniteNumber(usage.totalTokens ?? usage.total_tokens) ?? undefined,
-            thoughtTokens: this.asFiniteNumber(usage.thoughtTokens ?? usage.thought_tokens) ?? undefined,
+            totalTokens: this.asFiniteNumber(usage.totalTokens ?? usage.total_tokens ?? usage.total) ?? undefined,
+            thoughtTokens: this.asFiniteNumber(usage.thoughtTokens ?? usage.thought_tokens ?? usage.reasoning) ?? undefined,
             cacheReadTokens: this.asFiniteNumber(
                 usage.cachedReadTokens
                 ?? usage.cached_read_tokens
                 ?? usage.cachedInputTokens
                 ?? usage.cached_input_tokens
+                ?? (isObject(usage.cache) ? usage.cache.read : undefined)
             ) ?? undefined,
             cacheCreationTokens: this.asFiniteNumber(
                 usage.cachedWriteTokens
                 ?? usage.cached_write_tokens
                 ?? usage.cacheCreationInputTokens
                 ?? usage.cache_creation_input_tokens
+                ?? (isObject(usage.cache) ? usage.cache.write : undefined)
             ) ?? undefined
         };
     }
