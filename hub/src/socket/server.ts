@@ -17,7 +17,10 @@ import type { CliSocketWithData, SocketData, SocketServer } from './socketTypes'
 
 const jwtPayloadSchema = z.object({
     uid: z.number(),
-    ns: z.string()
+    ns: z.string(),
+    sid: z.string().min(1).optional(),
+    role: z.literal('session-guest').optional(),
+    sht: z.string().min(1).optional()
 })
 
 const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60_000
@@ -151,6 +154,9 @@ export function createSocketServer(deps: SocketServerDeps): {
             }
             socket.data.userId = parsed.data.uid
             socket.data.namespace = parsed.data.ns
+            if (parsed.data.role === 'session-guest') {
+                return next(new Error('Guest terminal access is disabled'))
+            }
             next()
             return
         } catch {

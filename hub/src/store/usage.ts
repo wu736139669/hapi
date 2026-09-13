@@ -26,6 +26,7 @@ export type UsageScanState = {
 }
 
 type UsageEventRow = {
+    namespace: string
     session_id: string
     source_key: string
     source_seq: number
@@ -66,6 +67,7 @@ function toUsageEvent(row: UsageEventRow): UsageEvent {
 export function recordUsageScan(
     db: Database,
     sessionId: string,
+    namespace: string,
     messageEpoch: number,
     lastSeq: number,
     events: UsageEvent[],
@@ -79,6 +81,7 @@ export function recordUsageScan(
         if (events.length > 0) {
             const statement = db.prepare(`
                 INSERT INTO usage_events (
+                    namespace,
                     session_id,
                     source_key,
                     source_seq,
@@ -95,6 +98,7 @@ export function recordUsageScan(
                     last_cache_read_tokens,
                     last_cache_creation_tokens
                 ) VALUES (
+                    @namespace,
                     @session_id,
                     @source_key,
                     @source_seq,
@@ -113,6 +117,7 @@ export function recordUsageScan(
                 )
                 ON CONFLICT(session_id, source_key)
                 DO UPDATE SET
+                    namespace = excluded.namespace,
                     source_seq = excluded.source_seq,
                     created_at = excluded.created_at,
                     agent = excluded.agent,
@@ -138,6 +143,7 @@ export function recordUsageScan(
 
             for (const event of events) {
                 statement.run({
+                    namespace,
                     session_id: event.sessionId,
                     source_key: event.sourceKey,
                     source_seq: event.sourceSeq,
@@ -161,9 +167,10 @@ export function recordUsageScan(
         }
 
         db.prepare(`
-            INSERT INTO usage_scan_state (session_id, message_epoch, last_seq)
-            VALUES (?, ?, ?)
+            INSERT INTO usage_scan_state (namespace, session_id, message_epoch, last_seq)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT(session_id) DO UPDATE SET
+                namespace = excluded.namespace,
                 message_epoch = excluded.message_epoch,
                 last_seq = CASE
                     WHEN usage_scan_state.message_epoch = excluded.message_epoch
@@ -171,7 +178,7 @@ export function recordUsageScan(
                     ELSE excluded.last_seq
                 END
             WHERE excluded.message_epoch >= usage_scan_state.message_epoch
-        `).run(sessionId, messageEpoch, lastSeq)
+        `).run(namespace, sessionId, messageEpoch, lastSeq)
     })()
 }
 
@@ -181,6 +188,7 @@ export function getUsageEvents(db: Database, sessionIds: string[]): UsageEvent[]
     const placeholders = sessionIds.map(() => '?').join(', ')
     const rows = db.prepare(`
         SELECT
+            namespace,
             session_id,
             source_key,
             source_seq,
@@ -200,6 +208,34 @@ export function getUsageEvents(db: Database, sessionIds: string[]): UsageEvent[]
         WHERE session_id IN (${placeholders})
         ORDER BY created_at ASC, source_seq ASC
     `).all(...sessionIds) as UsageEventRow[]
+
+    return rows.map(toUsageEvent)
+}
+
+/** Read usage history for a namespace, including rows whose session was deleted. */
+export function getUsageEventsByNamespace(db: Database, namespace: string): UsageEvent[] {
+    const rows = db.prepare(`
+        SELECT
+            namespace,
+            session_id,
+            source_key,
+            source_seq,
+            created_at,
+            agent,
+            model,
+            kind,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            last_input_tokens,
+            last_output_tokens,
+            last_cache_read_tokens,
+            last_cache_creation_tokens
+        FROM usage_events
+        WHERE namespace = ?
+        ORDER BY created_at ASC, source_seq ASC, session_id ASC, source_key ASC
+    `).all(namespace) as UsageEventRow[]
 
     return rows.map(toUsageEvent)
 }
@@ -226,6 +262,7 @@ export function transferUsageSession(db: Database, fromSessionId: string, toSess
     db.transaction(() => {
         db.prepare(`
             INSERT OR IGNORE INTO usage_events (
+                namespace,
                 session_id,
                 source_key,
                 source_seq,
@@ -244,6 +281,7 @@ export function transferUsageSession(db: Database, fromSessionId: string, toSess
             )
             SELECT
                 ?,
+                COALESCE((SELECT namespace FROM sessions WHERE id = ?), usage_events.namespace),
                 source_key,
                 source_seq,
                 created_at,
@@ -260,7 +298,7 @@ export function transferUsageSession(db: Database, fromSessionId: string, toSess
                 last_cache_creation_tokens
             FROM usage_events
             WHERE session_id = ?
-        `).run(toSessionId, fromSessionId)
+        `).run(toSessionId, toSessionId, fromSessionId)
         db.prepare('DELETE FROM usage_events WHERE session_id = ?').run(fromSessionId)
         db.prepare('DELETE FROM usage_scan_state WHERE session_id IN (?, ?)').run(fromSessionId, toSessionId)
     })()

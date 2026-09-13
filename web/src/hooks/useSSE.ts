@@ -696,12 +696,6 @@ export function useSSE(options: {
                 if (event.type === 'messages-consumed') {
                     markMessagesConsumed(event.sessionId, event.localIds, event.invokedAt, event.steered)
                 }
-                if (event.type === 'messages-indeterminate') {
-                    markMessagesIndeterminate(event.sessionId, event.localIds)
-                }
-                if (event.type === 'messages-requeued') {
-                    markMessagesRequeued(event.sessionId, event.localIds)
-                }
                 if (event.type === 'message-cancelled') {
                     removeOptimisticMessage(event.sessionId, event.messageId)
                 }
@@ -711,14 +705,6 @@ export function useSSE(options: {
 
             if (event.type === 'messages-consumed') {
                 markMessagesConsumed(event.sessionId, event.localIds, event.invokedAt, event.steered)
-            }
-
-            if (event.type === 'messages-indeterminate') {
-                markMessagesIndeterminate(event.sessionId, event.localIds)
-            }
-
-            if (event.type === 'messages-requeued') {
-                markMessagesRequeued(event.sessionId, event.localIds)
             }
 
             if (event.type === 'message-cancelled') {

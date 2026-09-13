@@ -171,7 +171,7 @@ type DuplicateSessionGroupCandidate = {
 const CODEX_DESKTOP_NOT_FOUND_ERROR = '尝试重启codex客户端失败，未安装/找不到codex客户端'
 const SCRIPT_TIMEOUT_ERROR = '执行超时'
 const NO_SYNC_SESSION_SELECTED_ERROR = '未选择需要导入的 Codex 会话'
-const CODEX_TRANSCRIPT_IMPORT_NAMESPACE_ERROR = 'Codex transcript import is not available outside the default namespace'
+const CODEX_DESKTOP_CONTROL_NAMESPACE_ERROR = 'Codex Desktop control is not available outside the default namespace'
 const DEFAULT_SCRIPT_TIMEOUT_MS = 60_000
 const DEFAULT_CODEX_SESSION_SCAN_LIMIT = 500
 const DARWIN_CODEX_APP_NAME = 'Codex'
@@ -1335,6 +1335,9 @@ async function mergeSingleDuplicateCodexSessionGroup(options: {
             latestActivity = Math.max(latestActivity, copied.invokedAt ?? copied.createdAt)
         }
 
+        // Preserve indexed token history when deduplication removes a source
+        // session. The usage ledger is independent of the session row.
+        options.store.usage.transferSession(source.sessionId, canonical.sessionId)
         if (engine) {
             await engine.deleteSession(source.sessionId)
         } else {
@@ -2191,16 +2194,6 @@ export function createCodexDesktopRoutes(options: {
 }): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
-    app.use('/codex/*', async (c, next) => {
-        if (c.get('namespace') !== 'default') {
-            return c.json({
-                success: false,
-                error: CODEX_TRANSCRIPT_IMPORT_NAMESPACE_ERROR
-            }, 403)
-        }
-        return next()
-    })
-
     app.get('/codex/status', (c) => {
         const codexStatus = getCodexDesktopStatus()
         return c.json({
@@ -2398,6 +2391,13 @@ export function createCodexDesktopRoutes(options: {
     })
 
     app.post('/codex/restart-desktop', async (c) => {
+        if (c.get('namespace') !== 'default') {
+            return c.json({
+                success: false,
+                error: CODEX_DESKTOP_CONTROL_NAMESPACE_ERROR
+            }, 403)
+        }
+
         const codexStatus = getCodexDesktopStatus()
         if (!codexStatus.clientAvailable) {
             const scriptPath = getRestartScriptPath()

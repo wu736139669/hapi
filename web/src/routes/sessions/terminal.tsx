@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { useParams } from '@tanstack/react-router'
+import { Navigate, useParams } from '@tanstack/react-router'
 import type { Terminal } from '@xterm/xterm'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
@@ -254,9 +254,18 @@ function QuickKeyButton(props: {
 }
 
 export default function TerminalPage() {
+    const { sessionId } = useParams({ from: '/sessions/$sessionId/terminal' })
+    const { isSessionGuest } = useAppContext()
+    if (isSessionGuest) {
+        return <Navigate to="/sessions/$sessionId" params={{ sessionId }} replace />
+    }
+    return <TerminalPageContent sessionId={sessionId} />
+}
+
+function TerminalPageContent(props: { sessionId: string }) {
     const { t } = useTranslation()
     const compactControls = useCompactTerminalControls()
-    const { sessionId } = useParams({ from: '/sessions/$sessionId/terminal' })
+    const sessionId = props.sessionId
     const { api, token, baseUrl } = useAppContext()
     const goBack = useAppGoBack()
     const { session } = useSession(api, sessionId)

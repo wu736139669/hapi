@@ -1,7 +1,6 @@
 import {
     CREATABLE_AGENT_FLAVORS,
-    getLaunchPermissionModesForFlavor,
-    resolveHapiYoloPermissionMode,
+    getPermissionModesForFlavor,
     type PermissionMode
 } from '@hapi/protocol'
 import {
@@ -12,7 +11,7 @@ import {
     type CodexReasoningEffort,
     type LaunchEffort
 } from './types'
-import { LEGACY_YOLO_BRIDGE_AGENTS, usesSharedPermissionModeState } from '@/lib/codexFamilyPermissionAgents'
+import { usesCodexFamilyPermissionModes } from '@/lib/codexFamilyPermissionAgents'
 
 const AGENT_STORAGE_KEY = 'hapi:newSession:agent'
 const YOLO_STORAGE_KEY = 'hapi:newSession:yolo'
@@ -84,9 +83,8 @@ export function loadPreferredLaunchSettings(
             return null
         }
         const permissionMode = typeof parsed.permissionMode === 'string'
-            ? getLaunchPermissionModesForFlavor(agent).includes(parsed.permissionMode as PermissionMode)
-                ? parsed.permissionMode as PermissionMode
-                : 'default'
+            && getPermissionModesForFlavor(agent).includes(parsed.permissionMode as PermissionMode)
+            ? parsed.permissionMode as PermissionMode
             : undefined
         return {
             model: parsed.model,
@@ -130,10 +128,11 @@ function resolvePreferredOptionValue(
 export function resolvePreferredLaunchSettings(
     agent: AgentType,
     preferred: PreferredLaunchSettings | null,
-    legacyYolo = false
+    legacyCodexYolo = false,
+    availableModelValues?: readonly string[]
 ): PreferredLaunchSettings {
     const preferredModel = preferred?.model ?? 'auto'
-    const staticModelValues = MODEL_OPTIONS[agent].map((option) => option.value)
+    const staticModelValues = availableModelValues ?? MODEL_OPTIONS[agent].map((option) => option.value)
     const model = staticModelValues.length > 0 && agent !== 'codex' && agent !== 'copilot'
         ? resolvePreferredOptionValue(preferredModel, staticModelValues, 'auto')
         : preferredModel
@@ -153,18 +152,14 @@ export function resolvePreferredLaunchSettings(
             'default'
         )
         : (preferred?.modelReasoningEffort ?? 'default')
-    const usesSharedPermissionMode = usesSharedPermissionModeState(agent)
-    const availablePermissionModes = getLaunchPermissionModesForFlavor(agent)
+    const supportsCodexFamilyPermissionMode = usesCodexFamilyPermissionModes(agent)
+    const availablePermissionModes = getPermissionModesForFlavor(agent)
     const preferredPermissionMode = preferred?.permissionMode
-    // A removed explicit mode falls back to Default, never to a stale YOLO toggle.
-    const legacyYoloBridgeMode = preferredPermissionMode === undefined && legacyYolo && LEGACY_YOLO_BRIDGE_AGENTS.includes(agent)
-        ? resolveHapiYoloPermissionMode(agent)
-        : null
-    const permissionMode = usesSharedPermissionMode
+    const permissionMode = supportsCodexFamilyPermissionMode
         ? preferredPermissionMode && availablePermissionModes.includes(preferredPermissionMode)
             ? preferredPermissionMode
-            : legacyYoloBridgeMode && availablePermissionModes.includes(legacyYoloBridgeMode)
-                ? legacyYoloBridgeMode
+            : agent === 'codex' && legacyCodexYolo
+                ? 'yolo'
                 : 'default'
         : undefined
 

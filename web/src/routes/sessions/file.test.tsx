@@ -13,13 +13,19 @@ const sampleMarkdown = '# Heading\n\n| Col A | Col B |\n| --- | --- |\n| one | t
 const filePath = 'docs/README.md'
 const encodedPath = encodeBase64(filePath)
 const encodedContent = encodeBase64(sampleMarkdown)
+const htmlPath = 'public/index.html'
+const sampleHtml = '<!doctype html><html><body><h1>Hello HAPI</h1></body></html>'
+const encodedHtml = encodeBase64(sampleHtml)
 const fileSize = 1024
 const fileModified = 1_784_175_060_000
+let activePath = encodedPath
+let activeContent = encodedContent
+let activeDiff: { success: boolean; stdout?: string; error?: string } = { success: true, stdout: '' }
 
 vi.mock('@tanstack/react-router', () => ({
     useParams: () => ({ sessionId: 'session-1' }),
     useSearch: () => ({
-        path: encodedPath,
+        path: activePath,
         staged: undefined,
     }),
 }))
@@ -27,10 +33,10 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('@/lib/app-context', () => ({
     useAppContext: () => ({
         api: {
-            getGitDiffFile: vi.fn(async () => ({ success: true, stdout: '' })),
+            getGitDiffFile: vi.fn(async () => activeDiff),
             readSessionFile: vi.fn(async () => ({
                 success: true,
-                content: encodedContent,
+                content: activeContent,
                 size: fileSize,
                 modified: fileModified,
             })),
@@ -80,6 +86,9 @@ describe('FilePage markdown preview', () => {
         vi.clearAllMocks()
         window.localStorage.clear()
         window.sessionStorage.clear()
+        activePath = encodedPath
+        activeContent = encodedContent
+        activeDiff = { success: true, stdout: '' }
     })
 
     it('renders markdown preview by default and toggles to source', async () => {
@@ -159,5 +168,68 @@ describe('FilePage markdown preview', () => {
         })
         const secondScrollRegion = document.querySelector('[data-hapi-file-scroll="true"]') as HTMLElement
         expect(secondScrollRegion.scrollTop).toBe(123)
+    })
+
+    it('renders HTML files in a sandboxed preview and allows switching to source', async () => {
+        activePath = encodeBase64(htmlPath)
+        activeContent = encodedHtml
+        renderWithProviders()
+
+        const iframe = await screen.findByTitle('HTML preview for index.html')
+        expect(iframe).toHaveAttribute('sandbox', '')
+        expect(iframe.getAttribute('srcdoc')).toContain('<h1>Hello HAPI</h1>')
+        expect(iframe.getAttribute('srcdoc')).toContain(
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        )
+        expect(screen.getByText('Preview sandbox · scripts disabled')).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: 'Source' }))
+        expect(screen.getByRole('code')).toHaveTextContent(sampleHtml)
+        expect(screen.queryByTitle('HTML preview for index.html')).not.toBeInTheDocument()
+    })
+
+    it('does not show a Git diff error above an HTML preview', async () => {
+        activePath = encodeBase64(htmlPath)
+        activeContent = encodedHtml
+        activeDiff = {
+            success: false,
+            error: 'Command failed: git diff --no-ext-diff -- path\nwarning: Not a git repository.\nUse --no-index to compare two paths outside a working tree.'
+        }
+        renderWithProviders()
+
+        expect(await screen.findByTitle('HTML preview for index.html')).toBeInTheDocument()
+        expect(screen.queryByText(/Diff 不可用/)).not.toBeInTheDocument()
+        expect(screen.queryByText(/Not a git repository/)).not.toBeInTheDocument()
+    })
+
+    it('opens an interactive HTML copy in a new tab with responsive viewport metadata', async () => {
+        activePath = encodeBase64(htmlPath)
+        activeContent = encodedHtml
+        const previewDocument = document.implementation.createHTMLDocument('about:blank')
+        const previewWindow = {
+            close: vi.fn(),
+            closed: true,
+            document: previewDocument,
+            opener: window,
+        } as unknown as Window
+        const openMock = vi.spyOn(window, 'open').mockReturnValue(previewWindow)
+        renderWithProviders()
+
+        await screen.findByTitle('HTML preview for index.html')
+        fireEvent.click(screen.getByRole('button', { name: 'Open in new tab' }))
+
+        expect(openMock).toHaveBeenCalledWith('about:blank', '_blank')
+        const frame = previewDocument.querySelector('iframe')
+        const backButton = previewDocument.querySelector('header button')
+        expect(backButton?.textContent).toBe('← Back to HAPI')
+        expect(previewDocument.querySelector('header span')?.textContent).toBe('HTML preview for index.html')
+        expect(frame?.getAttribute('sandbox')).toBe('allow-scripts allow-forms')
+        expect(frame?.getAttribute('referrerpolicy')).toBe('no-referrer')
+        expect(frame?.getAttribute('srcdoc')).toContain('<h1>Hello HAPI</h1>')
+        expect(frame?.getAttribute('srcdoc')).toContain(
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        )
+        expect(previewWindow.opener).toBeNull()
+        openMock.mockRestore()
     })
 })

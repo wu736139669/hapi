@@ -88,23 +88,26 @@ export function AskUserQuestionFooter(props: {
     sessionId: string
     tool: ChatToolCall
     disabled: boolean
+    allowSkip?: boolean
     onDone: () => void
 }) {
     const { t } = useTranslation()
     const { haptic } = usePlatform()
     const permission = props.tool.permission
-    const useStableQuestionIds = isCursorAskQuestionToolName(props.tool.name)
+    const isCursorQuestion = isCursorAskQuestionToolName(props.tool.name)
+    const useStableQuestionIds = isCursorQuestion || props.allowSkip === true
     const parsed = useMemo(() => (
-        useStableQuestionIds
+        isCursorQuestion
             ? parseCursorAskQuestionInput(props.tool.input)
             : parseAskUserQuestionInput(props.tool.input)
-    ), [props.tool.name, props.tool.input, useStableQuestionIds])
+    ), [props.tool.input, isCursorQuestion])
     const questions = parsed.questions
 
     const [step, setStep] = useState(0)
     const [selectedByQuestion, setSelectedByQuestion] = useState<number[][]>([])
     const [otherSelectedByQuestion, setOtherSelectedByQuestion] = useState<boolean[]>([])
     const [otherTextByQuestion, setOtherTextByQuestion] = useState<string[]>([])
+    const [skippedByQuestion, setSkippedByQuestion] = useState<boolean[]>([])
     const [fallbackText, setFallbackText] = useState('')
 
     const [loading, setLoading] = useState(false)
@@ -115,6 +118,7 @@ export function AskUserQuestionFooter(props: {
         setSelectedByQuestion(questions.map(() => []))
         setOtherSelectedByQuestion(questions.map(() => false))
         setOtherTextByQuestion(questions.map(() => ''))
+        setSkippedByQuestion(questions.map(() => false))
         setFallbackText('')
         setLoading(false)
         setError(null)
@@ -165,7 +169,7 @@ export function AskUserQuestionFooter(props: {
             : String(index)
     )
 
-    const submit = async () => {
+    const submit = async (skipQuestionIndex?: number) => {
         if (loading) return
 
         const answers: Record<string, string[]> = {}
@@ -178,7 +182,9 @@ export function AskUserQuestionFooter(props: {
             answers['0'] = a0
         } else {
             for (let i = 0; i < questions.length; i += 1) {
-                const a = validateQuestion(i)
+                const skipped = props.allowSkip === true
+                    && (skippedByQuestion[i] === true || skipQuestionIndex === i)
+                const a = skipped ? [] : validateQuestion(i)
                 if (!a) {
                     setError(t('tool.selectOption'))
                     setStep(i)
@@ -217,6 +223,11 @@ export function AskUserQuestionFooter(props: {
         const q = questions[qIdx]
         if (!q) return
         haptic.selection()
+        setSkippedByQuestion((previous) => {
+            const nextSkipped = previous.slice()
+            nextSkipped[qIdx] = false
+            return nextSkipped
+        })
 
         setSelectedByQuestion((prevSelected) => {
             const nextSelected = prevSelected.slice()
@@ -245,6 +256,11 @@ export function AskUserQuestionFooter(props: {
         const q = questions[qIdx]
         if (!q) return
         haptic.selection()
+        setSkippedByQuestion((previous) => {
+            const nextSkipped = previous.slice()
+            nextSkipped[qIdx] = false
+            return nextSkipped
+        })
 
         if (!q.multiSelect) {
             setSelectedByQuestion((prevSelected) => {
@@ -268,6 +284,11 @@ export function AskUserQuestionFooter(props: {
     }
 
     const updateOtherText = (qIdx: number, value: string) => {
+        setSkippedByQuestion((previous) => {
+            const nextSkipped = previous.slice()
+            nextSkipped[qIdx] = false
+            return nextSkipped
+        })
         setOtherTextByQuestion((prevText) => {
             const nextText = prevText.slice()
             nextText[qIdx] = value
@@ -280,6 +301,22 @@ export function AskUserQuestionFooter(props: {
                 return nextOther
             })
         }
+    }
+
+    const skipCurrentQuestion = () => {
+        if (props.allowSkip !== true || questions.length === 0 || loading) return
+        haptic.selection()
+        setError(null)
+        setSkippedByQuestion((previous) => {
+            const nextSkipped = previous.slice()
+            nextSkipped[clampedStep] = true
+            return nextSkipped
+        })
+        if (clampedStep < questions.length - 1) {
+            setStep((current) => Math.min(current + 1, questions.length - 1))
+            return
+        }
+        void submit(clampedStep)
     }
 
     return (
@@ -333,6 +370,11 @@ export function AskUserQuestionFooter(props: {
                                     questions[clampedStep]?.header ? 'mt-2' : ''
                                 )}>
                                     <MarkdownRenderer content={questions[clampedStep].question} />
+                                </div>
+                            ) : null}
+                            {questions[clampedStep]?.detail ? (
+                                <div className="mt-2 text-xs leading-5 text-[var(--app-tool-card-subtitle)]">
+                                    <MarkdownRenderer content={questions[clampedStep].detail ?? ''} />
                                 </div>
                             ) : null}
                         </div>
@@ -393,6 +435,19 @@ export function AskUserQuestionFooter(props: {
                 </div>
 
                 <div className="flex items-center gap-2">
+                    {props.allowSkip === true && questions.length > 0 ? (
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={props.disabled || loading}
+                            onClick={skipCurrentQuestion}
+                            aria-pressed={skippedByQuestion[clampedStep] === true}
+                            className={questionNavButtonClassName}
+                        >
+                            {t('tool.skipQuestion')}
+                        </Button>
+                    ) : null}
                     {questions.length > 1 && clampedStep < questions.length - 1 ? (
                         <Button
                             type="button"
@@ -410,7 +465,7 @@ export function AskUserQuestionFooter(props: {
                             variant="outline"
                             size="sm"
                             disabled={props.disabled || loading}
-                            onClick={submit}
+                            onClick={() => void submit()}
                             aria-busy={loading}
                             className={cn(questionNavButtonClassName, 'gap-2')}
                         >

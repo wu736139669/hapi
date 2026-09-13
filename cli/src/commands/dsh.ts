@@ -1,30 +1,17 @@
 import chalk from 'chalk'
+import { authAndSetupMachineIfNeeded } from '@/ui/auth'
 import { initializeToken } from '@/ui/tokenInit'
 import { maybeAutoStartServer } from '@/utils/autoStartServer'
-import { authAndSetupMachineIfNeeded } from '@/ui/auth'
-import { parseRemoteAgentCommandOptions } from './agentCommandOptions'
+import { DSH_PERMISSION_MODES } from '@hapi/protocol'
 import type { CommandDefinition } from './types'
-
-export function parseDshCommandOptions(commandArgs: string[]) {
-    const options = parseRemoteAgentCommandOptions(commandArgs, [], ['remote'])
-    if (commandArgs.includes('--yolo')) {
-        throw new Error('DeepSeek Harness permission policy is configured by the ACP server')
-    }
-    if (options.resumeSessionId) {
-        throw new Error('DeepSeek Harness ACP only supports fresh sessions; resume is unavailable')
-    }
-    if (options.model || options.effort || options.modelReasoningEffort) {
-        throw new Error('DeepSeek Harness model and effort are configured by the ACP server')
-    }
-    return { ...options, startingMode: 'remote' as const }
-}
+import { parseRemoteAgentCommandOptions } from './agentCommandOptions'
 
 export const dshCommand: CommandDefinition = {
     name: 'dsh',
-    requiresRuntimeAssets: true,
+    requiresRuntimeAssets: false,
     run: async ({ commandArgs }) => {
         try {
-            const options = parseDshCommandOptions(commandArgs)
+            const options = parseRemoteAgentCommandOptions(commandArgs, DSH_PERMISSION_MODES)
             await initializeToken()
             await maybeAutoStartServer()
             await authAndSetupMachineIfNeeded()

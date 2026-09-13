@@ -4,6 +4,9 @@ import type { DefaultEventsMap, Server, Socket } from 'socket.io'
 export type SocketData = {
     namespace?: string
     userId?: number
+    sessionId?: string
+    role?: 'session-guest'
+    shareToken?: string
 }
 
 export type SocketServer = Server<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, SocketData>

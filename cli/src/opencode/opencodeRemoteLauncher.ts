@@ -24,9 +24,10 @@ import {
 import { OpencodePermissionHandler } from './utils/permissionHandler';
 import { getOpencodeNativeToolInstruction, PLAN_MODE_INSTRUCTION } from './utils/systemPrompt';
 import { resolveThoughtLevelEffort } from './thoughtLevelEffort';
+import { fetchOpenCodeReasoningEffortState, type OpenCodeReasoningEffortState } from './utils/opencodeVariants';
+import type { AgentSessionConfigOptionDescriptor } from '@/agent/types';
 
 type OpencodeRemoteLauncherOptions = {
-    onModelRollback?: (model: string | null) => void;
     onReasoningEffortRollback?: (effort: string | null) => void;
     // Called with `true` once the ACP backend + internal HTTP baseUrl are
     // ready (so /compact can actually run) and with `false` whenever this
@@ -129,6 +130,7 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
     private defaultBackendModel: string | null = null;
     private currentBackendEffort: string | null = null;
     private defaultBackendEffort: string | null = null;
+    private nativeReasoningEffortState: OpenCodeReasoningEffortState | null = null;
     private setModelSupported: boolean | undefined = undefined;
     private setEffortSupported: boolean | undefined = undefined;
     private activeAcpSessionId: string | null = null;
@@ -251,33 +253,8 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
         const thoughtLevelOption = backend.getThoughtLevelConfigOption?.(acpSessionId);
         this.currentBackendEffort = thoughtLevelOption?.currentValue ?? null;
         this.defaultBackendEffort = this.currentBackendEffort;
-
-        // The CLI may have been launched with an explicit --model that differs
-        // from the ACP session's own default. Apply it eagerly right here so
-        // the new model's thought_level config options are captured (via
-        // setModel's set_config_option round-trip) *before* the web UI's first
-        // effort-options poll — otherwise a variant-capable startup model looks
-        // unsupported until after the first turn. On failure just warn: the
-        // first batch's existing inline switch path retries the same model.
-        const requestedStartupModel = this.session.getModel?.();
-        if (
-            !this.shouldExit
-            && typeof requestedStartupModel === 'string'
-            && requestedStartupModel.length > 0
-            && requestedStartupModel !== this.defaultBackendModel
-            && typeof backend.setModel === 'function'
-        ) {
-            try {
-                await backend.setModel(acpSessionId, requestedStartupModel, { flavor: 'opencode' });
-                this.currentBackendModel = requestedStartupModel;
-                // The lookup above ran before the switch — re-query so the
-                // seeded effort reflects the eagerly applied model.
-                const refreshedThoughtLevel = backend.getThoughtLevelConfigOption?.(acpSessionId);
-                this.currentBackendEffort = refreshedThoughtLevel?.currentValue ?? null;
-                this.defaultBackendEffort = this.currentBackendEffort;
-            } catch (error) {
-                logger.warn('[opencode-remote] Eager startup model application failed; first batch will retry inline', error);
-            }
+        if (!thoughtLevelOption) {
+            await this.refreshNativeReasoningEffortState(acpSessionId, this.currentBackendModel);
         }
 
         // Let the caller (runOpencode.ts) know native /compact can actually
@@ -329,7 +306,18 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
             const targetModelId = requestedModel === null
                 ? this.defaultBackendModel
                 : requestedModel ?? currentModelId;
-            if (!effortOption) {
+            if (effortOption) {
+                return {
+                    success: true,
+                    options: effortOption.options,
+                    currentValue: effortOption.currentValue ?? null,
+                    currentModelId,
+                    targetModelId
+                };
+            }
+            await this.refreshNativeReasoningEffortState(acpSessionId, this.currentBackendModel);
+            const nativeOption = this.nativeReasoningEffortState?.option;
+            if (!nativeOption) {
                 return {
                     success: false,
                     error: 'OpenCode reasoning effort options are not available',
@@ -339,11 +327,8 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
             }
             return {
                 success: true,
-                options: effortOption.options,
-                currentValue: effortOption.currentValue ?? null,
-                // Lets the web client detect "options still belong to the
-                // previous model" while a requested switch has not been
-                // applied by the backend yet.
+                options: nativeOption.options,
+                currentValue: this.currentBackendEffort ?? nativeOption.currentValue ?? null,
                 currentModelId,
                 targetModelId
             };
@@ -432,22 +417,13 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                 this.currentBackendModel = requestedModel;
             } else if (requestedModel && requestedModel !== this.currentBackendModel) {
                 if (!backend.setModel || this.setModelSupported === false) {
-                    this.rollbackModel(batch, this.currentBackendModel);
+                    batch.mode.model = this.currentBackendModel ?? undefined;
                 } else {
                     logger.debug(`[opencode-remote] Switching model inline: ${this.currentBackendModel} -> ${requestedModel}`);
                     try {
                         await backend.setModel(acpSessionId, requestedModel, { flavor: 'opencode' });
                         this.currentBackendModel = requestedModel;
                         this.setModelSupported = true;
-                        // set_config_option("model") also switches the backend's
-                        // effort currentValue — refresh both cached efforts so
-                        // a subsequent request equal to the stale value still
-                        // performs the round-trip instead of being skipped,
-                        // and an unset effort falls back to the *new* model's
-                        // default rather than reapplying the old model's.
-                        const refreshedInlineEffort = backend.getThoughtLevelConfigOption?.(acpSessionId);
-                        this.currentBackendEffort = refreshedInlineEffort?.currentValue ?? null;
-                        this.defaultBackendEffort = this.currentBackendEffort;
                         // Reflect the resolved model back into the batch so
                         // downstream display logic sees the concrete id rather
                         // than a `null` placeholder.
@@ -469,20 +445,29 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                                 message: `Failed to switch model to ${requestedModel}. Continuing with ${this.currentBackendModel ?? '(default)'}.`
                             });
                         }
-                        this.rollbackModel(batch, this.currentBackendModel);
+                        batch.mode.model = this.currentBackendModel ?? undefined;
                     }
+                }
+                if (requestedModel === this.currentBackendModel) {
+                    await this.refreshNativeReasoningEffortState(acpSessionId, this.currentBackendModel);
                 }
             }
 
             const requestedEffort = batch.mode.modelReasoningEffort ?? this.defaultBackendEffort;
             if (requestedEffort && requestedEffort !== this.currentBackendEffort) {
                 const thoughtLevelOption = backend.getThoughtLevelConfigOption?.(acpSessionId);
-                if (!backend.setConfigOption || !thoughtLevelOption || this.setEffortSupported === false) {
+                const nativeEffortOption = this.nativeReasoningEffortState
+                    && this.nativeReasoningEffortState.modelId === this.currentBackendModel
+                    ? this.nativeReasoningEffortState.option
+                    : undefined;
+                const effortOption: AgentSessionConfigOptionDescriptor | undefined = thoughtLevelOption ?? nativeEffortOption;
+                const nativeVariantSupported = Boolean(nativeEffortOption && backend.promptWithVariant);
+                if (!effortOption || (!backend.setConfigOption && !nativeVariantSupported) || this.setEffortSupported === false) {
                     this.rollbackReasoningEffort(batch, this.currentBackendEffort);
                 } else {
                     const resolvedEffort = resolveThoughtLevelEffort(
                         requestedEffort,
-                        thoughtLevelOption,
+                        effortOption,
                         this.currentBackendEffort ?? this.defaultBackendEffort
                     );
                     if (!resolvedEffort || resolvedEffort === this.currentBackendEffort) {
@@ -495,8 +480,17 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                     } else {
                         logger.debug(`[opencode-remote] Switching effort inline: ${this.currentBackendEffort ?? '(default)'} -> ${resolvedEffort}`);
                         try {
-                            await backend.setConfigOption(acpSessionId, thoughtLevelOption.id, resolvedEffort);
-                            this.currentBackendEffort = resolvedEffort;
+                            if (nativeVariantSupported) {
+                                this.currentBackendEffort = resolvedEffort;
+                                this.nativeReasoningEffortState = {
+                                    ...this.nativeReasoningEffortState!,
+                                    currentValue: resolvedEffort,
+                                    option: { ...nativeEffortOption!, currentValue: resolvedEffort }
+                                };
+                            } else {
+                                await backend.setConfigOption!(acpSessionId, effortOption.id, resolvedEffort);
+                                this.currentBackendEffort = resolvedEffort;
+                            }
                             this.setEffortSupported = true;
                             if (requestedEffort !== resolvedEffort) {
                                 this.rollbackReasoningEffort(batch, resolvedEffort);
@@ -663,9 +657,26 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
             session.onThinkingChange(true);
 
             try {
-                await backend.prompt(acpSessionId, promptContent, (message: AgentMessage) => {
-                    this.handleAgentMessage(message);
-                });
+                const nativeVariant = this.nativeReasoningEffortState
+                    && this.nativeReasoningEffortState.modelId === this.currentBackendModel
+                    ? this.currentBackendEffort
+                    : null;
+                const nativeModel = splitProviderModel(this.currentBackendModel);
+                if (nativeVariant && nativeModel && backend.promptWithVariant && this.baseUrl) {
+                    await backend.promptWithVariant(acpSessionId, promptContent, (message: AgentMessage) => {
+                        this.handleAgentMessage(message);
+                    }, {
+                        baseUrl: this.baseUrl,
+                        directory: session.path,
+                        providerId: nativeModel.providerId,
+                        modelId: nativeModel.modelId,
+                        variant: nativeVariant
+                    });
+                } else {
+                    await backend.prompt(acpSessionId, promptContent, (message: AgentMessage) => {
+                        this.handleAgentMessage(message);
+                    });
+                }
                 void backend.refreshSessionInfo(acpSessionId, session.path);
             } catch (error) {
                 logger.warn('[opencode-remote] prompt failed', error);
@@ -832,6 +843,35 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
         this.surfaceAgentError(formatOpencodePromptError(error));
     }
 
+    private async refreshNativeReasoningEffortState(
+        acpSessionId: string,
+        modelId: string | null
+    ): Promise<void> {
+        const baseUrl = this.baseUrl;
+        if (!baseUrl || !modelId) {
+            this.nativeReasoningEffortState = null;
+            return;
+        }
+
+        const state = await fetchOpenCodeReasoningEffortState({
+            baseUrl,
+            directory: this.session.path,
+            sessionId: acpSessionId,
+            modelId
+        });
+        this.nativeReasoningEffortState = state;
+        if (!state) return;
+
+        // The native session is authoritative. A variant may have been
+        // changed in OpenCode itself between HAPI polls, so refresh both the
+        // current and launch-time fallback values from the live session.
+        this.currentBackendEffort = state.currentValue ?? state.option.options[0]?.value ?? null;
+        this.defaultBackendEffort = this.currentBackendEffort;
+        // A model switch can move from an ACP-only effort option to native
+        // variants (or vice versa); do not retain a previous capability probe.
+        this.setEffortSupported = undefined;
+    }
+
     private surfaceAgentError(message: string): void {
         this.session.sendAgentMessage({ type: 'error', message });
         this.messageBuffer.addMessage(message, 'status');
@@ -857,13 +897,6 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
         this.session.setModelReasoningEffort(effort);
         this.session.pushKeepAlive();
         this.options.onReasoningEffortRollback?.(effort);
-    }
-
-    private rollbackModel(batch: { mode: OpencodeMode }, model: string | null): void {
-        batch.mode.model = model ?? undefined;
-        this.session.setModel(model);
-        this.session.pushKeepAlive();
-        this.options.onModelRollback?.(model);
     }
 
     /**

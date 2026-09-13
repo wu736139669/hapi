@@ -57,6 +57,8 @@ type ToolGroupingOptions = {
     hasMoreMessages: boolean
     previousGroups?: ToolGroupBlock[]
     codexExplorationCollapsed?: boolean
+    /** Client presentation preference; false keeps every tool call inline. */
+    executionProcessEnabled?: boolean
 }
 
 const PLAN_TOOL_NAMES = new Set([
@@ -271,6 +273,13 @@ export function buildVisibleChatBlocks(
     for (let index = 0; index < blocks.length; index += 1) {
         const block = blocks[index]
         if (block.kind !== 'tool-call') {
+            visibleBlocks.push(block)
+            continue
+        }
+        if (options.executionProcessEnabled === false) {
+            // The execution-process preference is a master presentation
+            // switch. When disabled, do not create derived ToolGroupCards
+            // either; show every tool call in its original order.
             visibleBlocks.push(block)
             continue
         }

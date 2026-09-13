@@ -7,10 +7,11 @@ import { getTerminalFontSizeOptions, useTerminalFontSize } from '@/hooks/useTerm
 import { getSessionListStatusModeOptions, useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
 import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
+import { usePinActiveSessions } from '@/hooks/usePinActiveSessions'
 import { MAX_SESSION_PREVIEW_LIMIT, MIN_SESSION_PREVIEW_LIMIT, normalizeSessionPreviewLimit, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
 import { useThemeColors, type ThemeColorKeyId } from '@/hooks/useThemeColors'
 import { useSessionHeaderMetadata, type SessionHeaderMetadataKey } from '@/hooks/useSessionHeaderMetadata'
-import { useAppBadgePreference } from '@/hooks/useAppBadgePreference'
+import { useSessionListToolbar } from '@/hooks/useSessionListToolbar'
 import { SettingsChoiceGroup, SettingsFieldLabel, SettingsPageContent, SettingsRow, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
 
 function MinusIcon() {
@@ -139,7 +140,8 @@ export default function SettingsDisplayPage() {
     const { sessionListStatusMode, setSessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly, setShowActiveSessionsOnly } = useShowActiveSessionsOnly()
     const { pinInProgressSessions, setPinInProgressSessions } = usePinInProgressSessions()
-    const { appBadgeEnabled, setAppBadgeEnabled } = useAppBadgePreference()
+    const { pinActiveSessions, setPinActiveSessions } = usePinActiveSessions()
+    const { preferences: sessionToolbar, setPreference: setSessionToolbarPreference } = useSessionListToolbar()
     const { preferences: sessionHeaderMetadata, setPreference: setSessionHeaderMetadata } = useSessionHeaderMetadata()
     const sessionHeaderOptions: ReadonlyArray<{ key: SessionHeaderMetadataKey; labelKey: string }> = [
         { key: 'showLabels', labelKey: 'settings.display.sessionHeader.showLabels' },
@@ -177,13 +179,49 @@ export default function SettingsDisplayPage() {
                 <SessionPreviewLimitControl />
                 <SettingsSwitch label={t('settings.display.activeSessionsOnly')} description={t('settings.display.activeSessionsOnly.desc')} checked={showActiveSessionsOnly} onChange={setShowActiveSessionsOnly} />
                 <SettingsSwitch label={t('settings.display.pinInProgressSessions')} description={t('settings.display.pinInProgressSessions.desc')} checked={pinInProgressSessions} onChange={setPinInProgressSessions} />
-                <SettingsSwitch label={t('settings.display.appBadge')} description={t('settings.display.appBadge.desc')} checked={appBadgeEnabled} onChange={setAppBadgeEnabled} />
+                <SettingsSwitch label={t('settings.display.pinActiveSessions')} description={t('settings.display.pinActiveSessions.desc')} checked={pinActiveSessions} onChange={setPinActiveSessions} />
                 <SettingsChoiceGroup
                     label={t('settings.display.sessionListStatus')}
                     description={t('settings.display.sessionListStatus.detailedDescription')}
                     value={sessionListStatusMode}
                     options={getSessionListStatusModeOptions().map((option) => ({ value: option.value, label: t(option.labelKey) }))}
                     onChange={setSessionListStatusMode}
+                />
+                <SettingsSwitch
+                    label={t('settings.display.sessionToolbar.collapsed')}
+                    description={t('settings.display.sessionToolbar.collapsed.desc')}
+                    checked={sessionToolbar.collapsed}
+                    onChange={(checked) => setSessionToolbarPreference('collapsed', checked)}
+                />
+                <SettingsSwitch
+                    label={t('settings.display.sessionToolbar.search')}
+                    description={t('settings.display.sessionToolbar.search.desc')}
+                    checked={sessionToolbar.showSearch}
+                    onChange={(checked) => setSessionToolbarPreference('showSearch', checked)}
+                />
+                <SettingsSwitch
+                    label={t('settings.display.sessionToolbar.dateFilter')}
+                    description={t('settings.display.sessionToolbar.dateFilter.desc')}
+                    checked={sessionToolbar.showDateFilter}
+                    onChange={(checked) => setSessionToolbarPreference('showDateFilter', checked)}
+                />
+                <SettingsSwitch
+                    label={t('settings.display.sessionToolbar.unreadFilter')}
+                    description={t('settings.display.sessionToolbar.unreadFilter.desc')}
+                    checked={sessionToolbar.showUnreadFilter}
+                    onChange={(checked) => setSessionToolbarPreference('showUnreadFilter', checked)}
+                />
+                <SettingsSwitch
+                    label={t('settings.display.sessionToolbar.share')}
+                    description={t('settings.display.sessionToolbar.share.desc')}
+                    checked={sessionToolbar.showShareManager}
+                    onChange={(checked) => setSessionToolbarPreference('showShareManager', checked)}
+                />
+                <SettingsSwitch
+                    label={t('settings.display.sessionToolbar.browse')}
+                    description={t('settings.display.sessionToolbar.browse.desc')}
+                    checked={sessionToolbar.showBrowse}
+                    onChange={(checked) => setSessionToolbarPreference('showBrowse', checked)}
                 />
             </SettingsSection>
 

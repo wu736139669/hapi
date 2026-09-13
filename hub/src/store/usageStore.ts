@@ -2,6 +2,7 @@ import type { Database } from 'bun:sqlite'
 
 import {
     getUsageEvents,
+    getUsageEventsByNamespace,
     getUsageScanStates,
     recordUsageScan,
     transferUsageSession,
@@ -14,16 +15,21 @@ export class UsageStore {
 
     recordScan(
         sessionId: string,
+        namespace: string,
         messageEpoch: number,
         lastSeq: number,
         events: UsageEvent[],
         replaceEvents: boolean
     ): void {
-        recordUsageScan(this.db, sessionId, messageEpoch, lastSeq, events, replaceEvents)
+        recordUsageScan(this.db, sessionId, namespace, messageEpoch, lastSeq, events, replaceEvents)
     }
 
     getEvents(sessionIds: string[]): UsageEvent[] {
         return getUsageEvents(this.db, sessionIds)
+    }
+
+    getEventsByNamespace(namespace: string): UsageEvent[] {
+        return getUsageEventsByNamespace(this.db, namespace)
     }
 
     getScanStates(sessionIds: string[]): Map<string, UsageScanState> {

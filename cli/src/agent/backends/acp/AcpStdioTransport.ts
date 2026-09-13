@@ -16,20 +16,6 @@ import {
 } from './agentCliGuard';
 import { matchesAcpHttp2Cancel, matchesAcpRetryBackoff } from './acpStderrErrors';
 
-/** Marks transport-level failures whose request outcome is unknown (unlike an
- * explicit JSON-RPC error response). */
-export const ACP_INDETERMINATE_SYMBOL = Symbol('acp-indeterminate');
-
-function markAcpIndeterminate(error: Error): Error {
-    Object.defineProperty(error, ACP_INDETERMINATE_SYMBOL, { value: true });
-    return error;
-}
-
-export function isAcpIndeterminateError(error: unknown): boolean {
-    return typeof error === 'object' && error !== null
-        && (error as Record<symbol, unknown>)[ACP_INDETERMINATE_SYMBOL] === true;
-}
-
 interface JsonRpcRequest {
     jsonrpc: '2.0';
     id: string | number | null;
@@ -82,7 +68,6 @@ export class AcpStdioTransport {
     private readonly pending = new Map<string | number, {
         resolve: (value: unknown) => void;
         reject: (error: Error) => void;
-        rejectDispatched: (error: Error) => void;
     }>();
     private readonly requestHandlers = new Map<string, RequestHandler>();
     private notificationHandler: ((method: string, params: unknown) => void) | null = null;
@@ -258,24 +243,19 @@ export class AcpStdioTransport {
     /** Default timeout for requests in milliseconds (2 minutes) */
     static readonly DEFAULT_TIMEOUT_MS = 120_000;
 
-    async sendRequest(method: string, params?: unknown, options?: { timeoutMs?: number; dispatchTimeoutMs?: number }): Promise<unknown> {
+    async sendRequest(method: string, params?: unknown, options?: { timeoutMs?: number }): Promise<unknown> {
         const request = this.sendRequestWithDispatch(method, params, options);
         void request.dispatched.catch(() => {});
         return request.completed;
     }
 
-    /**
-     * Split a request into transport dispatch (stdin accepted) and completion
-     * (JSON-RPC response). Lets callers commit state once stdin accepted the
-     * request without waiting for the (possibly long-running) response.
-     */
     sendRequestWithDispatch(
         method: string,
         params?: unknown,
-        options?: { timeoutMs?: number; dispatchTimeoutMs?: number }
+        options?: { timeoutMs?: number }
     ): { dispatched: Promise<void>; completed: Promise<unknown> } {
         if (this.closed || this.exited) {
-            const error = markAcpIndeterminate(this.closeError ?? this.exitError ?? new Error('ACP transport is closed'));
+            const error = this.closeError ?? this.exitError ?? new Error('ACP transport is closed');
             return { dispatched: Promise.reject(error), completed: Promise.reject(error) };
         }
 
@@ -288,105 +268,53 @@ export class AcpStdioTransport {
         };
 
         const timeoutMs = options?.timeoutMs ?? AcpStdioTransport.DEFAULT_TIMEOUT_MS;
-        const dispatchTimeoutMs = options?.dispatchTimeoutMs ?? timeoutMs;
 
         let timer: ReturnType<typeof setTimeout> | null = null;
-        let dispatchTimer: ReturnType<typeof setTimeout> | null = null;
-        let resolveDispatched!: () => void;
-        let rejectDispatched!: (error: Error) => void;
         let resolveCompleted!: (value: unknown) => void;
         let rejectCompleted!: (error: Error) => void;
-        const dispatched = new Promise<void>((resolve, reject) => {
-            resolveDispatched = resolve;
-            rejectDispatched = reject;
-        });
         const completed = new Promise<unknown>((resolve, reject) => {
             resolveCompleted = resolve;
             rejectCompleted = reject;
         });
-        let dispatchSettled = false;
-
-        const clearTimers = () => {
-            if (timer) clearTimeout(timer);
-            if (dispatchTimer) clearTimeout(dispatchTimer);
-        };
-        const failRequest = (error: Error) => {
-            this.pending.delete(id);
-            clearTimers();
-            if (!dispatchSettled) {
-                dispatchSettled = true;
-                rejectDispatched(error);
-            }
-            rejectCompleted(error);
-        };
         if (Number.isFinite(timeoutMs)) {
             timer = setTimeout(() => {
                 if (this.pending.has(id)) {
-                    failRequest(markAcpIndeterminate(new Error(`ACP request '${method}' timed out after ${timeoutMs}ms`)));
+                    this.pending.delete(id);
+                    rejectCompleted(new Error(`ACP request '${method}' timed out after ${timeoutMs}ms`));
                 }
             }, timeoutMs);
             timer.unref();
         }
-        if (Number.isFinite(dispatchTimeoutMs)) {
-            dispatchTimer = setTimeout(() => {
-                if (this.pending.has(id) && !dispatchSettled) {
-                    const error = markAcpIndeterminate(new Error(`ACP request '${method}' dispatch timed out after ${dispatchTimeoutMs}ms`));
-                    try {
-                        this.process.stdin.destroy();
-                    } catch (destroyError) {
-                        logger.debug('[ACP] Error destroying stalled stdin', destroyError);
-                    }
-                    this.markClosed(error);
-                }
-            }, dispatchTimeoutMs);
-            dispatchTimer.unref();
-        }
 
         this.pending.set(id, {
             resolve: (value) => {
-                clearTimers();
-                if (!dispatchSettled) {
-                    dispatchSettled = true;
-                    resolveDispatched();
-                }
+                if (timer) clearTimeout(timer);
                 resolveCompleted(value);
             },
             reject: (error) => {
-                clearTimers();
-                if (!dispatchSettled) {
-                    dispatchSettled = true;
-                    resolveDispatched();
-                }
+                if (timer) clearTimeout(timer);
                 rejectCompleted(error);
-            },
-            rejectDispatched: (error) => {
-                if (!dispatchSettled) {
-                    dispatchSettled = true;
-                    rejectDispatched(error);
-                }
             }
         });
 
-        try {
-            const serialized = JSON.stringify(payload);
-            this.process.stdin.write(`${serialized}\n`, (error) => {
-                if (error) {
-                    const writeError = markAcpIndeterminate(error instanceof Error ? error : new Error(String(error)));
-                    this.markClosed(writeError);
-                    failRequest(writeError);
-                    return;
-                }
-                if (!dispatchSettled) {
-                    dispatchSettled = true;
-                    if (dispatchTimer) clearTimeout(dispatchTimer);
-                    resolveDispatched();
-                }
-            });
-        } catch (error) {
-            const writeError = error instanceof Error ? error : new Error(String(error));
-            this.markClosed(writeError);
-            failRequest(writeError);
-        }
+        const dispatched = new Promise<void>((resolve, reject) => {
+            try {
+                const serialized = JSON.stringify(payload);
+                this.process.stdin.write(`${serialized}\n`, (error) => {
+                    if (error) {
+                        const writeError = error instanceof Error ? error : new Error(String(error));
+                        this.markClosed(writeError);
+                        reject(writeError);
+                        return;
+                    }
+                    resolve();
+                });
+            } catch (error) {
+                const writeError = error instanceof Error ? error : new Error(String(error));
+                this.markClosed(writeError);
+                reject(writeError);
+            }
+        });
 
         return { dispatched, completed };
     }
@@ -574,10 +502,8 @@ export class AcpStdioTransport {
     }
 
     private rejectAllPending(error: Error): void {
-        const indeterminate = markAcpIndeterminate(error);
-        for (const { reject, rejectDispatched } of this.pending.values()) {
-            rejectDispatched(indeterminate);
-            reject(indeterminate);
+        for (const { reject } of this.pending.values()) {
+            reject(error);
         }
         this.pending.clear();
     }

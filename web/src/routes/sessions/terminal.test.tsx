@@ -10,6 +10,7 @@ const resizeMock = vi.fn()
 const disconnectMock = vi.fn()
 const onOutputMock = vi.fn()
 let onExitHandler: ((code: number | null, signal: string | null) => void) | null = null
+const appContextState = vi.hoisted(() => ({ isSessionGuest: false }))
 
 const onExitRegister = (handler: (code: number | null, signal: string | null) => void) => {
     onExitHandler = handler
@@ -43,6 +44,7 @@ const terminalSocketState = {
 }
 
 vi.mock('@tanstack/react-router', () => ({
+    Navigate: (props: { to: string }) => <div data-testid="route-redirect">{props.to}</div>,
     useParams: () => ({ sessionId: 'session-1' })
 }))
 
@@ -50,7 +52,8 @@ vi.mock('@/lib/app-context', () => ({
     useAppContext: () => ({
         api: null,
         token: 'test-token',
-        baseUrl: 'http://localhost:3000'
+        baseUrl: 'http://localhost:3000',
+        isSessionGuest: appContextState.isSessionGuest
     })
 }))
 
@@ -88,6 +91,22 @@ function renderWithProviders() {
         </I18nProvider>
     )
 }
+
+beforeEach(() => {
+    appContextState.isSessionGuest = false
+})
+
+describe('TerminalPage guest access', () => {
+    it('redirects collaborative guests before opening a terminal socket', () => {
+        appContextState.isSessionGuest = true
+        capturedTerminalIds.length = 0
+
+        renderWithProviders()
+
+        expect(screen.getByTestId('route-redirect')).toHaveTextContent('/sessions/$sessionId')
+        expect(capturedTerminalIds).toHaveLength(0)
+    })
+})
 
 describe('TerminalPage paste behavior', () => {
     beforeEach(() => {

@@ -5,7 +5,7 @@ import { ScheduleIcon } from '@/components/icons'
 import { HoverTooltip, SESSION_ROW_TOOLTIP_FOCUS_CLASS, useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { getAttentionLabel, SessionAttentionIndicator } from '@/components/SessionAttentionIndicator'
 import { classifySessionAttention } from '@/lib/sessionAttention'
-import { getSessionLastSeenAt, getSessionManualUnreadAt } from '@/lib/sessionLastSeen'
+import { getSessionLastSeenAt } from '@/lib/sessionLastSeen'
 import { formatRelativeTime } from '@/lib/relativeTime'
 import { formatScheduledTooltipDetail } from '@/lib/scheduledTime'
 import { getCodexImportedAt } from '@/lib/codexImportedSessions'
@@ -99,6 +99,8 @@ function getSessionTimeLabel(
  */
 export function SessionRowSummary(props: {
     session: SessionSummary
+    /** Compact rows used by the collapsed session index rail. */
+    compact?: boolean
     showPath?: boolean
     showDetailedStatus?: boolean
     selected?: boolean
@@ -109,8 +111,6 @@ export function SessionRowSummary(props: {
     nestedTooltips?: boolean
     /** Pass from parent when the parent owns `aria-describedby` (session list). */
     attentionTooltipId?: string
-    /** Recompute local unread attention when the session-list watermark changes. */
-    lastSeenVersion?: number
     scheduleTooltipId?: string
     className?: string
     /** Rows inside the pinned "in progress" section skip the text label (dot only). */
@@ -119,20 +119,23 @@ export function SessionRowSummary(props: {
     projectLabel?: string
     /** Machine label shown next to the project name (pinned "in progress" rows). */
     machineLabel?: string
+    /** Whether the owner has an active collaborative share for this session. */
+    shared?: boolean
 }) {
     const {
         session: s,
+        compact = false,
         showPath = true,
         showDetailedStatus = true,
         selected = false,
         nestedTooltips = true,
         attentionTooltipId: attentionTooltipIdProp,
-        lastSeenVersion,
         scheduleTooltipId: scheduleTooltipIdProp,
         className,
         inRunningSection = false,
         projectLabel,
         machineLabel,
+        shared = false,
     } = props
     const { t } = useTranslation()
     const sessionName = getSessionTitle(s)
@@ -143,10 +146,9 @@ export function SessionRowSummary(props: {
             ? classifySessionAttention(s, {
                 selected,
                 lastSeenAt: getSessionLastSeenAt(s.id),
-                manualUnreadAt: getSessionManualUnreadAt(s.id),
             })
             : null,
-        [s, selected, showDetailedStatus, lastSeenVersion]
+        [s, selected, showDetailedStatus]
     )
     const attentionLabel = attention ? getAttentionLabel(attention, t) : null
     const urgentAttention = attention !== null
@@ -164,31 +166,27 @@ export function SessionRowSummary(props: {
     const timeLabel = getSessionTimeLabel(s, t)
 
     return (
-        <div className={`flex w-full min-w-0 flex-col gap-1 ${className ?? ''}`}>
-            <div className={`grid grid-cols-[minmax(9rem,1fr)_minmax(0,max-content)] items-center gap-2 ${!s.active ? 'opacity-50' : ''}`}>
-                <div className="flex min-w-0 items-center gap-2">
-                    <AgentFlavorIcon flavor={s.metadata?.flavor} className="h-4 w-4 shrink-0 -translate-y-px" />
+        <div className={`flex w-full min-w-0 flex-col ${compact ? 'gap-0' : 'gap-1'} ${className ?? ''}`}>
+            <div className={`grid min-w-0 items-center ${compact ? 'grid-cols-[minmax(0,1fr)] gap-1' : 'grid-cols-[minmax(9rem,1fr)_minmax(0,max-content)] gap-2'} ${!s.active ? 'opacity-50' : ''}`}>
+                <div className={`flex min-w-0 items-center ${compact ? 'gap-1' : 'gap-2'}`}>
+                    <AgentFlavorIcon flavor={s.metadata?.flavor} className={compact ? 'h-3.5 w-3.5 shrink-0 -translate-y-px' : 'h-4 w-4 shrink-0 -translate-y-px'} />
                     <div
-                        className={`min-w-0 flex-1 truncate text-sm font-medium ${s.active ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}
+                        className={`min-w-0 flex-1 truncate font-medium ${compact ? 'text-xs' : 'text-sm'} ${s.active ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}
                         title={sessionName}
                     >
                         {sessionName}
                     </div>
-                    {attention?.kind === 'unread' && nestedTooltips && attentionId ? (
-                        <SessionAttentionIndicator
-                            attention={attention}
-                            summary={s}
-                            label={attentionLabel ?? ''}
-                            tooltipId={attentionId}
-                        />
-                    ) : attention?.kind === 'unread' ? (
+                    {shared ? (
                         <span
-                            className={`inline-flex h-2 w-2 shrink-0 rounded-full ${ATTENTION_DOT_CLASS.unread}`}
-                            title={attentionLabel ?? undefined}
-                            aria-label={attentionLabel ?? undefined}
-                        />
-                    ) : s.active && s.thinking ? (
-                        <LoaderIcon className="h-3.5 w-3.5 shrink-0 animate-spin-slow text-[var(--app-badge-success-text)]" />
+                            className={`shrink-0 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300 ${compact ? 'px-1 text-[9px]' : ''}`}
+                            title={t('sessionShare.active')}
+                            aria-label={t('sessionShare.active')}
+                        >
+                            {compact ? '↗' : t('sessionShare.activeShort')}
+                        </span>
+                    ) : null}
+                    {s.active && s.thinking ? (
+                        <LoaderIcon className={compact ? 'h-3 w-3 shrink-0 animate-spin-slow text-[var(--app-badge-success-text)]' : 'h-3.5 w-3.5 shrink-0 animate-spin-slow text-[var(--app-badge-success-text)]'} />
                     ) : urgentAttention && nestedTooltips && attentionId ? (
                         <SessionAttentionIndicator
                             attention={attention}
@@ -249,7 +247,7 @@ export function SessionRowSummary(props: {
                             aria-label={attentionLabel ?? undefined}
                         />
                     ) : null}
-                    {hasScheduleTooltip && nestedTooltips && scheduleId ? (
+                    {!compact && hasScheduleTooltip && nestedTooltips && scheduleId ? (
                         <HoverTooltip
                             id={scheduleId}
                             target={<ScheduleIcon className="h-3.5 w-3.5 text-[var(--app-hint)]" />}
@@ -265,13 +263,13 @@ export function SessionRowSummary(props: {
                                 </span>
                             </span>
                         </HoverTooltip>
-                    ) : hasScheduleTooltip ? (
+                    ) : !compact && hasScheduleTooltip ? (
                         <span className="shrink-0" aria-label={scheduledLabel} title={scheduledLabel}>
                             <ScheduleIcon className="h-3.5 w-3.5 text-[var(--app-hint)]" />
                         </span>
                     ) : null}
                 </div>
-                <div className="flex min-w-0 items-center justify-end gap-2 overflow-hidden text-xs">
+                {!compact ? <div className="flex min-w-0 items-center justify-end gap-2 overflow-hidden text-xs">
                     {todoProgress ? (
                         <span className="flex shrink-0 items-center gap-1 text-[var(--app-hint)]">
                             <BulbIcon className="h-3 w-3" />
@@ -286,13 +284,13 @@ export function SessionRowSummary(props: {
                     {timeLabel ? (
                         <span className="min-w-0 truncate whitespace-nowrap tabular-nums text-[var(--app-hint)]">{timeLabel}</span>
                     ) : null}
+                </div> : null}
                 </div>
-            </div>
-            {projectLabel || machineLabel ? (
+            {!compact && (projectLabel || machineLabel) ? (
                 <div className="truncate text-xs text-[var(--app-hint)]" title={[projectLabel, machineLabel].filter(Boolean).join(' · ')}>
                     {[projectLabel, machineLabel].filter(Boolean).join(' · ')}
                 </div>
-            ) : showPath || worktreeLabel ? (
+            ) : !compact && (showPath || worktreeLabel) ? (
                 <div
                     className="truncate text-xs text-[var(--app-hint)]"
                     title={worktreeLabel

@@ -9,24 +9,20 @@ import { useAuth } from '@/hooks/useAuth'
 import { useAuthSource } from '@/hooks/useAuthSource'
 import { useServerUrl } from '@/hooks/useServerUrl'
 import { useSSE } from '@/hooks/useSSE'
-import { useSessions } from '@/hooks/queries/useSessions'
 import { useReconnectingState } from '@/hooks/useReconnectingState'
 import { useSyncingState } from '@/hooks/useSyncingState'
 import { usePushNotifications } from '@/hooks/usePushNotifications'
 import { useViewportHeight } from '@/hooks/useViewportHeight'
 import { useVisibilityReporter } from '@/hooks/useVisibilityReporter'
 import { queryKeys } from '@/lib/query-keys'
-import { refreshAllAgyCatalogs } from '@/lib/agyCatalogAnnouncement'
 import { AppContextProvider } from '@/lib/app-context'
-import { clearMessageWindow, rewindMessageWindow, syncTailMessages } from '@/lib/message-window-store'
+import { clearMessageWindow, syncTailMessages } from '@/lib/message-window-store'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
-import { translateInputRequestTitle } from '@/lib/input-request-toast'
 import { VoiceProvider } from '@/lib/voice-context'
 import { requireHubUrlForLogin } from '@/lib/runtime-config'
+import { useSessionGuestAuth } from '@/hooks/useSessionGuestAuth'
 import { getAppGlobalSseSubscription, getAppSessionSseSubscription } from '@/lib/appSseSubscriptions'
-import { canUseAppBadging, useAppBadge } from '@/hooks/useAppBadge'
-import { useAppBadgePreference } from '@/hooks/useAppBadgePreference'
 import { reconcileQueuedStateAfterConnect } from '@/lib/queued-state-reconciliation'
 import { LoginPrompt } from '@/components/LoginPrompt'
 import { InstallPrompt } from '@/components/InstallPrompt'
@@ -38,6 +34,7 @@ import { VoiceErrorBanner } from '@/components/VoiceErrorBanner'
 import { RunnerVersionSkewBanner } from '@/components/RunnerVersionSkewBanner'
 import { LoadingState } from '@/components/LoadingState'
 import { ToastContainer } from '@/components/ToastContainer'
+import { FilePreviewHost } from '@/components/FilePreviewModal'
 import { PwaUpdateProvider } from '@/lib/pwa-update-context'
 import { ToastProvider, useToast } from '@/lib/toast-context'
 import type { SyncEvent } from '@/types/api'
@@ -73,6 +70,11 @@ function AppInner() {
     const [titleSuggestionAvailable, setTitleSuggestionAvailable] = useState(false)
     const goBack = useAppGoBack()
     const pathname = useLocation({ select: (location) => location.pathname })
+    const search = useLocation({ select: (location) => location.search })
+    const guestAuth = useSessionGuestAuth(baseUrl, pathname, search)
+    const effectiveToken = guestAuth.auth?.token ?? token
+    const effectiveApi = guestAuth.api ?? api
+    const isSessionGuest = guestAuth.auth !== null
     const matchRoute = useMatchRoute()
     const router = useRouter()
     const { addToast } = useToast()
@@ -177,21 +179,7 @@ function AppInner() {
     const isFirstConnectRef = useRef(true)
     const baseUrlRef = useRef(baseUrl)
     const pushPromptedRef = useRef(false)
-    const { appBadgeEnabled: appBadgePreferenceEnabled } = useAppBadgePreference()
-    const appBadgeEnabled = Boolean(api && token && appBadgePreferenceEnabled && canUseAppBadging())
-    const {
-        sessions: appBadgeSessions,
-        isLoading: appBadgeSessionsLoading,
-        error: appBadgeSessionsError,
-    } = useSessions(api, { enabled: appBadgeEnabled })
-    useAppBadge({
-        enabled: appBadgeEnabled,
-        scope: baseUrl,
-        sessions: appBadgeSessions,
-        isLoading: appBadgeSessionsLoading,
-        hasError: Boolean(appBadgeSessionsError),
-    })
-    const { isSupported: isPushSupported, permission: pushPermission, requestPermission, subscribe } = usePushNotifications(api)
+    const { isSupported: isPushSupported, permission: pushPermission, requestPermission, subscribe } = usePushNotifications(isSessionGuest ? null : api)
 
     useEffect(() => {
         if (baseUrlRef.current === baseUrl) {
@@ -279,8 +267,7 @@ function AppInner() {
             // freshness window on `useSession`, a previously-viewed session that
             // received updates during the SSE gap would otherwise serve stale
             // cached data on remount.  See tiann/hapi#884.
-            queryClient.invalidateQueries({ queryKey: ['session'] }),
-            refreshAllAgyCatalogs(queryClient)
+            queryClient.invalidateQueries({ queryKey: ['session'] })
         ]
         const refreshMessages = (selectedSessionId && api)
             ? syncTailMessages(api, selectedSessionId)
@@ -311,11 +298,7 @@ function AppInner() {
         if (!api || event.sessionId !== selectedSessionId) {
             return
         }
-        if (event.reason === 'rewind' && event.truncateFromLocalId) {
-            rewindMessageWindow(event.sessionId, event.truncateFromLocalId)
-        } else {
-            clearMessageWindow(event.sessionId)
-        }
+        clearMessageWindow(event.sessionId)
         void syncTailMessages(api, event.sessionId)
     }, [api, selectedSessionId])
 
@@ -336,10 +319,6 @@ function AppInner() {
     const translateIncomingToast = useCallback((title: string, body: string): { title: string; body: string } => {
         const normalizedTitle = title.trim()
         const normalizedBody = body.trim()
-        const inputTitle = translateInputRequestTitle(normalizedTitle, t)
-        if (inputTitle) {
-            return { title: inputTitle, body: normalizedBody }
-        }
 
         if (normalizedTitle === 'Ready for input') {
             const waitingMatch = normalizedBody.match(/^(.+)\s+is waiting in\s+(.+)$/i)
@@ -396,12 +375,12 @@ function AppInner() {
         () => getAppSessionSseSubscription(selectedSessionId),
         [selectedSessionId]
     )
-    const sseEnabled = Boolean(api && token)
+    const sseEnabled = Boolean(effectiveApi && effectiveToken)
     const showReconnectingBanner = sseDisconnected && !isSyncing
 
     const { subscriptionId: globalSubscriptionId } = useSSE({
-        enabled: sseEnabled,
-        token: token ?? '',
+        enabled: sseEnabled && !isSessionGuest,
+        token: effectiveToken ?? '',
         baseUrl,
         subscription: globalEventSubscription,
         scope: 'global',
@@ -413,7 +392,7 @@ function AppInner() {
 
     const { subscriptionId: sessionSubscriptionId } = useSSE({
         enabled: sseEnabled && Boolean(sessionEventSubscription),
-        token: token ?? '',
+        token: effectiveToken ?? '',
         baseUrl,
         subscription: sessionEventSubscription ?? undefined,
         scope: 'full',
@@ -422,16 +401,35 @@ function AppInner() {
     })
 
     useVisibilityReporter({
-        api,
+        api: effectiveApi,
         subscriptionId: globalSubscriptionId,
-        enabled: sseEnabled
+        enabled: sseEnabled && !isSessionGuest
     })
 
     useVisibilityReporter({
-        api,
+        api: effectiveApi,
         subscriptionId: sessionSubscriptionId,
-        enabled: sseEnabled && Boolean(sessionEventSubscription)
+        enabled: sseEnabled && Boolean(sessionEventSubscription) && !isSessionGuest
     })
+
+    if (isSessionGuest && effectiveApi && effectiveToken) {
+        return <AppContextProvider value={{ api: effectiveApi, token: effectiveToken, baseUrl, titleSuggestionAvailable, isSessionGuest: true, guestShareToken: guestAuth.shareToken ?? undefined }}><FilePreviewHost><div className="h-full min-h-0 flex flex-col"><Outlet /></div></FilePreviewHost></AppContextProvider>
+    }
+
+    if (pathname.startsWith('/shared-session/')) {
+        return <div className="h-full min-h-0 flex flex-col"><Outlet /></div>
+    }
+
+    // Public studio links intentionally do not require a HAPI login token.
+    // Keep this route outside the authenticated shell; the public API only
+    // exposes a redacted transcript and the studio's own guest post endpoint.
+    if (pathname.startsWith('/studio/')) {
+        return (
+            <div className="h-full min-h-0 flex flex-col">
+                <Outlet />
+            </div>
+        )
+    }
 
     // Loading auth source
     if (isAuthSourceLoading) {
@@ -512,7 +510,8 @@ function AppInner() {
     }
 
     return (
-        <AppContextProvider value={{ api, token, baseUrl, titleSuggestionAvailable }}>
+        <AppContextProvider value={{ api: effectiveApi!, token: effectiveToken!, baseUrl, titleSuggestionAvailable }}>
+            <FilePreviewHost>
             <VoiceProvider>
                 <PwaUpdateBannerWithStatusOffset
                     isSyncing={isSyncing}
@@ -535,6 +534,7 @@ function AppInner() {
                 <ToastContainer />
                 <InstallPrompt />
             </VoiceProvider>
+            </FilePreviewHost>
         </AppContextProvider>
     )
 }

@@ -12,11 +12,10 @@ import {
     cliBinaryUpdatedOnDisk,
     isMachineCapabilitySkewed,
 } from '@hapi/protocol/runnerCapabilities'
-import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, RewindConversationErrorCode, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
+import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
 import type { SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
-import type { ImplementCodexPlanResult } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
-import { hasConversationMessageContent, unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
+import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
 import { randomUUID } from 'node:crypto'
 import type { Store, CancelQueuedMessageResult } from '../store'
@@ -31,7 +30,6 @@ import { MachineCache, type Machine } from './machineCache'
 import { MessageService, type RetryIndeterminateMessageResult } from './messageService'
 import { createTitleSuggestionService, type TitleSuggestionService } from './titleSuggestion'
 import { selectForkTranscriptPrefix } from './forkTranscript'
-import { buildForkSessionSummary } from './forkSessionSummary'
 import {
     RpcGateway,
     RpcTargetMissingError,
@@ -45,11 +43,13 @@ import {
     type RpcListAgyModelsResponse,
     type RpcListPiModelsResponse,
     type RpcListCodexModelsResponse,
+    type RpcListClaudeSessionsResponse,
+    type RpcListDshSessionsResponse,
+    type RpcListDshModelsResponse,
     type RpcListPiSessionsResponse,
     type RpcArchiveCodexSessionResponse,
     type RpcListCursorModelsResponse,
     type RpcListOpencodeModelsResponse,
-    type RpcListOpencodeModelVariantsResponse,
     type RpcListGrokModelsResponse,
     type RpcListCopilotModelsResponse,
     type RpcListGrokReasoningEffortOptionsResponse,
@@ -80,10 +80,12 @@ export type {
     RpcListAgyModelsResponse,
     RpcListPiModelsResponse,
     RpcListCodexModelsResponse,
+    RpcListClaudeSessionsResponse,
+    RpcListDshSessionsResponse,
+    RpcListDshModelsResponse,
     RpcListPiSessionsResponse,
     RpcListCursorModelsResponse,
     RpcListOpencodeModelsResponse,
-    RpcListOpencodeModelVariantsResponse,
     RpcListGrokModelsResponse,
     RpcListCopilotModelsResponse,
     RpcListGrokReasoningEffortOptionsResponse,
@@ -111,7 +113,7 @@ export type LocalResumeTargetResult =
 
 export type LocalHandoffResult =
     | { type: 'success' }
-    | { type: 'error'; message: string; code: 'session_not_found' | 'access_denied' | 'already_local' | 'handoff_failed' | 'control_mode_not_applicable' }
+    | { type: 'error'; message: string; code: 'session_not_found' | 'access_denied' | 'already_local' | 'handoff_failed' }
 
 export type ClearOpencodeSessionResult =
     | { type: 'success'; sessionId: string }
@@ -214,16 +216,6 @@ export class SyncEngine {
     ) {
         this.eventPublisher = new EventPublisher(sseManager, (event) => this.resolveNamespace(event))
         this.sessionCache = new SessionCache(store, this.eventPublisher)
-        this.eventPublisher.subscribe((event) => {
-            if (event.type === 'message-received') {
-                if (!this.sessionCache.getSession(event.sessionId)?.hasConversationContent
-                    && hasConversationMessageContent(event.message.content)) {
-                    this.sessionCache.refreshConversationContent(event.sessionId)
-                }
-            } else if (event.type === 'message-cancelled' || event.type === 'messages-invalidated') {
-                this.sessionCache.refreshConversationContent(event.sessionId)
-            }
-        })
         this.machineCache = new MachineCache(store, this.eventPublisher)
         this.messageService = new MessageService(
             store,
@@ -421,8 +413,8 @@ export class SyncEngine {
         return this.messageService.getQueuedState(sessionId, localIds)
     }
 
-    getSessionExport(sessionId: string, session: Session, options?: { force?: boolean }): HapiSessionExportResult {
-        return this.messageService.getSessionExport(sessionId, session, options)
+    getSessionExport(sessionId: string, session: Session): HapiSessionExportResult {
+        return this.messageService.getSessionExport(sessionId, session)
     }
 
     getDeliverableMessagesAfter(sessionId: string, options: { afterSeq: number; limit: number; now: number }): DecryptedMessage[] {
@@ -1050,10 +1042,7 @@ export class SyncEngine {
 
     /**
      * Ask the CLI to deliver one waiting-queue message into the active turn
-     * (native steer). Supported for Pi, Codex, and Cursor ACP sessions; the
-     * CLI's `steer-queued-message` handler is registered per flavor. Legacy
-     * stream-json Cursor sessions and other flavors are rejected by the
-     * capability gate.
+     * (Pi native steer, Codex turn/steer, Cursor ACP soft send, or DSH steer).
      */
     async steerQueuedMessage(
         sessionId: string,
@@ -1064,9 +1053,9 @@ export class SyncEngine {
             return { status: 'failed', error: 'Session not found', localId: null }
         }
         if (!isSteeringSupportedForSession(session.metadata)) {
-            return { status: 'failed', error: 'Steering is only supported for Pi, Codex, and Cursor ACP sessions', localId: null }
+            return { status: 'failed', error: 'Steering is not supported for this agent', localId: null }
         }
-        if (session.agentState?.controlledByUser === true && !session.metadata?.capabilities?.concurrentClients) {
+        if (session.agentState?.controlledByUser === true) {
             return { status: 'failed', error: 'Steering is only available for remote sessions', localId: null }
         }
 
@@ -1116,6 +1105,71 @@ export class SyncEngine {
         }
     }
 
+    async retryCodexTurn(sessionId: string): Promise<{ retried: boolean; error?: string; sessionId?: string }> {
+        const session = this.getSession(sessionId)
+        if (!session) return { retried: false, error: 'Session not found' }
+        if (this.resolveFlavor(session) !== 'codex') {
+            return { retried: false, error: 'Retry is only available for Codex sessions' }
+        }
+        if (session.agentState?.controlledByUser === true) {
+            return { retried: false, error: 'Retry is only available for remote sessions' }
+        }
+
+        // The CLI keeps the original QueuedMessage in memory while it is
+        // connected. Once the process has gone idle and the session becomes
+        // inactive, that in-memory retry state is gone. Reopen the same
+        // Codex thread and enqueue the last user prompt as a durable fallback
+        // instead of returning a silent 409 to the web client.
+        const retryLastUserPrompt = async (targetSessionId: string): Promise<{ retried: boolean; error?: string; sessionId?: string }> => {
+            const messages = this.messageService.getMessages(targetSessionId, 200)
+            let prompt: string | undefined
+            for (let index = messages.length - 1; index >= 0; index -= 1) {
+                const roleWrapped = unwrapRoleWrappedRecordEnvelope(messages[index]?.content)
+                if (roleWrapped?.role !== 'user') continue
+                prompt = extractUserMessageText(roleWrapped.content)
+                if (prompt) break
+            }
+            if (!prompt) {
+                return { retried: false, error: 'No previous Codex prompt is available to retry' }
+            }
+
+            try {
+                await this.sendMessage(targetSessionId, { text: prompt, deliveryMode: 'queue' })
+                return { retried: true, sessionId: targetSessionId }
+            } catch (error) {
+                return { retried: false, error: error instanceof Error ? error.message : 'Failed to queue Codex retry' }
+            }
+        }
+
+        if (!session.active) {
+            const resumed = await this.resumeSession(sessionId, session.namespace)
+            if (resumed.type === 'error') {
+                return { retried: false, error: resumed.message }
+            }
+            return await retryLastUserPrompt(resumed.sessionId)
+        }
+
+        try {
+            const result = await this.rpcGateway.retryCodexTurn(sessionId)
+            if (result.retried || result.error !== 'No retryable Codex turn is available') {
+                return result
+            }
+            // Older runners and terminal event paths can lose the in-memory
+            // QueuedMessage even though the session is still active. Fall
+            // back to the durable last prompt in that case.
+            return await retryLastUserPrompt(sessionId)
+        } catch (error) {
+            // A runner that predates RetryCodexTurn (or a briefly
+            // disconnected CLI socket) reports a missing RPC handler. The
+            // durable prompt fallback still works in that situation and is
+            // preferable to surfacing a dead-end toast to the user.
+            if (error instanceof RpcTargetMissingError) {
+                return await retryLastUserPrompt(sessionId)
+            }
+            return { retried: false, error: error instanceof Error ? error.message : 'Retry failed' }
+        }
+    }
+
     sweepImmediateQueuedOnSessionEnd(sessionId: string, invokedAt: number): void {
         this.messageService.sweepImmediateQueuedOnSessionEnd(sessionId, invokedAt)
     }
@@ -1147,7 +1201,7 @@ export class SyncEngine {
         if (!session.active) {
             throw new Error('Session must be active')
         }
-        if (session.agentState?.controlledByUser === true && !session.metadata?.capabilities?.concurrentClients) {
+        if (session.agentState?.controlledByUser === true) {
             throw new Error('Conversation history actions require a remote session')
         }
         if (session.thinking) {
@@ -1411,11 +1465,6 @@ export class SyncEngine {
         if (!rpcResult?.nativeSessionId) {
             return { type: 'error', message: 'Native fork did not return a session id' }
         }
-        if (rpcResult.sessionId) {
-            const child = await this.validateSharedChild(source, rpcResult.sessionId, rpcResult.nativeSessionId)
-            if (!child || child.metadata?.forkedFrom !== sessionId) return { type: 'error', message: 'Invalid shared-runtime fork binding' }
-            return { type: 'success', sessionId: child.id }
-        }
 
         // Native fork RPC can race CLI metadata/transcript updates. Construct
         // the child only from a fresh source snapshot, never the pre-RPC row.
@@ -1436,13 +1485,11 @@ export class SyncEngine {
         const copiedLocalIds = new Set(
             prefix.flatMap((message) => (message.localId ? [message.localId] : []))
         )
-        const forkSummary = buildForkSessionSummary(source.metadata)
         const childMetadata: Record<string, unknown> = {
             path: directory,
             host: source.metadata?.host ?? 'unknown',
             machineId,
             flavor,
-            ...(forkSummary ? { summary: forkSummary } : {}),
             forkedFrom: sessionId,
             startedBy: 'runner',
             capabilities: source.metadata?.capabilities,
@@ -1603,7 +1650,7 @@ export class SyncEngine {
         sessionId: string,
         namespace: string,
         messageLocalId: string
-    ): Promise<{ type: 'success' } | { type: 'error'; message: string; code?: RewindConversationErrorCode; hydrateFailed?: boolean }> {
+    ): Promise<{ type: 'success' } | { type: 'error'; message: string; hydrateFailed?: boolean }> {
         if (this.historyActionsInFlight.has(sessionId)) {
             return { type: 'error', message: 'Conversation history action already in progress' }
         }
@@ -1619,7 +1666,7 @@ export class SyncEngine {
         sessionId: string,
         namespace: string,
         messageLocalId: string
-    ): Promise<{ type: 'success' } | { type: 'error'; message: string; code?: RewindConversationErrorCode; hydrateFailed?: boolean }> {
+    ): Promise<{ type: 'success' } | { type: 'error'; message: string; hydrateFailed?: boolean }> {
         const access = this.resolveSessionAccess(sessionId, namespace)
         if (!access.ok) {
             return { type: 'error', message: access.reason === 'not-found' ? 'Session not found' : 'Access denied' }
@@ -1655,11 +1702,7 @@ export class SyncEngine {
         }
 
         if (rpcResult?.success !== true) {
-            return {
-                type: 'error',
-                message: rpcResult?.error ?? 'Native rewind failed',
-                ...(rpcResult?.success === false && rpcResult.code ? { code: rpcResult.code } : {})
-            }
+            return { type: 'error', message: rpcResult?.error ?? 'Native rewind failed' }
         }
 
         try {
@@ -1670,13 +1713,7 @@ export class SyncEngine {
             )
             this.scrubHistoryLocators(sessionId, namespace)
             this.sessionCache.rebuildTodosFromTranscript(sessionId)
-            this.eventPublisher.emit({
-                type: 'messages-invalidated',
-                sessionId,
-                namespace,
-                reason: 'rewind',
-                truncateFromLocalId: rpcResult.truncateFromLocalId ?? messageLocalId
-            })
+            this.eventPublisher.emit({ type: 'messages-invalidated', sessionId, namespace })
             this.sessionCache.refreshSession(sessionId)
             return { type: 'success' }
         } catch (error) {
@@ -1881,46 +1918,7 @@ export class SyncEngine {
         })
     }
 
-    private async validateSharedChild(source: Session, id: string, nativeId?: string): Promise<Session | null> {
-        if (!source.metadata?.capabilities?.concurrentClients || id === source.id) return null
-        const deadline = Date.now() + 5_000
-        do {
-            const child = this.sessionCache.refreshSession(id)
-            if (child && child.namespace === source.namespace
-                && child.metadata?.machineId === source.metadata.machineId
-                && child.metadata?.hostPid === source.metadata.hostPid
-                && child.metadata?.capabilities?.concurrentClients
-                && child.metadata.codexSessionId && (!nativeId || child.metadata.codexSessionId === nativeId)) return child
-            await new Promise(resolve => setTimeout(resolve, 50))
-        } while (Date.now() < deadline)
-        return null
-    }
-
-    async clearConversation(sessionId: string, namespace: string): Promise<{ sessionId: string }> {
-        const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
-        if (!access.ok || !access.session.active || !access.session.metadata?.capabilities?.concurrentClients) {
-            throw new Error('Clear requires an active shared session')
-        }
-        const result = await this.rpcGateway.clearConversation(access.sessionId)
-        const child = await this.validateSharedChild(access.session, result.sessionId)
-        if (!child) throw new Error('Invalid shared-runtime clear binding')
-        // No superseded-session redirect: only the initiating client navigates.
-        return { sessionId: child.id }
-    }
-
-    async implementCodexPlan(sessionId: string, namespace: string, planId: string): Promise<ImplementCodexPlanResult> {
-        const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
-        if (!access.ok || !access.session.active || access.session.metadata?.flavor !== 'codex'
-            || !access.session.metadata.capabilities?.concurrentClients) {
-            return { ok: false, code: 'unavailable', error: 'Plan implementation requires an active shared Codex session' }
-        }
-        // CLI validates native history and deduplicates already accepted actions.
-        // A stale Hub plan id must not prevent a safe retry of a lost RPC reply.
-        return await this.rpcGateway.implementCodexPlan(access.sessionId, planId)
-    }
-
     async switchSession(sessionId: string, to: 'remote' | 'local'): Promise<void> {
-        if (this.getSession(sessionId)?.metadata?.capabilities?.concurrentClients) throw new Error('control_mode_not_applicable')
         if (this.historyActionsInFlight.has(sessionId)) {
             throw new Error('Conversation history action already in progress')
         }
@@ -2015,7 +2013,7 @@ export class SyncEngine {
         collaborationMode?: CodexCollaborationMode,
         copilotAgentMode?: CopilotAgentMode,
         startingMode?: 'remote' | 'pty'
-    ): ReturnType<RpcGateway['spawnSession']> {
+    ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
         return await this.rpcGateway.spawnSession(
             machineId,
             directory,
@@ -2104,11 +2102,9 @@ export class SyncEngine {
         const operation = access.session.metadata?.opencodeClearOperation
         if (!operation) return { type: 'error', message: 'Clear reservation not found', code: 'clear_unavailable' }
         if (operation.state === 'aborted') {
-            if (replacementSessionId !== operation.replacementSessionId) {
-                return { type: 'error', message: 'Clear reservation not found', code: 'clear_unavailable' }
-            }
-            this.sessionCache.refreshConversationContent(operation.replacementSessionId)
-            return { type: 'success', sessionId }
+            return replacementSessionId === operation.replacementSessionId
+                ? { type: 'success', sessionId }
+                : { type: 'error', message: 'Clear reservation not found', code: 'clear_unavailable' }
         }
         const required = { replacementSessionId, state: expectedState, requireInactive }
         for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -2117,7 +2113,6 @@ export class SyncEngine {
             const current = latest.metadata.opencodeClearOperation
             if (!current) break
             if (current.replacementSessionId === required.replacementSessionId && current.state === 'aborted') {
-                this.sessionCache.refreshConversationContent(current.replacementSessionId)
                 return { type: 'success', sessionId }
             }
             if ((required.requireInactive && latest.active)
@@ -2129,7 +2124,6 @@ export class SyncEngine {
             }, latest.metadataVersion, namespace, required)
             if (result.result === 'success') {
                 this.sessionCache.refreshSession(sessionId)
-                this.sessionCache.refreshConversationContent(current.replacementSessionId)
                 return { type: 'success', sessionId }
             }
             if (result.result !== 'version-mismatch') break
@@ -2475,12 +2469,10 @@ export class SyncEngine {
         if (flavor === 'grok') return metadata.grokSessionId ?? null
         if (flavor === 'agy') return metadata.agySessionId ?? null
         if (flavor === 'cursor') return metadata.cursorSessionId ?? null
+        if (flavor === 'dsh') return metadata.dshSessionId ?? null
         if (flavor === 'kimi') return metadata.kimiSessionId ?? null
         if (flavor === 'copilot') return metadata.copilotSessionId ?? null
         if (flavor === 'pi') return metadata.piSessionId ?? null
-        // The official DSH ACP server creates fresh sessions only; never fall
-        // through to a stale Claude id and advertise a false resume path.
-        if (flavor === 'dsh') return null
 
         return metadata.claudeSessionId ?? this.recoverClaudeSessionIdFromMessages(session.id, namespace)
     }
@@ -3432,14 +3424,11 @@ export class SyncEngine {
             }
         }
 
-        if (access.session.metadata?.capabilities?.concurrentClients) {
-            return { type: 'error', message: 'Shared sessions attach without handoff', code: 'control_mode_not_applicable' }
-        }
         if (!access.session.active) {
             return { type: 'success' }
         }
 
-        if (access.session.agentState?.controlledByUser === true && !access.session.metadata?.capabilities?.concurrentClients) {
+        if (access.session.agentState?.controlledByUser === true) {
             return {
                 type: 'error',
                 message: 'Session is already controlled by a local terminal',
@@ -3618,6 +3607,7 @@ export class SyncEngine {
             && (prev?.opencodeSessionId ?? null) === (next.opencodeSessionId ?? null)
             && (prev?.grokSessionId ?? null) === (next.grokSessionId ?? null)
             && (prev?.cursorSessionId ?? null) === (next.cursorSessionId ?? null)
+            && (prev?.dshSessionId ?? null) === (next.dshSessionId ?? null)
             && (prev?.piSessionId ?? null) === (next.piSessionId ?? null)
             && (prev?.kimiSessionId ?? null) === (next.kimiSessionId ?? null)
             && (prev?.agySessionId ?? null) === (next.agySessionId ?? null)
@@ -3916,12 +3906,8 @@ export class SyncEngine {
         return false
     }
 
-    async checkPathsExist(machineId: string, paths: string[]): ReturnType<RpcGateway['checkPathsExist']> {
+    async checkPathsExist(machineId: string, paths: string[]): Promise<Record<string, boolean>> {
         return await this.rpcGateway.checkPathsExist(machineId, paths)
-    }
-
-    async getAgentAvailability(machineId: string): ReturnType<RpcGateway['getAgentAvailability']> {
-        return await this.rpcGateway.getAgentAvailability(machineId)
     }
 
     async listMachineDirectory(machineId: string, path: string, includeHidden?: boolean): Promise<RpcListDirectoryResponse> {
@@ -3980,11 +3966,8 @@ export class SyncEngine {
         return await this.rpcGateway.listSkills(sessionId, flavor)
     }
 
-    async listAgyModelsForMachine(
-        machineId: string,
-        options?: { refresh?: boolean }
-    ): Promise<RpcListAgyModelsResponse> {
-        return await this.rpcGateway.listAgyModelsForMachine(machineId, options)
+    async listAgyModelsForMachine(machineId: string): Promise<RpcListAgyModelsResponse> {
+        return await this.rpcGateway.listAgyModelsForMachine(machineId)
     }
 
     async listPiModelsForMachine(machineId: string): Promise<RpcListPiModelsResponse> {
@@ -3995,10 +3978,6 @@ export class SyncEngine {
         return await this.rpcGateway.listCodexModelsForMachine(machineId)
     }
 
-    async listOpencodeModelVariantsForMachine(machineId: string, cwd?: string | null): Promise<RpcListOpencodeModelVariantsResponse> {
-        return await this.rpcGateway.listOpencodeModelVariantsForMachine(machineId, cwd)
-    }
-
     async listCodexModelsForSession(sessionId: string): Promise<RpcListCodexModelsResponse> {
         return await this.rpcGateway.listCodexModelsForSession(sessionId)
     }
@@ -4007,8 +3986,24 @@ export class SyncEngine {
         return await this.rpcGateway.listCodexSessionsForMachine(machineId, cwd, sessionIds)
     }
 
+    async listClaudeSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[]): Promise<RpcListClaudeSessionsResponse> {
+        return await this.rpcGateway.listClaudeSessionsForMachine(machineId, cwd, sessionIds)
+    }
+
     async listPiSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[]): Promise<RpcListPiSessionsResponse> {
         return await this.rpcGateway.listPiSessionsForMachine(machineId, cwd, sessionIds)
+    }
+
+    async listDshSessionsForMachine(machineId: string, cwd?: string | null, sessionIds?: string[]): Promise<RpcListDshSessionsResponse> {
+        return await this.rpcGateway.listDshSessionsForMachine(machineId, cwd, sessionIds)
+    }
+
+    async listDshModelsForMachine(machineId: string): Promise<RpcListDshModelsResponse> {
+        return await this.rpcGateway.listDshModelsForMachine(machineId)
+    }
+
+    async listDshModelsForSession(sessionId: string): Promise<RpcListDshModelsResponse> {
+        return await this.rpcGateway.listDshModelsForSession(sessionId)
     }
 
     async archiveCodexSessionForMachine(machineId: string, sessionId: string): Promise<RpcArchiveCodexSessionResponse> {

@@ -9,7 +9,12 @@ import type {
     CodexDesktopStatusResponse,
     CodexArchiveSessionResponse,
     DecryptedMessage,
+    DshImportSessionsResponse,
+    DshLocalSessionsResponse,
     CodexCollaborationMode,
+    ClaudeImportSessionsRequest,
+    ClaudeImportSessionsResponse,
+    ClaudeLocalSessionsResponse,
     CopilotAgentMode,
     FileSearchResponse,
     MachinesResponse,
@@ -24,16 +29,23 @@ import type {
     SkillsResponse,
     SpawnResponse,
     VisibilityPayload,
-    HapiSessionExportResponse,
+    HapiSessionExport,
     HubHealthResponse,
     SessionResponse,
     SessionTitleSuggestionResponse,
-    SessionsResponse
+    SessionsResponse,
+    StudioAccessMode,
+    StudioOwnerResponse,
+    StudioPost,
+    SessionShare,
+    SessionShareListItem,
+    SessionShareCreateResponse,
+    SessionShareExchangeResponse
 } from '@/types/api'
 import type {
     AgyModelsResponse,
-    AgentAvailabilityResponse,
     CodexModelsResponse,
+    DshModelsResponse,
     CursorMigrateOutcome,
     CursorMigrateToAcpRequest,
     CursorChatStoreStatus,
@@ -48,7 +60,6 @@ import type {
     MachineListDirectoryResponse,
     MachinePathsExistsResponse,
     OpencodeModelsResponse,
-    OpencodeModelVariantsResponse,
     OpencodeReasoningEffortResponse,
     PiModelsResponse,
     QueuedStateResponse,
@@ -266,6 +277,10 @@ export class ApiClient {
         return await this.request<PushVapidPublicKeyResponse>('/api/push/vapid-public-key')
     }
 
+    async getClaudeCustomModels(): Promise<{ models: string[] }> {
+        return await this.request<{ models: string[] }>('/api/claude/custom-models')
+    }
+
     async subscribePushNotifications(payload: PushSubscriptionPayload): Promise<void> {
         await this.request('/api/push/subscribe', {
             method: 'POST',
@@ -297,8 +312,38 @@ export class ApiClient {
         return await this.request<PiLocalSessionsResponse>(`/api/pi/sessions${query}`)
     }
 
+    async getClaudeSessions(cwd?: string | null, machineId?: string | null): Promise<ClaudeLocalSessionsResponse> {
+        const params = new URLSearchParams()
+        if (cwd?.trim()) params.set('cwd', cwd.trim())
+        if (machineId?.trim()) params.set('machineId', machineId.trim())
+        const query = params.size ? `?${params.toString()}` : ''
+        return await this.request<ClaudeLocalSessionsResponse>(`/api/claude/sessions${query}`)
+    }
+
+    async importClaudeSessions(payload: ClaudeImportSessionsRequest): Promise<ClaudeImportSessionsResponse> {
+        return await this.request<ClaudeImportSessionsResponse>('/api/claude/import-sessions', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        })
+    }
+
     async importPiSessions(payload: { sessionIds: string[]; cwd?: string | null; machineId?: string | null }): Promise<PiImportSessionsResponse> {
         return await this.request<PiImportSessionsResponse>('/api/pi/import-sessions', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        })
+    }
+
+    async getDshSessions(cwd?: string | null, machineId?: string | null): Promise<DshLocalSessionsResponse> {
+        const params = new URLSearchParams()
+        if (cwd?.trim()) params.set('cwd', cwd.trim())
+        if (machineId?.trim()) params.set('machineId', machineId.trim())
+        const query = params.size ? `?${params.toString()}` : ''
+        return await this.request<DshLocalSessionsResponse>(`/api/dsh/sessions${query}`)
+    }
+
+    async importDshSessions(payload: { sessionIds: string[]; cwd?: string | null; machineId?: string | null }): Promise<DshImportSessionsResponse> {
+        return await this.request<DshImportSessionsResponse>('/api/dsh/import-sessions', {
             method: 'POST',
             body: JSON.stringify(payload)
         })
@@ -355,13 +400,106 @@ export class ApiClient {
         return await this.request<SessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}`)
     }
 
-    async getSessionExport(
-        sessionId: string,
-        options?: { force?: boolean; signal?: AbortSignal }
-    ): Promise<HapiSessionExportResponse> {
-        const query = options?.force ? '?force=true' : ''
-        return await this.request<HapiSessionExportResponse>(
-            `/api/sessions/${encodeURIComponent(sessionId)}/export${query}`,
+    async createSessionShare(sessionId: string): Promise<SessionShareCreateResponse> {
+        return await this.request<SessionShareCreateResponse>('/api/session-shares', { method: 'POST', body: JSON.stringify({ sessionId }) })
+    }
+
+    async getSessionShares(): Promise<{ shares: SessionShareListItem[] }> {
+        return await this.request<{ shares: SessionShareListItem[] }>('/api/session-shares')
+    }
+
+    async getSessionShare(sessionId: string): Promise<{ share: SessionShare | null }> {
+        return await this.request<{ share: SessionShare | null }>(`/api/session-shares/session/${encodeURIComponent(sessionId)}`)
+    }
+
+    async revokeSessionShare(shareId: string): Promise<void> {
+        await this.request(`/api/session-shares/${encodeURIComponent(shareId)}`, { method: 'DELETE' })
+    }
+
+    async exchangeSessionShare(shareToken: string, accessCode: string): Promise<SessionShareExchangeResponse> {
+        // This endpoint intentionally has no authenticated session yet. Keep
+        // its structured error response intact so the share join screen can
+        // translate stable codes such as `invalid_access_code` and
+        // `rate_limited` instead of receiving request()'s generic 401 error.
+        const res = await fetch(this.buildUrl(`/api/public/session-shares/${encodeURIComponent(shareToken)}/exchange`), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ accessCode })
+        })
+        if (!res.ok) {
+            const body = await res.text().catch(() => '')
+            const code = parseErrorCode(body)
+            throw new ApiError(
+                `HTTP ${res.status} ${res.statusText}: ${body}`,
+                res.status,
+                code,
+                body || undefined
+            )
+        }
+        return await res.json() as SessionShareExchangeResponse
+    }
+
+    async createStudio(input: {
+        sessionId: string
+        title?: string
+        accessMode?: StudioAccessMode
+    }): Promise<StudioOwnerResponse> {
+        return await this.request<StudioOwnerResponse>('/api/studios', {
+            method: 'POST',
+            body: JSON.stringify(input)
+        })
+    }
+
+    async getStudio(studioId: string): Promise<StudioOwnerResponse> {
+        return await this.request<StudioOwnerResponse>(`/api/studios/${encodeURIComponent(studioId)}`)
+    }
+
+    async getStudioSuggestions(studioId: string, cursor?: { beforeAt: number; beforeId: string }): Promise<{
+        items: StudioPost[]
+        nextCursor: { beforeAt: number; beforeId: string } | null
+    }> {
+        const params = cursor
+            ? `?beforeAt=${encodeURIComponent(cursor.beforeAt)}&beforeId=${encodeURIComponent(cursor.beforeId)}`
+            : ''
+        return await this.request(`/api/studios/${encodeURIComponent(studioId)}/suggestions${params}`)
+    }
+
+    async getStudioForSession(sessionId: string): Promise<{ room: StudioOwnerResponse['room'] | null; posts: StudioPost[] }> {
+        return await this.request(`/api/studios/session/${encodeURIComponent(sessionId)}`)
+    }
+
+    async updateStudio(
+        studioId: string,
+        input: { title?: string; accessMode?: StudioAccessMode; rotateToken?: boolean }
+    ): Promise<{ room: StudioOwnerResponse['room'] }> {
+        return await this.request(`/api/studios/${encodeURIComponent(studioId)}`, {
+            method: 'PATCH',
+            body: JSON.stringify(input)
+        })
+    }
+
+    async revokeStudio(studioId: string): Promise<void> {
+        await this.request(`/api/studios/${encodeURIComponent(studioId)}`, { method: 'DELETE' })
+    }
+
+    async clearStudioPosts(studioId: string): Promise<{ deleted: number }> {
+        return await this.request(`/api/studios/${encodeURIComponent(studioId)}/posts`, { method: 'DELETE' })
+    }
+
+    async decideStudioPost(
+        studioId: string,
+        postId: string,
+        input: { action: 'submit' | 'dismiss'; text?: string }
+    ): Promise<{ post: StudioPost | null }> {
+        return await this.request(
+            `/api/studios/${encodeURIComponent(studioId)}/posts/${encodeURIComponent(postId)}/decision`,
+            { method: 'POST', body: JSON.stringify(input) }
+        )
+    }
+
+    async getSessionExport(sessionId: string, options?: { signal?: AbortSignal }): Promise<HapiSessionExport> {
+        return await this.request<HapiSessionExport>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/export`,
             { signal: options?.signal }
         )
     }
@@ -559,12 +697,16 @@ export class ApiClient {
         return response as CancelMessageResponse
     }
 
-    async steerMessage(sessionId: string, messageId: string): Promise<SteerQueuedMessageResponse> {
+    async steerQueuedMessage(sessionId: string, messageId: string): Promise<SteerQueuedMessageResponse> {
         const response = await this.request(
             `/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/steer`,
-            { method: 'POST' }
+            { method: 'POST', body: JSON.stringify({}) }
         )
         return response as SteerQueuedMessageResponse
+    }
+
+    async steerMessage(sessionId: string, messageId: string): Promise<SteerQueuedMessageResponse> {
+        return this.steerQueuedMessage(sessionId, messageId)
     }
 
     async retryIndeterminateMessage(sessionId: string, messageId: string): Promise<RetryIndeterminateMessageResponse> {
@@ -581,14 +723,11 @@ export class ApiClient {
         })
     }
 
-    async clearConversation(sessionId: string): Promise<{ sessionId: string }> {
-        return await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/clear`, { method: 'POST' })
-    }
-
-    async implementCodexPlan(sessionId: string, planId: string): Promise<void> {
-        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/codex/plan/implement`, {
-            method: 'POST', body: JSON.stringify({ planId })
-        })
+    async retryCodexTurn(sessionId: string): Promise<{ retried: boolean; error?: string; sessionId?: string }> {
+        return await this.request<{ retried: boolean; error?: string; sessionId?: string }>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/retry-codex-turn`,
+            { method: 'POST' }
+        )
     }
 
     async forkConversation(sessionId: string, messageLocalId?: string): Promise<{ sessionId: string }> {
@@ -813,12 +952,6 @@ export class ApiClient {
         )
     }
 
-    async getMachineAgentAvailability(machineId: string): Promise<AgentAvailabilityResponse> {
-        return await this.request<AgentAvailabilityResponse>(
-            `/api/machines/${encodeURIComponent(machineId)}/agent-availability`
-        )
-    }
-
     async checkMachinePathsExists(
         machineId: string,
         paths: string[]
@@ -868,14 +1001,9 @@ export class ApiClient {
         })
     }
 
-    async getMachineAgyModels(
-        machineId: string,
-        options?: { refresh?: boolean }
-    ): Promise<AgyModelsResponse> {
-        // Without `refresh` the machine may answer from its cached catalog.
-        const query = options?.refresh ? '?refresh=true' : ''
+    async getMachineAgyModels(machineId: string): Promise<AgyModelsResponse> {
         return await this.request<AgyModelsResponse>(
-            `/api/machines/${encodeURIComponent(machineId)}/agy-models${query}`
+            `/api/machines/${encodeURIComponent(machineId)}/agy-models`
         )
     }
 
@@ -894,6 +1022,18 @@ export class ApiClient {
     async getSessionCodexModels(sessionId: string): Promise<CodexModelsResponse> {
         return await this.request<CodexModelsResponse>(
             `/api/sessions/${encodeURIComponent(sessionId)}/codex-models`
+        )
+    }
+
+    async getMachineDshModels(machineId: string): Promise<DshModelsResponse> {
+        return await this.request<DshModelsResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/dsh-models`
+        )
+    }
+
+    async getSessionDshModels(sessionId: string): Promise<DshModelsResponse> {
+        return await this.request<DshModelsResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/dsh-models`
         )
     }
 
@@ -932,12 +1072,6 @@ export class ApiClient {
     async getMachineOpencodeModelsForCwd(machineId: string, cwd: string): Promise<OpencodeModelsResponse> {
         return await this.request<OpencodeModelsResponse>(
             `/api/machines/${encodeURIComponent(machineId)}/opencode-models?cwd=${encodeURIComponent(cwd)}`
-        )
-    }
-
-    async getMachineOpencodeModelVariants(machineId: string, cwd?: string | null): Promise<OpencodeModelVariantsResponse> {
-        return await this.request<OpencodeModelVariantsResponse>(
-            `/api/machines/${encodeURIComponent(machineId)}/opencode-model-variants${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ''}`
         )
     }
 

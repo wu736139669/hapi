@@ -26,12 +26,17 @@ import { createUsageRoutes } from './routes/usage'
 import { createGitRoutes } from './routes/git'
 import { createCliRoutes } from './routes/cli'
 import { createCodexDesktopRoutes } from './routes/codexDesktop'
+import { createClaudeSessionRoutes } from './routes/claudeSessions'
 import { createPiSessionRoutes } from './routes/piSessions'
+import { createDshSessionRoutes } from './routes/dshSessions'
 import { createPushRoutes } from './routes/push'
 import { createDevicesRoutes } from './routes/devices'
 import { createVoiceRoutes } from './routes/voice'
 import { createHubSettingsRoutes } from './routes/hubSettings'
 import { createWorkGraphRoutes } from './routes/workGraph'
+import { createClaudeModelsRoutes } from './routes/claudeModels'
+import { createPublicStudioRoutes, createStudioRoutes } from './routes/studios'
+import { createSessionShareRoutes } from './routes/sessionShares'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 import type { Server as BunServer, ServerWebSocket } from 'bun'
@@ -210,6 +215,8 @@ function serveEmbeddedAsset(asset: EmbeddedWebAsset): Response {
         headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
         headers['CDN-Cache-Control'] = 'no-store'
         headers['Cloudflare-CDN-Cache-Control'] = 'no-store'
+    } else if (asset.path.startsWith('/studio-assets/')) {
+        headers['Cache-Control'] = 'public, max-age=31536000, immutable'
     }
 
     return new Response(Bun.file(asset.sourcePath), {
@@ -228,6 +235,7 @@ function createWebApp(options: {
     embeddedAssetMap: Map<string, EmbeddedWebAsset> | null
     relayMode?: boolean
     officialWebUrl?: string
+    dataDir: string
 }): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
@@ -278,14 +286,30 @@ function createWebApp(options: {
         }
         return next()
     })
+    app.use('/studio-assets/*', async (c, next) => {
+        c.header('Cache-Control', 'public, max-age=31536000, immutable')
+        if (acceptsGzip(c.req.header('Accept-Encoding'))) {
+            return gzipCompress(c, next)
+        }
+        return next()
+    })
 
     app.route('/cli', createCliRoutes(options.getSyncEngine))
 
     app.route('/api', createAuthRoutes(options.jwtSecret, options.store))
     app.route('/api', createBindRoutes(options.jwtSecret, options.store))
+    app.route('/api', createPublicStudioRoutes({
+        store: options.store,
+        getSyncEngine: options.getSyncEngine
+    }))
 
-    app.use('/api/*', createAuthMiddleware(options.jwtSecret))
-    app.route('/api', createEventsRoutes(options.getSseManager, options.getSyncEngine, options.getVisibilityTracker))
+    app.use('/api/*', createAuthMiddleware(options.jwtSecret, {
+        isGuestTokenActive: (shareToken) => options.store.sessionShares.getActiveByToken(shareToken) !== null
+    }))
+    app.route('/api', createSessionShareRoutes({ store: options.store, jwtSecret: options.jwtSecret, getSyncEngine: options.getSyncEngine }))
+    app.route('/api', createEventsRoutes(options.getSseManager, options.getSyncEngine, options.getVisibilityTracker, {
+        isGuestTokenActive: (shareToken) => options.store.sessionShares.getActiveByToken(shareToken) !== null
+    }))
     app.route('/api', createSessionsRoutes(options.getSyncEngine))
     app.route('/api', createMessagesRoutes(options.getSyncEngine))
     app.route('/api', createPermissionsRoutes(options.getSyncEngine))
@@ -293,9 +317,17 @@ function createWebApp(options: {
     app.route('/api', createStorageRoutes(configuration.dbPath))
     app.route('/api', createHubSettingsRoutes(configuration.dataDir))
     app.route('/api', createUsageRoutes(options.store))
+    app.route('/api', createStudioRoutes({
+        store: options.store,
+        getSyncEngine: options.getSyncEngine
+    }))
     app.route('/api', createGitRoutes(options.getSyncEngine))
     // 中文注释：这里提供两类 Codex 辅助能力：扫描本地 transcript 以导入到 Hapi，以及按需重启 Codex Desktop 客户端。
     app.route('/api', createCodexDesktopRoutes({
+        store: options.store,
+        getSyncEngine: options.getSyncEngine
+    }))
+    app.route('/api', createClaudeSessionRoutes({
         store: options.store,
         getSyncEngine: options.getSyncEngine
     }))
@@ -303,7 +335,12 @@ function createWebApp(options: {
         store: options.store,
         getSyncEngine: options.getSyncEngine
     }))
+    app.route('/api', createDshSessionRoutes({
+        store: options.store,
+        getSyncEngine: options.getSyncEngine
+    }))
     app.route('/api', createPushRoutes(options.store, options.vapidPublicKey))
+    app.route('/api', createClaudeModelsRoutes(options.dataDir))
     app.route('/api', createDevicesRoutes(options.store))
     app.route('/api', createVoiceRoutes({ dataDir: configuration.dataDir }))
     // Path is intentionally NOT `/api/events` — that route is the SSE stream.
@@ -337,6 +374,7 @@ from GitHub Pages instead of through the relay tunnel.
     if (options.embeddedAssetMap) {
         const embeddedAssetMap = options.embeddedAssetMap
         const indexHtmlAsset = embeddedAssetMap.get('/index.html')
+        const studioHtmlAsset = embeddedAssetMap.get('/studio.html')
 
         if (!indexHtmlAsset) {
             app.get('*', (c) => {
@@ -351,6 +389,10 @@ from GitHub Pages instead of through the relay tunnel.
         app.use('*', async (c, next) => {
             if (c.req.path.startsWith('/api')) {
                 return await next()
+            }
+
+            if (c.req.path.startsWith('/studio/') && studioHtmlAsset) {
+                return serveEmbeddedAsset(studioHtmlAsset)
             }
 
             if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
@@ -378,6 +420,7 @@ from GitHub Pages instead of through the relay tunnel.
     }
 
     const { distDir, indexHtmlPath } = findWebappDistDir()
+    const studioHtmlPath = join(distDir, 'studio.html')
 
     if (!existsSync(indexHtmlPath)) {
         app.get('/', (c) => {
@@ -390,6 +433,13 @@ from GitHub Pages instead of through the relay tunnel.
     }
 
     app.use('/assets/*', serveStatic({ root: distDir }))
+    app.use('/studio-assets/*', serveStatic({ root: distDir }))
+
+    if (existsSync(studioHtmlPath)) {
+        app.get('/studio/*', async (c) => {
+            return await serveStatic({ root: distDir, path: 'studio.html' })(c, async () => {})
+        })
+    }
 
     app.use('*', async (c, next) => {
         if (c.req.path.startsWith('/api')) {
@@ -423,6 +473,7 @@ export async function startWebServer(options: {
     corsOrigins?: string[]
     relayMode?: boolean
     officialWebUrl?: string
+    dataDir: string
 }): Promise<BunServer<WebSocketData>> {
     const isCompiled = isBunCompiled()
     const embeddedAssetMap = isCompiled ? await loadEmbeddedAssetMap() : null
@@ -435,6 +486,7 @@ export async function startWebServer(options: {
         vapidPublicKey: options.vapidPublicKey,
         corsOrigins: options.corsOrigins,
         embeddedAssetMap,
+        dataDir: options.dataDir,
         relayMode: options.relayMode,
         officialWebUrl: options.officialWebUrl
     })

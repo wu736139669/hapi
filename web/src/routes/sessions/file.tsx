@@ -212,6 +212,144 @@ function resolveImageMimeType(path: string): string | null {
     return IMAGE_MIME_BY_EXTENSION[ext] ?? null
 }
 
+function isHtmlFile(path: string): boolean {
+    const parts = path.split('.')
+    if (parts.length <= 1) return false
+    const ext = parts[parts.length - 1]?.toLowerCase()
+    return ext === 'html' || ext === 'htm'
+}
+
+const RESPONSIVE_VIEWPORT_META = '<meta name="viewport" content="width=device-width, initial-scale=1">'
+
+/** Add a mobile viewport without changing a document that already declares one. */
+function prepareHtmlDocument(content: string): string {
+    if (/<meta\b[^>]*name\s*=\s*["']viewport["']/i.test(content)) {
+        return content
+    }
+
+    const headTag = content.match(/<head\b[^>]*>/i)
+    if (headTag?.index !== undefined) {
+        const end = headTag.index + headTag[0].length
+        return `${content.slice(0, end)}\n${RESPONSIVE_VIEWPORT_META}${content.slice(end)}`
+    }
+
+    const htmlTag = content.match(/<html\b[^>]*>/i)
+    if (htmlTag?.index !== undefined) {
+        const end = htmlTag.index + htmlTag[0].length
+        return `${content.slice(0, end)}\n<head>${RESPONSIVE_VIEWPORT_META}</head>${content.slice(end)}`
+    }
+
+    return `<!doctype html><html><head>${RESPONSIVE_VIEWPORT_META}</head><body>${content}</body></html>`
+}
+
+function ExternalLinkIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+            aria-hidden="true"
+        >
+            <path d="M14 3h7v7" />
+            <path d="M10 14 21 3" />
+            <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
+        </svg>
+    )
+}
+
+/**
+ * Open an interactive copy without navigating to a data URL. Chrome blocks
+ * top-level data URL navigations in some PWA/extension contexts and leaves an
+ * empty tab behind. An about:blank document is opened by the user gesture,
+ * then the HTML is mounted inside a sandboxed srcdoc iframe. The sandbox
+ * gives the preview an opaque origin, so project scripts cannot access HAPI's
+ * DOM or authenticated API context.
+ */
+function openHtmlPreview(content: string, title: string, backLabel: string): void {
+    const previewWindow = window.open('about:blank', '_blank')
+    if (!previewWindow) return
+
+    try {
+        // Detach the opener before any project content is mounted. The outer
+        // document only contains the sandboxed preview iframe.
+        previewWindow.opener = null
+        const previewDocument = previewWindow.document
+        previewDocument.open()
+        previewDocument.write(
+            '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{height:100%;margin:0}body{display:flex;flex-direction:column;background:#f7f7f5;color:#252525;font:13px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}header{display:flex;align-items:center;gap:10px;flex:0 0 44px;padding:0 14px;background:#f1f1ed;box-shadow:0 1px 8px rgba(0,0,0,.08)}header button{border:0;border-radius:7px;padding:6px 10px;background:transparent;color:#444;cursor:pointer;font:inherit}header button:hover{background:#e5e5df}header span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#777}iframe{display:block;flex:1;min-height:0;width:100%;border:0;background:#fff}</style></head><body></body></html>'
+        )
+        previewDocument.close()
+        previewDocument.title = title
+
+        const toolbar = previewDocument.createElement('header')
+        const backButton = previewDocument.createElement('button')
+        backButton.type = 'button'
+        backButton.textContent = `← ${backLabel}`
+        backButton.addEventListener('click', () => {
+            previewWindow.close()
+            if (!previewWindow.closed) previewWindow.history.back()
+        })
+        toolbar.appendChild(backButton)
+        const titleLabel = previewDocument.createElement('span')
+        titleLabel.textContent = title
+        toolbar.appendChild(titleLabel)
+        previewDocument.body.appendChild(toolbar)
+
+        const frame = previewDocument.createElement('iframe')
+        frame.setAttribute('sandbox', 'allow-scripts allow-forms')
+        frame.setAttribute('referrerpolicy', 'no-referrer')
+        frame.srcdoc = content
+        previewDocument.body.appendChild(frame)
+    } catch {
+        // A browser may close the popup while it is being initialized. Avoid
+        // leaving a blank tab around in that case.
+        previewWindow.close()
+    }
+}
+
+function HtmlPreview(props: {
+    content: string
+    title: string
+    safetyLabel: string
+    openLabel: string
+    backLabel: string
+}) {
+    const preparedContent = useMemo(() => prepareHtmlDocument(props.content), [props.content])
+
+    return (
+        <div className="overflow-hidden rounded-lg border border-[var(--app-border)] bg-white shadow-sm">
+            <div className="flex items-center gap-2 border-b border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-[var(--app-hint)]">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500/70" aria-hidden="true" />
+                <span className="min-w-0 flex-1 truncate">{props.safetyLabel}</span>
+                <button
+                    type="button"
+                    onClick={() => openHtmlPreview(preparedContent, props.title, props.backLabel)}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-secondary-bg)]"
+                    title={props.openLabel}
+                    aria-label={props.openLabel}
+                >
+                    <ExternalLinkIcon />
+                    <span className="hidden sm:inline">{props.openLabel}</span>
+                </button>
+            </div>
+            <iframe
+                title={props.title}
+                srcDoc={preparedContent}
+                sandbox=""
+                referrerPolicy="no-referrer"
+                className="block h-[min(72dvh,720px)] min-h-[360px] w-full bg-white"
+            />
+        </div>
+    )
+}
+
 function getUtf8ByteLength(value: string): number {
     return new TextEncoder().encode(value).length
 }
@@ -247,6 +385,7 @@ export default function FilePage() {
     const fileName = filePath.split('/').pop() || filePath || t('file.page.fallbackName')
     const imageMimeType = useMemo(() => resolveImageMimeType(filePath), [filePath])
     const markdownFile = useMemo(() => isMarkdownFile(filePath), [filePath])
+    const htmlFile = useMemo(() => isHtmlFile(filePath), [filePath])
 
     const diffQuery = useQuery({
         queryKey: queryKeys.gitFileDiff(sessionId, filePath, staged),
@@ -290,6 +429,8 @@ export default function FilePage() {
     const language = useMemo(() => imageMimeType ? undefined : resolveLanguage(filePath), [filePath, imageMimeType])
     const [markdownMode, setMarkdownMode] = useState<MarkdownPreviewMode>(getInitialMarkdownPreviewMode)
     const showMarkdownSource = !markdownFile || markdownMode === 'source'
+    const [htmlMode, setHtmlMode] = useState<'source' | 'preview'>('preview')
+    const showHtmlSource = !htmlFile || htmlMode === 'source'
     const highlighted = useShikiHighlighter(
         imageMimeType || (markdownFile && !showMarkdownSource) ? '' : decodedContent,
         language
@@ -380,6 +521,12 @@ export default function FilePage() {
     const diffErrorMessage = diffError ? formatDiffError(diffError, t) : null
     const fileErrorMessage = fileError ? formatReadFileError(fileError, t) : null
     const fileMetadata = formatFileMetadata(fileContentResult?.size, fileContentResult?.modified, locale)
+    // HTML/Markdown previews do not depend on Git. A non-repository (or a
+    // file outside the repository) can still make the parallel diff request
+    // fail, but surfacing Git's verbose usage text above a valid preview is
+    // misleading and overwhelms the actual file content.
+    const showDiffError = Boolean(diffErrorMessage)
+        && !(displayMode === 'file' && (htmlFile || markdownFile))
 
     return (
         <div className="flex h-full min-h-0 flex-col">
@@ -424,7 +571,7 @@ export default function FilePage() {
                 </div>
             </div>
 
-            {diffContent || (markdownFile && displayMode === 'file') ? (
+            {diffContent || ((markdownFile || htmlFile) && displayMode === 'file') ? (
                 <div className="bg-[var(--app-bg)]">
                     <div className="mx-auto w-full max-w-content px-3 py-2 flex items-center gap-2 border-b border-[var(--app-divider)]">
                         {diffContent ? (
@@ -464,13 +611,32 @@ export default function FilePage() {
                                 </button>
                             </>
                         ) : null}
+                        {htmlFile && displayMode === 'file' ? (
+                            <>
+                                {diffContent || markdownFile ? <span className="mx-1 h-4 w-px bg-[var(--app-divider)]" aria-hidden="true" /> : null}
+                                <button
+                                    type="button"
+                                    onClick={() => setHtmlMode('source')}
+                                    className={`rounded px-3 py-1 text-xs font-semibold ${showHtmlSource ? 'bg-[var(--app-button)] text-[var(--app-button-text)] opacity-80' : 'bg-[var(--app-subtle-bg)] text-[var(--app-hint)]'}`}
+                                >
+                                    {t('file.page.tab.source')}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setHtmlMode('preview')}
+                                    className={`rounded px-3 py-1 text-xs font-semibold ${!showHtmlSource ? 'bg-[var(--app-button)] text-[var(--app-button-text)] opacity-80' : 'bg-[var(--app-subtle-bg)] text-[var(--app-hint)]'}`}
+                                >
+                                    {t('file.page.tab.preview')}
+                                </button>
+                            </>
+                        ) : null}
                     </div>
                 </div>
             ) : null}
 
             <div ref={fileScrollRef} data-hapi-file-scroll="true" className="app-scroll-y flex-1 min-h-0">
                 <div className="mx-auto w-full max-w-content p-4">
-                    {diffErrorMessage ? (
+                    {showDiffError ? (
                         <div className="mb-3 rounded-md bg-amber-500/10 p-2 text-xs text-[var(--app-hint)]">
                             {diffErrorMessage}
                         </div>
@@ -498,7 +664,15 @@ export default function FilePage() {
                             </div>
                         ) : (
                             decodedContent ? (
-                                markdownFile && !showMarkdownSource ? (
+                                htmlFile && !showHtmlSource ? (
+                                    <HtmlPreview
+                                        content={decodedContent}
+                                        title={t('file.page.htmlPreviewTitle', { name: fileName })}
+                                        safetyLabel={t('file.page.htmlPreviewSafety')}
+                                        openLabel={t('file.page.htmlPreviewOpenInNewTab')}
+                                        backLabel={t('file.page.htmlPreviewBackToHapi')}
+                                    />
+                                ) : markdownFile && !showMarkdownSource ? (
                                     <div className="markdown-content">
                                         {canCopyContent ? (
                                             <div className="mb-3 overflow-hidden rounded-md">

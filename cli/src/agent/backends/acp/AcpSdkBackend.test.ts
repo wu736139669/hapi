@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentMessage } from '@/agent/types';
 import { AcpSdkBackend } from './AcpSdkBackend';
-import { AcpMessageHandler } from './AcpMessageHandler';
 import { buildAcpStdioSpawnOptions } from './AcpStdioTransport';
 import { ACP_SESSION_UPDATE_TYPES } from './constants';
 
@@ -210,7 +209,7 @@ describe('AcpSdkBackend', () => {
         ]);
     });
 
-    it('uses session/set_config_option when flavor is opencode and captures thought_level', async () => {
+    it('uses session/set_model when flavor is opencode', async () => {
         const backend = new AcpSdkBackend({ command: 'opencode' });
         const calls: Array<{ method: string; params: unknown }> = [];
         const backendInternal = backend as unknown as {
@@ -219,50 +218,25 @@ describe('AcpSdkBackend', () => {
         backendInternal.transport = {
             sendRequest: async (method, params) => {
                 calls.push({ method, params });
-                if (method === 'session/set_config_option') {
-                    return {
-                        models: {
-                            currentModelId: 'opencode/hy3-free',
-                            availableModels: []
-                        },
-                        configOptions: [{
-                            id: 'effort',
-                            category: 'thought_level',
-                            currentValue: 'high',
-                            options: [
-                                { value: 'low', name: 'Low' },
-                                { value: 'medium', name: 'Medium' },
-                                { value: 'high', name: 'High' }
-                            ]
-                        }]
-                    };
-                }
-                return null;
+                // OpenCode 1.14.30's set_model response: only an opaque _meta block.
+                return {
+                    _meta: { opencode: { modelId: 'ollama/exaone:4.5-33b-q8', variant: null, availableVariants: [] } }
+                };
             },
             close: async () => {}
         };
 
-        await backend.setModel('session-1', 'opencode/hy3-free', { flavor: 'opencode' });
+        await backend.setModel('session-1', 'ollama/exaone:4.5-33b-q8', { flavor: 'opencode' });
 
         expect(calls).toEqual([
             {
-                method: 'session/set_config_option',
+                method: 'session/set_model',
                 params: {
                     sessionId: 'session-1',
-                    configId: 'model',
-                    value: 'opencode/hy3-free'
+                    modelId: 'ollama/exaone:4.5-33b-q8'
                 }
             }
         ]);
-        expect(backend.getThoughtLevelConfigOption('session-1')).toMatchObject({
-            id: 'effort',
-            currentValue: 'high',
-            options: [
-                { value: 'low', name: 'Low' },
-                { value: 'medium', name: 'Medium' },
-                { value: 'high', name: 'High' }
-            ]
-        });
     });
 
     it('captures availableModels and currentModelId from session/new response', async () => {
@@ -474,9 +448,8 @@ describe('AcpSdkBackend', () => {
         expect(backend.getSessionModelsMetadata(sessionId)).toBeUndefined();
     });
 
-    it('falls back to session/set_model when opencode set_config_option is not found', async () => {
+    it('optimistically updates currentModelId after a successful opencode setModel call', async () => {
         const backend = new AcpSdkBackend({ command: 'opencode' });
-        const calls: Array<{ method: string; params: unknown }> = [];
         const backendInternal = backend as unknown as {
             transport: { sendRequest: (method: string, params: unknown) => Promise<unknown>; close: () => Promise<void> } | null;
         };
@@ -485,22 +458,12 @@ describe('AcpSdkBackend', () => {
             { modelId: 'ollama/b', name: 'b' }
         ];
         backendInternal.transport = {
-            sendRequest: async (method, params) => {
-                calls.push({ method, params });
+            sendRequest: async (method) => {
                 if (method === 'session/new') {
                     return {
                         sessionId: 's1',
-                        models: { availableModels: fixtureModels, currentModelId: 'ollama/a' },
-                        configOptions: [{
-                            id: 'effort',
-                            category: 'thought_level',
-                            currentValue: 'high',
-                            options: [{ value: 'high', name: 'High' }]
-                        }]
+                        models: { availableModels: fixtureModels, currentModelId: 'ollama/a' }
                     };
-                }
-                if (method === 'session/set_config_option') {
-                    throw new Error('Method not found');
                 }
                 if (method === 'session/set_model') {
                     // OpenCode 1.14.30: response carries only an opaque _meta block.
@@ -512,60 +475,14 @@ describe('AcpSdkBackend', () => {
         };
 
         await backend.newSession({ cwd: '/tmp/x', mcpServers: [] });
-        expect(backend.getThoughtLevelConfigOption('s1')).toBeDefined();
         await backend.setModel('s1', 'ollama/b', { flavor: 'opencode' });
 
-        expect(calls.slice(1)).toEqual([
-            {
-                method: 'session/set_config_option',
-                params: { sessionId: 's1', configId: 'model', value: 'ollama/b' }
-            },
-            { method: 'session/set_model', params: { sessionId: 's1', modelId: 'ollama/b' } }
-        ]);
+        // availableModels list is preserved from session/new; currentModelId is
+        // optimistically updated from the requested modelId.
         expect(backend.getSessionModelsMetadata('s1')).toEqual({
             availableModels: fixtureModels,
             currentModelId: 'ollama/b'
         });
-        expect(backend.getThoughtLevelConfigOption('s1')).toBeUndefined();
-    });
-
-    it('rethrows non method-not-found errors from opencode set_config_option without falling back', async () => {
-        const backend = new AcpSdkBackend({ command: 'opencode' });
-        const backendInternal = backend as unknown as {
-            transport: { sendRequest: (method: string, params: unknown) => Promise<unknown>; close: () => Promise<void> } | null;
-        };
-        backendInternal.transport = {
-            sendRequest: async (method) => {
-                if (method === 'session/set_config_option') {
-                    throw new Error('Invalid params');
-                }
-                return null;
-            },
-            close: async () => {}
-        };
-
-        await expect(backend.setModel('session-1', 'm/b', { flavor: 'opencode' })).rejects.toThrow('Invalid params');
-    });
-
-    it('uses session/set_model when flavor is grok', async () => {
-        const backend = new AcpSdkBackend({ command: 'grok' });
-        const calls: Array<{ method: string; params: unknown }> = [];
-        const backendInternal = backend as unknown as {
-            transport: { sendRequest: (method: string, params: unknown) => Promise<unknown>; close: () => Promise<void> } | null;
-        };
-        backendInternal.transport = {
-            sendRequest: async (method, params) => {
-                calls.push({ method, params });
-                return null;
-            },
-            close: async () => {}
-        };
-
-        await backend.setModel('session-1', 'grok-4.5', { flavor: 'grok' });
-
-        expect(calls).toEqual([
-            { method: 'session/set_model', params: { sessionId: 'session-1', modelId: 'grok-4.5' } }
-        ]);
     });
 
 
@@ -768,6 +685,80 @@ describe('AcpSdkBackend', () => {
             contextTokens: 13_879,
             contextWindow: 65_536
         });
+    });
+
+    it('sends OpenCode native prompts with a model variant and forwards ACP updates', async () => {
+        backendStatics.UPDATE_QUIET_PERIOD_MS = 1;
+        backendStatics.UPDATE_DRAIN_TIMEOUT_MS = 20;
+        backendStatics.PRE_PROMPT_UPDATE_QUIET_PERIOD_MS = 1;
+        backendStatics.PRE_PROMPT_UPDATE_DRAIN_TIMEOUT_MS = 20;
+        backendStatics.LATE_FLUSH_INTERVAL_MS = 1;
+        backendStatics.LATE_FLUSH_QUIET_PERIOD_MS = 1;
+        backendStatics.LATE_FLUSH_WINDOW_MS = 20;
+
+        const backend = new AcpSdkBackend({ command: 'opencode' });
+        const backendInternal = backend as unknown as {
+            transport: {
+                sendRequest: (...args: unknown[]) => Promise<unknown>;
+                close: () => Promise<void>;
+            } | null;
+            handleSessionUpdate: (params: unknown) => void;
+        };
+        backendInternal.transport = {
+            sendRequest: async () => ({}),
+            close: async () => {}
+        };
+
+        const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body));
+            expect(body.model).toEqual({ providerID: 'opencode-go', modelID: 'deepseek-v4.1-flash' });
+            expect(body.variant).toBe('max');
+            expect(body.parts).toEqual([{ type: 'text', text: 'hello' }]);
+            backendInternal.handleSessionUpdate({
+                sessionId: 'session-1',
+                update: {
+                    sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+                    content: { type: 'text', text: 'OK' }
+                }
+            });
+            return new Response(JSON.stringify({
+                info: {
+                    finish: 'stop',
+                    tokens: { input: 12, output: 2, reasoning: 5, total: 14, cache: { read: 3, write: 1 } }
+                }
+            }), { status: 200 });
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        try {
+            const messages: AgentMessage[] = [];
+            await backend.promptWithVariant('session-1', [{ type: 'text', text: 'hello' }], (message) => {
+                messages.push(message);
+            }, {
+                baseUrl: 'http://127.0.0.1:1234',
+                directory: '/workspace',
+                providerId: 'opencode-go',
+                modelId: 'deepseek-v4.1-flash',
+                variant: 'max'
+            });
+
+            expect(fetchMock).toHaveBeenCalledOnce();
+            expect(messages).toContainEqual({ type: 'text', text: 'OK' });
+            expect(messages).toContainEqual({
+                type: 'usage',
+                inputTokens: 12,
+                outputTokens: 2,
+                totalTokens: 14,
+                thoughtTokens: 5,
+                cacheReadTokens: 3,
+                cacheCreationTokens: 1,
+                contextTokens: undefined,
+                contextWindow: undefined
+            });
+            expect(messages).toContainEqual({ type: 'turn_complete', stopReason: 'stop' });
+        } finally {
+            vi.unstubAllGlobals();
+        }
     });
 
     it('emits straggler chunks before turn_complete', async () => {
@@ -1333,7 +1324,7 @@ describe('AcpSdkBackend', () => {
             transport: { sendRequestWithDispatch: () => { dispatched: Promise<void>; completed: Promise<unknown> }; close: () => Promise<void> } | null;
             isProcessingMessage: boolean;
             activePromptRequests: number;
-            finishPromptRequest: (epoch: number) => void;
+            finishPromptRequest: () => void;
             waitForSessionUpdateQuiet: () => Promise<void>;
             drainLateBuffers: () => Promise<void>;
         };
@@ -1353,7 +1344,7 @@ describe('AcpSdkBackend', () => {
         let responseComplete = false;
         const responseWait = backend.waitForResponseComplete().then(() => { responseComplete = true; });
 
-        backendInternal.finishPromptRequest(0);
+        backendInternal.finishPromptRequest();
         await Promise.resolve();
         expect(backend.processingMessage).toBe(true);
         expect(responseComplete).toBe(false);
@@ -1411,7 +1402,6 @@ describe('AcpSdkBackend', () => {
         expect(() => backend.beginSoftSteerPrompt('session-1', [{ type: 'text', text: 'x' }]))
             .toThrow(/No active ACP prompt/);
     });
-
 
     it('suppressUpdatesDuring drops session/update notifications that would otherwise leak into the previous turn\'s onUpdate, then restores normal forwarding', async () => {
         // Reproduces the real /compact duplicate-summary bug: OpenCode keeps
@@ -1809,59 +1799,5 @@ describe('AcpSdkBackend', () => {
             options: []
         }, { outcome: 'cancelled' });
         await pending;
-    });
-});
-
-describe('AcpSdkBackend abortSoftSteers', () => {
-    it('drains buffered foreground output before suppressing late updates', async () => {
-        const backend = new AcpSdkBackend({ command: 'agent' });
-        const updates: AgentMessage[] = [];
-        const handler = new AcpMessageHandler((message) => updates.push(message));
-        const backendInternal = backend as unknown as {
-            messageHandler: AcpMessageHandler | null;
-        };
-
-        await handler.handleUpdate({
-            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
-            content: { type: 'text', text: 'partial answer' }
-        });
-        await handler.handleUpdate({
-            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentThoughtChunk,
-            content: { type: 'text', text: 'partial thought' }
-        });
-        backendInternal.messageHandler = handler;
-
-        backend.abortSoftSteers();
-
-        expect(updates).toEqual([
-            { type: 'reasoning', text: 'partial thought' },
-            { type: 'text', text: 'partial answer' }
-        ]);
-    });
-
-    it('releases processingMessage without waiting for the concurrent prompt', () => {
-        const backend = new AcpSdkBackend({ command: 'agent' });
-        const backendInternal = backend as unknown as {
-            isProcessingMessage: boolean;
-            activePromptRequests: number;
-        };
-        backendInternal.isProcessingMessage = true;
-        backendInternal.activePromptRequests = 2;
-
-        backend.abortSoftSteers();
-
-        expect(backend.processingMessage).toBe(false);
-        expect(backendInternal.activePromptRequests).toBe(0);
-    });
-
-    it('is a no-op when nothing is in flight', () => {
-        const backend = new AcpSdkBackend({ command: 'agent' });
-        const backendInternal = backend as unknown as {
-            activePromptRequests: number;
-        };
-        backendInternal.activePromptRequests = 0;
-
-        expect(() => backend.abortSoftSteers()).not.toThrow();
-        expect(backend.processingMessage).toBe(false);
     });
 });

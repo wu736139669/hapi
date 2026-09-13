@@ -36,7 +36,11 @@ const visibilitySchema = z.object({
 export function createEventsRoutes(
     getSseManager: () => SSEManager | null,
     getSyncEngine: () => SyncEngine | null,
-    getVisibilityTracker: () => VisibilityTracker | null
+    getVisibilityTracker: () => VisibilityTracker | null,
+    options?: {
+        isGuestTokenActive?: (shareToken: string) => boolean
+        guestCheckIntervalMs?: number
+    }
 ): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
@@ -59,9 +63,19 @@ export function createEventsRoutes(
         const resumeFrom = parseOptionalId(c.req.header('Last-Event-ID'))
             ?? parseOptionalId(query.lastEventId)
         const namespace = c.get('namespace')
-        let resolvedSessionId = sessionId
+        const guestSessionId = c.get('sessionId')
+        const guestShareToken = c.get('shareToken')
+        const isGuestShareActive = () => !guestShareToken
+            || options?.isGuestTokenActive?.(guestShareToken) === true
+        if (!isGuestShareActive()) {
+            return c.json({ error: 'Share revoked or expired' }, 401)
+        }
+        if (guestSessionId && (all || machineId || (sessionId && sessionId !== guestSessionId))) {
+            return c.json({ error: 'Guest access is limited to the shared session' }, 403)
+        }
+        let resolvedSessionId = guestSessionId ?? sessionId
 
-        if (sessionId || machineId) {
+        if (sessionId || machineId || guestSessionId) {
             const engine = getSyncEngine()
             if (!engine) {
                 return c.json({ error: 'Not connected' }, 503)
@@ -131,7 +145,25 @@ export function createEventsRoutes(
                 await manager.drainPending(subscriptionId)
 
                 await new Promise<void>((resolve) => {
-                    const done = () => resolve()
+                    let settled = false
+                    let guestCheckInterval: ReturnType<typeof setInterval> | null = null
+                    const done = () => {
+                        if (settled) {
+                            return
+                        }
+                        settled = true
+                        if (guestCheckInterval) {
+                            clearInterval(guestCheckInterval)
+                        }
+                        resolve()
+                    }
+                    if (guestShareToken && options?.isGuestTokenActive) {
+                        guestCheckInterval = setInterval(() => {
+                            if (!isGuestShareActive()) {
+                                done()
+                            }
+                        }, options.guestCheckIntervalMs ?? 5_000)
+                    }
                     c.req.raw.signal.addEventListener('abort', done, { once: true })
                     stream.onAbort(done)
                 })

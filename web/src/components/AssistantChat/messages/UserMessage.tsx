@@ -38,14 +38,14 @@ export function HappyUserMessage() {
         const custom = s.message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
         return custom?.kind === 'cli-output'
     })
-    const steered = useAuiState(({ message }) => (
-        message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
-    )?.steered === true)
     const cliText = useAuiState((s) => {
         const custom = s.message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
         if (custom?.kind !== 'cli-output') return ''
         return s.message.content.find((part): part is TextMessagePart => part.type === 'text')?.text ?? ''
     })
+    const steered = useAuiState(({ message }) => (
+        message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
+    )?.steered === true)
     if (role !== 'user') return null
     const canRetry = status === 'failed' && typeof localId === 'string' && Boolean(ctx.onRetryMessage)
     const onRetry = canRetry ? () => ctx.onRetryMessage!(localId) : undefined

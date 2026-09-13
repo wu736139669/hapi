@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { useNavigate } from '@tanstack/react-router'
-import { useQueryClient } from '@tanstack/react-query'
 import { PRESERVE_SESSION_SIDEBAR_SCROLL } from '@/lib/sessionNavigation'
 import { AssistantRuntimeProvider, useAui, useAuiState } from '@assistant-ui/react'
 import { DragDropZone } from '@/components/AssistantChat/DragDropZone'
-import { ApiError, type ApiClient } from '@/api/client'
+import type { ApiClient } from '@/api/client'
 import type {
-    AgyModelSummary,
     AttachmentMetadata,
     CodexCollaborationMode,
-    CodexModelSummary,
     CopilotAgentMode,
     DecryptedMessage,
     PermissionMode,
@@ -21,12 +18,14 @@ import type {
 import type { ChatBlock, NormalizedMessage } from '@/chat/types'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
+import { getRetryableCodexTurnMessageId } from '@/chat/codexRetry'
 import { reduceChatBlocks } from '@/chat/reducer'
 import { reconcileChatBlocks } from '@/chat/reconcile'
 import { buildConversationOutline } from '@/chat/outline'
 import { buildVisibleChatBlocks, isToolGroupBlock, type ToolGroupBlock } from '@/chat/toolGroups'
 import { useUnseenBlockCount } from '@/hooks/useUnseenBlockCount'
 import { useCodexExplorationCollapse } from '@/hooks/useCodexExplorationCollapse'
+import { useExecutionProcess } from '@/hooks/useExecutionProcess'
 import { isQueuedForInvocation } from '@/lib/messages'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import {
@@ -57,8 +56,8 @@ import {
 } from '@/lib/messageDelivery'
 import type { MessageDeliveryMode } from '@hapi/protocol'
 import { isSteeringSupportedForSession } from '@hapi/protocol'
+import type { OlderLoadOutcome } from '@/lib/message-window-store'
 import { createAttachmentAdapter } from '@/lib/attachmentAdapter'
-import { rewindMessageWindow, type OlderLoadOutcome } from '@/lib/message-window-store'
 import { ShareSeedConsumer } from '@/components/ShareSeedConsumer'
 import {
     createScratchlistAttachmentAdapter,
@@ -88,10 +87,11 @@ import { SessionStatusPanel } from '@/components/SessionStatusPanel'
 import { buildSessionStatusData } from '@/chat/sessionStatus'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
+import { useClaudeCustomModels } from '@/hooks/queries/useClaudeCustomModels'
 import { useCodexModels } from '@/hooks/queries/useCodexModels'
+import { useDshModels } from '@/hooks/queries/useDshModels'
 import { useCursorModels } from '@/hooks/queries/useCursorModels'
 import { useCursorModelsForMachine } from '@/hooks/queries/useCursorModelsForMachine'
-import { useAgyModels } from '@/hooks/queries/useAgyModels'
 import {
     mergeCursorCliModelSkus,
     resolveCursorBaseFromWire
@@ -112,34 +112,14 @@ import { useCopilotModels } from '@/hooks/queries/useCopilotModels'
 import { useGrokReasoningEffortOptions } from '@/hooks/queries/useGrokReasoningEffortOptions'
 import { usePiModels } from '@/hooks/queries/usePiModels'
 import { useOpencodeReasoningEffortOptions } from '@/hooks/queries/useOpencodeReasoningEffortOptions'
-import { queryKeys } from '@/lib/query-keys'
+import { buildDshModelOptions, getDshReasoningOptions } from '@/lib/dshModelOptions'
 import { useVoiceOptional } from '@/lib/voice-context'
 import { AgentTerminalView } from '@/components/AgentTerminal/AgentTerminalView'
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { VoiceBackendSession, registerSessionStore, registerVoiceHooksStore, voiceHooks } from '@/realtime'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
+import { useOptionalAppContext } from '@/lib/app-context'
 
 type SessionModelSelection = { provider: string; modelId: string } | string | null
-
-/**
- * Query key to invalidate after a successful model switch on an opencode
- * session, or null for other flavors. The effort-options query caches per
- * session (not per model), so without invalidation a stale option list from
- * the previous model survives the switch.
- */
-export function opencodeEffortOptionsInvalidationKey(
-    agentFlavor: string | null | undefined,
-    sessionId: string
-): readonly unknown[] | null {
-    if (agentFlavor !== 'opencode') {
-        return null
-    }
-    return queryKeys.sessionOpencodeReasoningEffortOptions(sessionId)
-}
-
-export function isRewindForkFallbackError(error: unknown): boolean {
-    return error instanceof ApiError && error.code === 'ambiguous_native_boundary_fork_safe'
-}
 
 export function resolvePiContextWindow(
     models: PiModelSummary[] | undefined,
@@ -154,24 +134,6 @@ export function resolvePiContextWindow(
         : models?.find((candidate) => candidate.modelId === legacyModelId)
 
     return model?.contextWindow
-}
-
-/**
- * Composer options for an agy session, from the same machine catalog New Session
- * reads. `undefined` until the machine answers, so the picker falls back to the
- * built-in list rather than rendering empty.
- */
-export function buildAgyComposerModelOptions(
-    availableModels: AgyModelSummary[]
-): Array<{ value: string; label: string }> | undefined {
-    if (availableModels.length === 0) {
-        return undefined
-    }
-
-    return availableModels.map((model) => ({
-        value: model.modelId,
-        label: model.name ?? model.modelId
-    }))
 }
 
 export async function applyModelChangeWithReasoningRollback(args: {
@@ -197,26 +159,6 @@ export async function applyModelChangeWithReasoningRollback(args: {
         }
         throw error
     }
-}
-
-export function shouldClearReasoningEffortForModelChange(args: {
-    agentFlavor: string | null | undefined
-    previousModelReasoningEffort: string | null
-    codexModels: readonly CodexModelSummary[]
-    model: SessionModelSelection
-}): boolean {
-    if (!args.previousModelReasoningEffort) {
-        return false
-    }
-    if (args.agentFlavor === 'opencode') {
-        return false
-    }
-    return args.agentFlavor === 'codex'
-        && supportsCodexReasoningEffort(
-            args.codexModels,
-            args.model,
-            args.previousModelReasoningEffort
-        ) === false
 }
 
 /**
@@ -375,14 +317,6 @@ export function shouldRouteToScratchlist(
     // uploads made before scratchlist mode was enabled still have normal
     // CLI paths; the hub rejects those as scratchlist metadata.
     return (attachments ?? []).every((att) => isHubScratchlistAttachmentPath(att.path))
-}
-
-export function mergeStagedAttachmentsInOrder(
-    attachments: readonly AttachmentMetadata[],
-    staged: readonly AttachmentMetadata[],
-): AttachmentMetadata[] {
-    const stagedById = new Map(staged.map((attachment) => [attachment.id, attachment]))
-    return attachments.map((attachment) => stagedById.get(attachment.id) ?? attachment)
 }
 
 function isUninvokedScheduledMessage(message: DecryptedMessage): boolean {
@@ -557,6 +491,7 @@ function hasAbortableAgentRun(blocks: readonly ChatBlock[]): boolean {
 
 type SessionChatProps = {
     api: ApiClient
+    baseUrl?: string
     titleSuggestionAvailable?: boolean
     session: Session
     cursorChatOnDisk?: boolean
@@ -574,7 +509,7 @@ type SessionChatProps = {
     historyVersion: number
     tailRevision: number
     onBack: () => void
-    onRefresh: () => void | Promise<void>
+    onRefresh: () => void
     onLoadMore: (onBeforeApply?: (historyVersion: number) => boolean) => Promise<OlderLoadOutcome>
     onCancelLoadMore: () => void
     // Returns the accepted mutation's attempt id, or false when
@@ -591,6 +526,7 @@ type SessionChatProps = {
     onUploadSessionResolved?: (sessionId: string) => void
     onViewModeChange: (mode: 'tail' | 'history') => void
     onRetryMessage?: (localId: string) => void
+    onRetryCodexTurn?: () => Promise<void> | void
     autocompleteSuggestions?: (query: string) => Promise<Suggestion[]>
     availableSlashCommands?: readonly SlashCommand[]
     // The latest send the hub rejected (4xx/5xx/network).  When set, the
@@ -628,12 +564,13 @@ export function SessionChat(props: SessionChatProps) {
 }
 
 function SessionChatInner(props: SessionChatProps) {
+    const isSessionGuest = useOptionalAppContext()?.isSessionGuest ?? false
     const { haptic } = usePlatform()
     const { t } = useTranslation()
     const { codexExplorationCollapsed } = useCodexExplorationCollapse()
+    const { executionProcessEnabled } = useExecutionProcess()
     const navigate = useNavigate()
     const [historyActionPending, setHistoryActionPending] = useState(false)
-    const [rewindForkFallback, setRewindForkFallback] = useState<string | null>(null)
 
     const onForkConversation = useCallback(async (messageLocalId?: string) => {
         setHistoryActionPending(true)
@@ -653,29 +590,11 @@ function SessionChatInner(props: SessionChatProps) {
         setHistoryActionPending(true)
         try {
             await props.api.rewindConversation(props.session.id, messageLocalId)
-            // Apply the deterministic local part immediately so the removed
-            // suffix cannot flash back while the authoritative refresh runs.
-            rewindMessageWindow(props.session.id, messageLocalId)
-            await props.onRefresh()
-            // Force the same tail behavior as a successful send after the
-            // refreshed message window has been committed.
-            setForceScrollToken((token) => token + 1)
-        } catch (error) {
-            if (isRewindForkFallbackError(error)) {
-                setRewindForkFallback(messageLocalId)
-                return
-            }
-            throw error
+            props.onRefresh()
         } finally {
             setHistoryActionPending(false)
         }
     }, [props.api, props.onRefresh, props.session.id])
-
-    const onRewindForkFallback = useCallback(async () => {
-        if (!rewindForkFallback) return
-        await onForkConversation(rewindForkFallback)
-        setRewindForkFallback(null)
-    }, [onForkConversation, rewindForkFallback])
     const sessionInactive = !props.session.active
     const inactiveCanResume = inactiveSessionCanResume(
         props.session,
@@ -689,9 +608,8 @@ function SessionChatInner(props: SessionChatProps) {
     // misleadingly "connected" view. Matches the composer terminal button, which
     // is likewise gated on `session.active`.
     const canViewAgentTerminal =
-        props.session.metadata?.startingMode === 'pty' && props.session.active
+        !isSessionGuest && props.session.metadata?.startingMode === 'pty' && props.session.active
     const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
-    const focusComposerRef = useRef<(() => void) | null>(null)
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const visibleGroupsRef = useRef<ToolGroupBlock[]>([])
     const [rememberedTailBoundary, setRememberedTailBoundary] = useState<{
@@ -718,7 +636,6 @@ function SessionChatInner(props: SessionChatProps) {
     const enqueueCursorModelApply = useMemo(() => createSerialAsyncQueue(), [])
     const lastSyncedCursorModelRef = useRef<string | null | undefined>(undefined)
     const scratchlist = useHubScratchlist(props.session.id, props.api)
-    const queryClient = useQueryClient()
     const { sessions: allSessions } = useSessions(props.api)
     const resolveSessionMentionTooltip = useCallback((id: string, title: string) => {
         const hit = allSessions.find((s) => s.id === id) ?? null
@@ -918,15 +835,15 @@ function SessionChatInner(props: SessionChatProps) {
             const list = attachments ?? []
             const hubItems = list.filter((att) => isHubScratchlistAttachmentPath(att.path))
             if (hubItems.length > 0) {
+                const normalItems = list.filter((att) => !isHubScratchlistAttachmentPath(att.path))
                 const staged = await stageScratchlistAttachmentsForComposeSend(
                     props.api,
                     props.session.id,
                     hubItems,
                 )
-                const ordered = mergeStagedAttachmentsInOrder(list, staged)
                 const accepted = await props.onSend(
                     text,
-                    ordered,
+                    [...normalItems, ...staged],
                     scheduledAt,
                     deliveryMode,
                 )
@@ -939,41 +856,52 @@ function SessionChatInner(props: SessionChatProps) {
                 }
                 return accepted
             }
-            if (!scratchlistMode && scheduledAt == null && !attachments?.length
-                && props.session.metadata?.capabilities?.concurrentClients && /^\/(clear|new)\s*$/.test(text.trim())) {
-                const result = await props.api.clearConversation(props.session.id)
-                await navigate({ to: '/sessions/$sessionId', params: { sessionId: result.sessionId }, ...PRESERVE_SESSION_SIDEBAR_SCROLL })
-                return { attemptId: null }
-            }
             return props.onSend(text, attachments, scheduledAt, deliveryMode)
         },
-        [props.onSend, props.api, props.session.id, props.session.metadata?.capabilities?.concurrentClients, navigate, scratchlist, scratchlistMode],
+        [props.onSend, props.api, props.session.id, scratchlist, scratchlistMode],
     )
     const agentFlavor = props.session.metadata?.flavor ?? null
-    // The effort-options query is keyed by session only, so a stale option
-    // list from the previous model would survive a switch. Reset when the
-    // session model changes. `session.model` is updated by the hub at REST-ack
-    // time, ahead of the CLI's inline ACP switch — the invalidation alone
-    // would refetch the old model's options, and the hook's pending-switch
-    // polling (currentModelId mismatch) is what actually converges the picker.
-    // The key is built inside the effect: computing it during render yields a
-    // fresh array every render, and putting that in the deps would invalidate
-    // on every streaming re-render.
-    const sessionModel = props.session.model
-    const sessionId = props.session.id
-    useEffect(() => {
-        const effortInvalidationKey = opencodeEffortOptionsInvalidationKey(agentFlavor, sessionId)
-        if (!effortInvalidationKey || sessionModel === undefined) return
-        void queryClient.resetQueries({ queryKey: effortInvalidationKey, exact: true })
-    }, [agentFlavor, sessionId, sessionModel, queryClient])
-    const controlledByUser = props.session.agentState?.controlledByUser === true && !props.session.metadata?.capabilities?.concurrentClients
+    const controlledByUser = props.session.agentState?.controlledByUser === true
     const codexCollaborationModeSupported = agentFlavor === 'codex' && !controlledByUser
+    const claudeCustomModelsState = useClaudeCustomModels({
+        api: props.api,
+        // Guest shares are scoped to one session; custom Claude models are a
+        // hub-wide setting and would otherwise trigger a forbidden request.
+        enabled: !isSessionGuest && agentFlavor === 'claude'
+    })
+    const claudeModelOptions = useMemo(() => (
+        agentFlavor === 'claude'
+            ? claudeCustomModelsState.models.map((model) => ({ value: model, label: model }))
+            : undefined
+    ), [agentFlavor, claudeCustomModelsState.models])
     const codexModelsState = useCodexModels({
         api: props.api,
         sessionId: props.session.id,
-        machineId: props.session.metadata?.machineId ?? null,
-        enabled: agentFlavor === 'codex' && props.session.active && !controlledByUser
+        // Model discovery is owner-only for collaborative shares.
+        machineId: isSessionGuest ? null : props.session.metadata?.machineId ?? null,
+        enabled: !isSessionGuest && agentFlavor === 'codex' && props.session.active && !controlledByUser
     })
+    const dshModelsState = useDshModels({
+        api: props.api,
+        sessionId: props.session.id,
+        enabled: !isSessionGuest && agentFlavor === 'dsh' && props.session.active && !controlledByUser
+    })
+    const dshModelOptions = useMemo(
+        () => agentFlavor === 'dsh'
+            ? buildDshModelOptions(dshModelsState.availableModels, dshModelsState.current)
+            : undefined,
+        [agentFlavor, dshModelsState.availableModels, dshModelsState.current]
+    )
+    const dshReasoningEffortOptions = useMemo(
+        () => agentFlavor === 'dsh'
+            ? getDshReasoningOptions(
+                dshModelsState.availableModels,
+                dshModelsState.current,
+                props.session.model
+            )
+            : undefined,
+        [agentFlavor, dshModelsState.availableModels, dshModelsState.current, props.session.model]
+    )
     const effectiveCodexServiceTier = agentFlavor === 'codex'
         ? getEffectiveCodexServiceTier(
             props.session.serviceTier,
@@ -1008,13 +936,12 @@ function SessionChatInner(props: SessionChatProps) {
     const opencodeModelsState = useOpencodeModels({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'opencode' && props.session.active
+        enabled: !isSessionGuest && agentFlavor === 'opencode' && props.session.active
     })
     const opencodeReasoningEffortState = useOpencodeReasoningEffortOptions({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'opencode' && props.session.active,
-        sessionModel: props.session.model
+        enabled: !isSessionGuest && agentFlavor === 'opencode' && props.session.active
     })
     const opencodeModelOptions = useMemo(() => {
         if (agentFlavor !== 'opencode') {
@@ -1029,12 +956,12 @@ function SessionChatInner(props: SessionChatProps) {
     const grokModelsState = useGrokModels({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'grok' && props.session.active && !controlledByUser
+        enabled: !isSessionGuest && agentFlavor === 'grok' && props.session.active && !controlledByUser
     })
     const grokEffortState = useGrokReasoningEffortOptions({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'grok' && props.session.active && !controlledByUser
+        enabled: !isSessionGuest && agentFlavor === 'grok' && props.session.active && !controlledByUser
     })
     const grokModelOptions = useMemo(() => (
         agentFlavor === 'grok'
@@ -1050,7 +977,7 @@ function SessionChatInner(props: SessionChatProps) {
     const copilotModelsState = useCopilotModels({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'copilot' && props.session.active && !controlledByUser
+        enabled: !isSessionGuest && agentFlavor === 'copilot' && props.session.active && !controlledByUser
     })
     const copilotModelOptions = useMemo(() => (
         agentFlavor === 'copilot'
@@ -1068,13 +995,13 @@ function SessionChatInner(props: SessionChatProps) {
     const cursorModelsState = useCursorModels({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'cursor' && props.session.active
+        enabled: !isSessionGuest && agentFlavor === 'cursor' && props.session.active
     })
     const sessionMachineId = props.session.metadata?.machineId ?? null
     const machineCursorModelsState = useCursorModelsForMachine({
         api: props.api,
         machineId: sessionMachineId,
-        enabled: agentFlavor === 'cursor' && props.session.active && Boolean(sessionMachineId)
+        enabled: !isSessionGuest && agentFlavor === 'cursor' && props.session.active && Boolean(sessionMachineId)
     })
     const sessionCliModelSkus = useMemo(() => (
         mergeCursorCliModelSkus(
@@ -1102,23 +1029,10 @@ function SessionChatInner(props: SessionChatProps) {
         sessionCliModelSkus,
         props.session.model
     ])
-    const agyModelsState = useAgyModels({
-        api: props.api,
-        machineId: sessionMachineId,
-        enabled: agentFlavor === 'agy' && props.session.active && Boolean(sessionMachineId)
-    })
-    // Options only: the composer has no surface for a catalog warning, so a
-    // machine whose sign-in has lapsed shows its last known list here and New
-    // Session is where that gets explained.
-    const agyModelOptions = useMemo(() => (
-        agentFlavor === 'agy'
-            ? buildAgyComposerModelOptions(agyModelsState.availableModels)
-            : undefined
-    ), [agentFlavor, agyModelsState.availableModels])
     const piModelsState = usePiModels({
         api: props.api,
         sessionId: props.session.id,
-        enabled: agentFlavor === 'pi' && props.session.active
+        enabled: !isSessionGuest && agentFlavor === 'pi' && props.session.active
     })
     // Fallback to cached models from metadata when session is inactive
     const piMetadata = props.session.metadata as Record<string, unknown> | null
@@ -1388,6 +1302,11 @@ function SessionChatInner(props: SessionChatProps) {
         return normalized
     }, [visibleMessages])
 
+    const retryableCodexTurnMessageId = useMemo(
+        () => getRetryableCodexTurnMessageId(normalizedMessages, props.session.thinking),
+        [normalizedMessages, props.session.thinking]
+    )
+
     const goalStateSourceMessages = useMemo(
         () => buildGoalStateMessages(props.messages),
         [props.messages]
@@ -1441,9 +1360,10 @@ function SessionChatInner(props: SessionChatProps) {
         () => buildVisibleChatBlocks(reconciled.blocks, {
             hasMoreMessages: props.hasMoreMessages,
             previousGroups: visibleGroupsRef.current,
-            codexExplorationCollapsed
+            codexExplorationCollapsed,
+            executionProcessEnabled
         }),
-        [reconciled.blocks, props.hasMoreMessages, codexExplorationCollapsed]
+        [reconciled.blocks, props.hasMoreMessages, codexExplorationCollapsed, executionProcessEnabled]
     )
 
     // Fork-current must compare against assistant-ui message ids (`kind:id`),
@@ -1534,12 +1454,21 @@ function SessionChatInner(props: SessionChatProps) {
     // Model mode change handler
     const handleModelChange = useCallback(async (model: SessionModelSelection) => {
         const previousModelReasoningEffort = props.session.modelReasoningEffort
-        const shouldClearReasoningEffort = shouldClearReasoningEffortForModelChange({
-            agentFlavor,
-            previousModelReasoningEffort,
-            codexModels: codexModelsState.models,
-            model
-        })
+        const shouldClearReasoningEffort = Boolean(previousModelReasoningEffort) && (
+            agentFlavor === 'codex'
+                ? supportsCodexReasoningEffort(
+                    codexModelsState.models,
+                    model,
+                    previousModelReasoningEffort
+                ) === false
+                : agentFlavor === 'dsh' && typeof model === 'string'
+                    ? !getDshReasoningOptions(
+                        dshModelsState.availableModels,
+                        dshModelsState.current,
+                        model
+                    ).some((option) => option.value === previousModelReasoningEffort)
+                    : false
+        )
 
         try {
             await applyModelChangeWithReasoningRollback({
@@ -1549,6 +1478,7 @@ function SessionChatInner(props: SessionChatProps) {
                 setModel,
                 setModelReasoningEffort
             })
+            if (agentFlavor === 'dsh') await dshModelsState.refetch()
             haptic.notification('success')
             props.onRefresh()
         } catch (e) {
@@ -1558,6 +1488,9 @@ function SessionChatInner(props: SessionChatProps) {
     }, [
         agentFlavor,
         codexModelsState.models,
+        dshModelsState.availableModels,
+        dshModelsState.current,
+        dshModelsState.refetch,
         props.session.modelReasoningEffort,
         setModelReasoningEffort,
         setModel,
@@ -1609,13 +1542,14 @@ function SessionChatInner(props: SessionChatProps) {
     const handleModelReasoningEffortChange = useCallback(async (modelReasoningEffort: string | null) => {
         try {
             await setModelReasoningEffort(modelReasoningEffort)
+            if (agentFlavor === 'dsh') await dshModelsState.refetch()
             haptic.notification('success')
             props.onRefresh()
         } catch (e) {
             haptic.notification('error')
             console.error('Failed to set model reasoning effort:', e)
         }
-    }, [setModelReasoningEffort, props.onRefresh, haptic])
+    }, [agentFlavor, dshModelsState.refetch, setModelReasoningEffort, props.onRefresh, haptic])
 
     const handleEffortChange = useCallback(async (effort: string | null) => {
         try {
@@ -1692,7 +1626,6 @@ function SessionChatInner(props: SessionChatProps) {
     // turn, so explicit or retry-safe queue intents never stick to later
     // ordinary sends.
     const pendingSendIntentRef = useRef<ComposerSendIntent>('default')
-    const attachmentOrderRef = useRef<string[]>([])
     const restoredSendErrorIdRef = useRef<number | null>(null)
 
     useEffect(() => {
@@ -1835,10 +1768,9 @@ function SessionChatInner(props: SessionChatProps) {
         isSending: props.isSending,
         isRunning: props.session.thinking || hasRunningChildAgent,
         onSendMessage: handleSend,
-        attachmentOrderRef,
         onAbort: handleAbort,
         attachmentAdapter,
-        allowSendWhenInactive: true,
+        allowSendWhenInactive: !isSessionGuest,
         pendingScheduleRef,
         pendingSendIntentRef,
     })
@@ -1856,8 +1788,9 @@ function SessionChatInner(props: SessionChatProps) {
                 onToggleTerminal={canViewAgentTerminal ? () => setTerminalVisible(v => !v) : undefined}
                 terminalActive={terminalVisible}
                 api={props.api}
+                baseUrl={props.baseUrl}
                 titleSuggestionAvailable={props.titleSuggestionAvailable}
-                canReopen={inactiveCanResume}
+                canReopen={isSessionGuest ? false : inactiveCanResume}
                 reopenDisabledReason={props.reopenDisabledReason}
                 reopenHint={props.reopenHint}
                 onSessionDeleted={props.onBack}
@@ -1885,7 +1818,7 @@ function SessionChatInner(props: SessionChatProps) {
             )}
 
             {sessionInactive ? (
-                <div className="mx-auto w-full max-w-content bg-[var(--app-subtle-bg)] p-3 text-center text-sm text-[var(--app-hint)]">
+                <div className="mx-auto w-full max-w-content bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
                     {inactiveCanResume
                         ? t('session.inactive.autoResume')
                         : t('session.inactive.cannotResume')}
@@ -1921,10 +1854,11 @@ function SessionChatInner(props: SessionChatProps) {
                         disabled={sessionInactive}
                         onRefresh={props.onRefresh}
                         onRetryMessage={props.onRetryMessage}
-                        onContinuePlan={() => focusComposerRef.current?.()}
+                        onRetryCodexTurn={props.onRetryCodexTurn}
+                        retryableCodexTurnMessageId={retryableCodexTurnMessageId}
                         historyActionPending={historyActionPending}
-                        onForkConversation={controlledByUser ? undefined : onForkConversation}
-                        onRewindConversation={controlledByUser ? undefined : onRewindConversation}
+                        onForkConversation={isSessionGuest || controlledByUser ? undefined : onForkConversation}
+                        onRewindConversation={isSessionGuest || controlledByUser ? undefined : onRewindConversation}
                         isLatestCompletedBoundary={isLatestCompletedBoundary}
                         onViewModeChange={props.onViewModeChange}
                         isSyncingTail={props.isSyncingTail}
@@ -1953,7 +1887,6 @@ function SessionChatInner(props: SessionChatProps) {
                                 </div>
                             </div>
                         ) : null}
-
                         {/*
                          * tiann/hapi#893: one-time banner shown on first
                          * v2-load when localStorage entries got migrated to
@@ -1990,29 +1923,36 @@ function SessionChatInner(props: SessionChatProps) {
                             <QueuedMessagesBar
                                 sessionId={props.session.id}
                                 api={props.api}
+                                sessionMetadata={props.session.metadata}
+                                steeringActive={
+                                    props.session.active
+                                    && !controlledByUser
+                                    && props.session.agentState?.steeringActive === true
+                                }
+                                isThinking={
+                                    props.session.active
+                                    && !controlledByUser
+                                    && props.session.thinking
+                                }
                                 pendingSchedule={pendingSchedule}
                                 pendingScheduleRevision={pendingScheduleRevision}
                                 onEdit={({ pendingSchedule: restored }) => {
                                     // Restore the schedule so the clock button re-activates
                                     updatePendingSchedule(restored)
                                 }}
-                                canSteer={isSteeringSupportedForSession(props.session.metadata)
-                                    && (agentFlavor === 'pi'
-                                        ? props.session.thinking
-                                        : props.session.agentState?.steeringActive === true)
+                                canSteer={(agentFlavor === 'pi' || agentFlavor === 'dsh')
+                                    && props.session.thinking
                                     && !controlledByUser}
                             />
                         </div>
 
                         <HappyComposer
-                        focusInputRef={focusComposerRef}
                         key={`composer-${props.session.id}`}
                         sessionId={props.session.id}
                         canRestoreAttachments={props.session.active}
                         onUploadDraftSnapshot={(text, attachments) => {
                             uploadDraftSnapshotRef.current = { text, attachments }
                         }}
-                        attachmentOrderRef={attachmentOrderRef}
                         resolveSessionMentionTooltip={resolveSessionMentionTooltip}
                         disabled={props.isSending}
                         pendingSchedule={pendingSchedule}
@@ -2024,13 +1964,16 @@ function SessionChatInner(props: SessionChatProps) {
                         collaborationMode={codexCollaborationModeSupported ? props.session.collaborationMode : undefined}
                         copilotAgentMode={agentFlavor === 'copilot' ? props.session.copilotAgentMode : undefined}
                         model={props.session.model}
-                        modelReasoningEffort={agentFlavor === 'codex' || agentFlavor === 'opencode' ? props.session.modelReasoningEffort : undefined}
+                        modelReasoningEffort={agentFlavor === 'codex' || agentFlavor === 'dsh' || agentFlavor === 'opencode' ? props.session.modelReasoningEffort : undefined}
                         effort={props.session.effort}
                         agentFlavor={agentFlavor}
-                        concurrentClients={props.session.metadata?.capabilities?.concurrentClients}
                         availableModelOptions={
-                            agentFlavor === 'codex'
+                            agentFlavor === 'claude'
+                                ? claudeModelOptions
+                                : agentFlavor === 'codex'
                                 ? codexModelOptions
+                                : agentFlavor === 'dsh'
+                                    ? dshModelOptions
                                 : agentFlavor === 'cursor'
                                     ? (
                                         cursorCatalogPending
@@ -2045,8 +1988,6 @@ function SessionChatInner(props: SessionChatProps) {
                                             ? grokModelOptions
                                         : agentFlavor === 'copilot'
                                             ? copilotModelOptions
-                                        : agentFlavor === 'agy'
-                                            ? agyModelOptions
                                         // Pi gets its provider-qualified model list from the piModels prop;
                                         // feeding piModelOptions here would make the generic Ctrl/Cmd+M
                                         // cycler (getNextModelForFlavor) post a bare modelId string,
@@ -2055,11 +1996,13 @@ function SessionChatInner(props: SessionChatProps) {
                                         // so Pi model changes go through the settings sheet only.
                                         : undefined
                         }
-                        piModels={piModels}
-                        piSelectedModel={agentFlavor === 'pi' ? piSelectedModel : undefined}
+                        piModels={isSessionGuest ? undefined : piModels}
+                        piSelectedModel={!isSessionGuest && agentFlavor === 'pi' ? piSelectedModel : undefined}
                         availableModelReasoningEffortOptions={
                             agentFlavor === 'codex'
                                 ? codexReasoningEffortOptions
+                                : agentFlavor === 'dsh' && dshReasoningEffortOptions && dshReasoningEffortOptions.length > 0
+                                    ? dshReasoningEffortOptions
                                 : agentFlavor === 'opencode' && opencodeReasoningEffortState.options.length > 0
                                     ? opencodeReasoningEffortState.options
                                     : undefined
@@ -2070,8 +2013,8 @@ function SessionChatInner(props: SessionChatProps) {
                                 : undefined
                         }
                         active={props.session.active}
-                        allowSendWhenInactive
-                        onResumeStoredDraft={() => handleSend('', undefined, null)}
+                        allowSendWhenInactive={!isSessionGuest}
+                        onResumeStoredDraft={isSessionGuest ? undefined : () => handleSend('', undefined, null)}
                         thinking={props.session.thinking}
                         agentState={props.session.agentState}
                         backgroundTaskCount={props.session.backgroundTaskCount}
@@ -2081,17 +2024,17 @@ function SessionChatInner(props: SessionChatProps) {
                         contextModel={reduced.latestUsage?.model ?? props.session.model}
                         controlledByUser={controlledByUser}
                         onCollaborationModeChange={
-                            codexCollaborationModeSupported && props.session.active && !controlledByUser
+                            !isSessionGuest && codexCollaborationModeSupported && props.session.active && !controlledByUser
                                 ? handleCollaborationModeChange
                                 : undefined
                         }
                         onCopilotAgentModeChange={
-                            agentFlavor === 'copilot' && props.session.active && !controlledByUser
+                            !isSessionGuest && agentFlavor === 'copilot' && props.session.active && !controlledByUser
                                 ? handleCopilotAgentModeChange
                                 : undefined
                         }
                         onPermissionModeChange={
-                            agentFlavor === 'copilot' && controlledByUser
+                            isSessionGuest || (agentFlavor === 'copilot' && controlledByUser)
                                 ? undefined
                                 : handlePermissionModeChange
                         }
@@ -2120,8 +2063,12 @@ function SessionChatInner(props: SessionChatProps) {
                                 : undefined
                         }
                         onModelChange={
-                            agentFlavor === 'codex'
+                            isSessionGuest
+                                ? undefined
+                                : agentFlavor === 'codex'
                                 ? (props.session.active && !controlledByUser && !codexModelsState.error ? handleModelChange : undefined)
+                                : agentFlavor === 'dsh'
+                                    ? (props.session.active && !controlledByUser && !dshModelsState.error ? handleModelChange : undefined)
                                 : agentFlavor === 'cursor'
                                     ? (props.session.active
                                         && !controlledByUser
@@ -2144,7 +2091,8 @@ function SessionChatInner(props: SessionChatProps) {
                                         : handleModelChange
                         }
                         onModelEffortChange={
-                            agentFlavor === 'cursor'
+                            !isSessionGuest
+                                && agentFlavor === 'cursor'
                                 && props.session.active
                                 && !controlledByUser
                                 && !cursorCatalogPending
@@ -2153,15 +2101,19 @@ function SessionChatInner(props: SessionChatProps) {
                                 : undefined
                         }
                         onModelReasoningEffortChange={
-                            (agentFlavor === 'codex' || agentFlavor === 'opencode')
+                            !isSessionGuest
+                                && (agentFlavor === 'codex' || agentFlavor === 'dsh' || agentFlavor === 'opencode')
                                 && props.session.active
                                 && !controlledByUser
-                                && (agentFlavor !== 'opencode' || opencodeReasoningEffortState.options.length > 0)
+                            && (agentFlavor !== 'opencode' || opencodeReasoningEffortState.options.length > 0)
+                            && (agentFlavor !== 'dsh' || Boolean(dshReasoningEffortOptions?.length))
                                 ? handleModelReasoningEffortChange
                                 : undefined
                         }
                         onEffortChange={
-                            agentFlavor === 'grok'
+                            isSessionGuest
+                                ? undefined
+                                : agentFlavor === 'grok'
                                 ? (props.session.active && !controlledByUser && grokEffortState.options.length > 0
                                     ? handleEffortChange
                                     : undefined)
@@ -2169,7 +2121,8 @@ function SessionChatInner(props: SessionChatProps) {
                         }
                         serviceTier={effectiveCodexServiceTier}
                         onServiceTierChange={
-                            agentFlavor === 'codex'
+                            !isSessionGuest
+                                && agentFlavor === 'codex'
                                 && props.session.active
                                 && !controlledByUser
                                 && !codexModelsState.error
@@ -2177,9 +2130,9 @@ function SessionChatInner(props: SessionChatProps) {
                                 ? handleServiceTierChange
                                 : undefined
                         }
-                        onSwitchToRemote={handleSwitchToRemote}
-                        onTerminal={props.session.active && terminalSupported ? handleViewTerminal : undefined}
-                        terminalUnsupported={props.session.active && !terminalSupported}
+                        onSwitchToRemote={isSessionGuest ? undefined : handleSwitchToRemote}
+                        onTerminal={!isSessionGuest && props.session.active && terminalSupported ? handleViewTerminal : undefined}
+                        terminalUnsupported={!isSessionGuest && props.session.active && !terminalSupported}
                         autocompleteSuggestions={props.autocompleteSuggestions}
                         voiceStatus={voice?.status}
                         voiceMicMuted={voice?.micMuted}
@@ -2211,19 +2164,6 @@ function SessionChatInner(props: SessionChatProps) {
                     onReadyChange={setVoiceBackendReady}
                 />
             )}
-
-            <ConfirmDialog
-                isOpen={rewindForkFallback !== null}
-                onClose={() => {
-                    if (!historyActionPending) setRewindForkFallback(null)
-                }}
-                title={t('message.rewind.fallbackTitle')}
-                description={t('message.rewind.fallbackDescription')}
-                confirmLabel={t('message.rewind.fallbackFork')}
-                confirmingLabel={t('message.rewind.fallbackForking')}
-                isPending={historyActionPending}
-                onConfirm={onRewindForkFallback}
-            />
         </div>
     )
 }

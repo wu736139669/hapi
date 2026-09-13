@@ -7,7 +7,7 @@ import { z } from 'zod'
  */
 export const AGENT_MESSAGE_PAYLOAD_TYPE = 'codex' as const
 
-export const AGENT_FLAVORS = ['agy', 'claude', 'codex', 'dsh', 'copilot', 'cursor', 'gemini', 'grok', 'kimi', 'opencode', 'pi'] as const
+export const AGENT_FLAVORS = ['agy', 'claude', 'codex', 'copilot', 'cursor', 'dsh', 'gemini', 'grok', 'kimi', 'opencode', 'pi'] as const
 export type AgentFlavor = typeof AGENT_FLAVORS[number]
 export const AgentFlavorSchema = z.enum(AGENT_FLAVORS)
 
@@ -49,6 +49,9 @@ export type OpencodePermissionMode = typeof OPENCODE_PERMISSION_MODES[number]
 export const CURSOR_PERMISSION_MODES = ['default', 'plan', 'ask', 'debug', 'autoReview', 'yolo'] as const
 export type CursorPermissionMode = typeof CURSOR_PERMISSION_MODES[number]
 
+export const DSH_PERMISSION_MODES = ['default', 'read-only', 'workspace-write', 'danger-full-access'] as const
+export type DshPermissionMode = typeof DSH_PERMISSION_MODES[number]
+
 export const PERMISSION_MODES = [
     'default',
     'acceptEdits',
@@ -59,6 +62,8 @@ export const PERMISSION_MODES = [
     'debug',
     'autoReview',
     'read-only',
+    'workspace-write',
+    'danger-full-access',
     'safe-yolo',
     'yolo',
     'request-review',
@@ -77,6 +82,8 @@ export const PERMISSION_MODE_LABELS: Record<PermissionMode, string> = {
     autoReview: 'Auto-review',
     bypassPermissions: 'Yolo',
     'read-only': 'Read Only',
+    'workspace-write': 'Workspace Write',
+    'danger-full-access': 'Full Access',
     'safe-yolo': 'Safe Yolo',
     yolo: 'Yolo',
     'request-review': 'Request Review',
@@ -95,6 +102,8 @@ export const PERMISSION_MODE_TONES: Record<PermissionMode, PermissionModeTone> =
     autoReview: 'warning',
     bypassPermissions: 'danger',
     'read-only': 'warning',
+    'workspace-write': 'warning',
+    'danger-full-access': 'danger',
     'safe-yolo': 'warning',
     yolo: 'danger',
     'request-review': 'neutral',
@@ -139,9 +148,6 @@ export function getPermissionModesForFlavor(flavor?: string | null): readonly Pe
     if (flavor === 'kimi') {
         return KIMI_PERMISSION_MODES
     }
-    if (flavor === 'dsh') {
-        return []
-    }
     if (flavor === 'copilot') {
         return COPILOT_PERMISSION_MODES
     }
@@ -156,6 +162,9 @@ export function getPermissionModesForFlavor(flavor?: string | null): readonly Pe
     }
     if (flavor === 'cursor') {
         return CURSOR_PERMISSION_MODES
+    }
+    if (flavor === 'dsh') {
+        return DSH_PERMISSION_MODES
     }
     if (flavor === 'pi') {
         // Pi RPC mode has no runtime permission switching (always auto-approve);
@@ -177,11 +186,6 @@ export function isPermissionModeAllowedForFlavor(mode: PermissionMode, flavor?: 
     return getPermissionModesForFlavor(flavor).includes(mode)
 }
 
-/** New Codex sessions use the native shared runtime, without HAPI Safe Yolo. */
-export function getLaunchPermissionModesForFlavor(flavor?: string | null): readonly PermissionMode[] {
-    return getPermissionModesForFlavor(flavor).filter(mode => flavor !== 'codex' || mode !== 'safe-yolo')
-}
-
 export function getCodexCollaborationModeOptions(): CodexCollaborationModeOption[] {
     return CODEX_COLLABORATION_MODES.map((mode) => ({
         mode,
@@ -194,15 +198,16 @@ export function getCodexCollaborationModeOptions(): CodexCollaborationModeOption
  * (per-message "Steer" from the waiting queue), without waiting for full-turn end.
  *
  * Steer = soft mid-turn delivery (same idea as Cursor GUI default "Send"):
- * - Pi: native steer over the Pi runtime (first-class since #1466)
+ * - Pi: native queued-message steer
  * - Codex: app-server `turn/steer` (true mid-turn inject)
  * - Cursor ACP: concurrent `session/prompt` soft-send (no cancel). Legacy
  *   stream-json Cursor sessions are NOT steerable — gate with
  *   {@link isSteeringSupportedForSession}.
+ * - DeepSeek Harness: native queued-message steer
  *
  * Claude / others: not supported (no reachable soft-steer path) — UI hides Steer.
  */
-export const STEERING_SUPPORTED_FLAVORS = ['codex', 'cursor', 'pi'] as const
+export const STEERING_SUPPORTED_FLAVORS = ['pi', 'codex', 'cursor', 'dsh'] as const
 
 export function isSteeringSupportedForFlavor(flavor?: string | null): boolean {
     return (STEERING_SUPPORTED_FLAVORS as readonly string[]).includes(flavor ?? '')
@@ -221,7 +226,7 @@ export function isSteeringSupportedForSession(metadata?: {
     cursorSessionId?: string | null
     cursorSessionProtocol?: 'acp' | 'stream-json' | null
 } | null): boolean {
-    if (metadata?.flavor === 'codex' || metadata?.flavor === 'pi') {
+    if (metadata?.flavor === 'pi' || metadata?.flavor === 'codex' || metadata?.flavor === 'dsh') {
         return true
     }
     if (metadata?.flavor !== 'cursor') {

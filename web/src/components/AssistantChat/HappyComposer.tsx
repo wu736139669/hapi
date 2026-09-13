@@ -1052,7 +1052,7 @@ export function HappyComposer(props: {
 
     const visibleModelEffortOptions = cursorDrillDownVariantOptions ?? modelEffortOptions
     const codexReasoningEffortOptions = useMemo(
-        () => agentFlavor === 'codex' || agentFlavor === 'opencode'
+        () => agentFlavor === 'codex' || agentFlavor === 'dsh' || agentFlavor === 'opencode'
             ? getCodexComposerReasoningEffortOptions(
                 modelReasoningEffort,
                 agentFlavor,

@@ -32,9 +32,12 @@ export const RPC_METHODS = {
     ListPiModelsForMachine: 'listPiModelsForMachine',
     ListCodexSessions: 'listCodexSessions',
     ArchiveCodexSession: 'archiveCodexSession',
+    ListClaudeSessions: 'listClaudeSessions',
     ListCursorModels: 'listCursorModels',
     ListPiModels: 'listPiModels',
     ListPiSessions: 'listPiSessions',
+    ListDshModels: 'listDshModels',
+    ListDshSessions: 'listDshSessions',
     ListOpencodeModels: 'listOpencodeModels',
     ListOpencodeModelVariants: 'listOpencodeModelVariants',
     ListOpencodeModelsForCwd: 'listOpencodeModelsForCwd',
@@ -45,8 +48,9 @@ export const RPC_METHODS = {
     ListCopilotModels: 'listCopilotModels',
     ListOpencodeReasoningEffortOptions: 'listOpencodeReasoningEffortOptions',
     ListAgyModels: 'listAgyModels',
-    /** Deliver one queued message into the active Pi turn (native steer). */
+    /** Deliver one queued message into the active turn (Pi / Codex / Cursor). */
     SteerQueuedMessage: 'steer-queued-message',
+    RetryCodexTurn: 'retry-codex-turn',
     ForkConversation: 'fork-conversation',
     RewindConversation: 'rewind-conversation',
     ClearConversation: 'clear-conversation',

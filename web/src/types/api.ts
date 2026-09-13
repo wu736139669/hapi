@@ -9,6 +9,7 @@ import type {
     SyncEvent as ProtocolSyncEvent,
     WorktreeMetadata
 } from '@hapi/protocol/types'
+import type { DshLocalSessionSummary as ProtocolDshLocalSessionSummary } from '@hapi/protocol/apiTypes'
 
 export type {
     AgyModelsResponse,
@@ -17,6 +18,10 @@ export type {
     AgyModelSummary,
     CodexModelsResponse,
     CodexModelSummary,
+    DshModelsResponse,
+    DshModelSelection,
+    DshModelSummary,
+    DshReasoningEffortOption,
     CommandResponse,
     CursorModelsResponse,
     CursorModelSummary,
@@ -242,6 +247,54 @@ export type CodexLocalSessionsResponse = {
     machineId?: string
 }
 
+export type ClaudeLocalSessionSummary = {
+    id: string
+    title: string
+    lastUserMessage?: string | null
+    cwd?: string | null
+    file: string
+    modifiedAt: number
+    model?: string | null
+    messageCount: number
+    hapiSessionId?: string
+    importState?: 'importing' | 'complete' | 'failed' | 'diverged'
+}
+
+export type ClaudeLocalSessionsResponse = {
+    success: true
+    sessions: ClaudeLocalSessionSummary[]
+    machineId: string
+} | {
+    success: false
+    error: string
+    sessions: []
+    machineId?: string
+}
+
+export type ClaudeImportResult = {
+    claudeSessionId: string
+    hapiSessionId?: string
+    action?: 'created' | 'updated' | 'unchanged'
+    appended?: number
+    error?: { code: string; message: string }
+}
+
+export type ClaudeImportSessionsRequest = {
+    sessionIds: string[]
+    cwd?: string | null
+    machineId?: string | null
+    model?: string | null
+    effort?: string | null
+    permissionMode?: 'default' | 'bypassPermissions'
+}
+
+export type ClaudeImportSessionsResponse = {
+    success: boolean
+    results: ClaudeImportResult[]
+    machineId?: string
+    error?: string
+}
+
 export type PiLocalSessionSummary = {
     id: string
     title: string
@@ -279,6 +332,37 @@ export type PiImportResult = {
 export type PiImportSessionsResponse = {
     success: boolean
     results: PiImportResult[]
+    machineId?: string
+    error?: string
+}
+
+export type DshLocalSessionSummary = ProtocolDshLocalSessionSummary & {
+    hapiSessionId?: string
+    importState?: 'importing' | 'complete' | 'failed' | 'diverged'
+}
+
+export type DshLocalSessionsResponse = {
+    success: true
+    sessions: DshLocalSessionSummary[]
+    machineId: string
+} | {
+    success: false
+    error: string
+    sessions: []
+    machineId?: string
+}
+
+export type DshImportResult = {
+    dshSessionId: string
+    hapiSessionId?: string
+    action?: 'created' | 'updated' | 'unchanged'
+    appended?: number
+    error?: { code: string; message: string }
+}
+
+export type DshImportSessionsResponse = {
+    success: boolean
+    results: DshImportResult[]
     machineId?: string
     error?: string
 }
@@ -340,6 +424,74 @@ export type CodexMergeDuplicateSessionsResponse = {
 export type VisibilityPayload = {
     subscriptionId: string
     visibility: 'visible' | 'hidden'
+}
+
+export type SessionShare = {
+    id: string
+    sessionId: string
+    shareToken: string
+    createdAt: number
+    updatedAt: number
+}
+
+export type SessionShareCreateResponse = { share: SessionShare; accessCode: string }
+export type SessionShareExchangeResponse = { token: string; sessionId: string; share: SessionShare }
+export type SessionShareListItem = { share: SessionShare; session: SessionSummary | null }
+
+export type StudioAccessMode = 'view' | 'contribute'
+export type StudioPostKind = 'discussion' | 'suggestion'
+export type StudioPostStatus = 'open' | 'submitted' | 'dismissed'
+
+export type StudioRoom = {
+    id: string
+    sessionId: string
+    namespace: string
+    title: string
+    shareToken: string
+    accessMode: StudioAccessMode
+    status: 'active' | 'revoked'
+    createdAt: number
+    updatedAt: number
+}
+
+export type StudioPost = {
+    id: string
+    roomId: string
+    guestId: string
+    authorName: string
+    kind: StudioPostKind
+    text: string
+    status: StudioPostStatus
+    createdAt: number
+    decidedAt: number | null
+    submittedText: string | null
+}
+
+export type PublicStudioPost = Pick<StudioPost, 'id' | 'roomId' | 'authorName' | 'kind' | 'text' | 'createdAt'>
+
+export type StudioOwnerResponse = {
+    room: StudioRoom
+    posts: StudioPost[]
+    openSuggestionCount?: number
+    nextSuggestionCursor?: { beforeAt: number; beforeId: string } | null
+}
+
+export type PublicStudioMessage = {
+    id: string
+    role: 'user' | 'assistant'
+    text: string
+    createdAt: number
+    seq: number
+}
+
+export type PublicStudioResponse = {
+    room: Pick<StudioRoom, 'id' | 'title' | 'accessMode' | 'createdAt' | 'updatedAt'> & {
+        active: boolean
+        agent: string
+        model: string | null
+    }
+    messages: PublicStudioMessage[]
+    posts: PublicStudioPost[]
 }
 
 export type SyncEvent = ProtocolSyncEvent

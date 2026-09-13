@@ -28,6 +28,8 @@ import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer
 import { formatFileMetadata } from '@/lib/file-metadata'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from '@/lib/use-translation'
+import { isPreviewableFilePath } from '@/lib/file-preview'
+import { useOptionalFilePreview } from '@/lib/file-preview-context'
 import * as Popover from '@radix-ui/react-popover'
 import { CheckIcon, CloseIcon } from '@/components/icons'
 import { Button } from '@/components/ui/button'
@@ -348,6 +350,7 @@ const SCROLL_KEY_PREFIX = 'hapi-dir-scroll-'
 export default function FilesPage() {
     const { api, titleSuggestionAvailable = false } = useAppContext()
     const { t, locale } = useTranslation()
+    const filePreview = useOptionalFilePreview()
     const navigate = useNavigate()
     const queryClient = useQueryClient()
     const goBack = useAppGoBack()
@@ -433,6 +436,10 @@ export default function FilesPage() {
     )
 
     const handleOpenFile = useCallback((path: string, staged?: boolean) => {
+        if (filePreview && isPreviewableFilePath(path)) {
+            filePreview.openFilePreview({ sessionId, filePath: path })
+            return
+        }
         const fileSearch = {
             path: encodeBase64(path),
             ...(staged !== undefined ? { staged } : {}),
@@ -445,7 +452,7 @@ export default function FilesPage() {
             search: fileSearch,
             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
-    }, [activeTab, navigate, searchQuery, sessionId])
+    }, [activeTab, filePreview, navigate, searchQuery, sessionId])
 
     const handleAddFileToComposer = useCallback((path: string) => {
         appendFileReferenceToComposerDraft(sessionId, path)

@@ -31,6 +31,15 @@ describe('Gemini CLI sunset (read-only, not creatable)', () => {
 })
 
 describe('getPermissionModesForFlavor', () => {
+    test('returns DeepSeek Harness native permission presets', () => {
+        expect(getPermissionModesForFlavor('dsh')).toEqual([
+            'default',
+            'read-only',
+            'workspace-write',
+            'danger-full-access'
+        ])
+    })
+
     test("returns the conservative Grok modes", () => {
         expect(getPermissionModesForFlavor('grok')).toEqual([
             'default',
@@ -38,10 +47,6 @@ describe('getPermissionModesForFlavor', () => {
             'plan',
             'bypassPermissions'
         ])
-    })
-
-    test("returns no HAPI mode selector for DSH's server-owned permission policy", () => {
-        expect(getPermissionModesForFlavor('dsh')).toEqual([])
     })
 
     test("returns [] for flavor 'pi' (RPC mode has no runtime permission switching)", () => {
@@ -76,8 +81,6 @@ describe('isPermissionModeAllowedForFlavor', () => {
         expect(isPermissionModeAllowedForFlavor('acceptEdits', 'grok')).toBe(false)
         expect(isPermissionModeAllowedForFlavor('auto', 'grok')).toBe(true)
         expect(isPermissionModeAllowedForFlavor('yolo', 'grok')).toBe(false)
-        expect(isPermissionModeAllowedForFlavor('read-only', 'dsh')).toBe(false)
-        expect(isPermissionModeAllowedForFlavor('plan', 'dsh')).toBe(false)
     })
 
     test("no mode is allowed for pi", () => {
@@ -139,10 +142,11 @@ describe('claude auto permission mode', () => {
 })
 
 describe('isSteeringSupportedForFlavor', () => {
-    it('supports codex, cursor and pi', () => {
+    it('supports native steer flavors', () => {
+        expect(isSteeringSupportedForFlavor('pi')).toBe(true)
         expect(isSteeringSupportedForFlavor('codex')).toBe(true)
         expect(isSteeringSupportedForFlavor('cursor')).toBe(true)
-        expect(isSteeringSupportedForFlavor('pi')).toBe(true)
+        expect(isSteeringSupportedForFlavor('dsh')).toBe(true)
         expect(isSteeringSupportedForFlavor('claude')).toBe(false)
         expect(isSteeringSupportedForFlavor('opencode')).toBe(false)
         expect(isSteeringSupportedForFlavor(undefined)).toBe(false)
@@ -151,9 +155,13 @@ describe('isSteeringSupportedForFlavor', () => {
 })
 
 describe('isSteeringSupportedForSession', () => {
-    it('supports codex and pi sessions', () => {
-        expect(isSteeringSupportedForSession({ flavor: 'codex' })).toBe(true)
+    it('supports Pi and DeepSeek Harness sessions', () => {
         expect(isSteeringSupportedForSession({ flavor: 'pi' })).toBe(true)
+        expect(isSteeringSupportedForSession({ flavor: 'dsh' })).toBe(true)
+    })
+
+    it('supports codex sessions', () => {
+        expect(isSteeringSupportedForSession({ flavor: 'codex' })).toBe(true)
     })
 
     it('supports Cursor ACP sessions', () => {

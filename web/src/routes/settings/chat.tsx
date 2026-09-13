@@ -3,6 +3,7 @@ import { getComposerEnterBehaviorOptions, useComposerEnterBehavior } from '@/hoo
 import { getTerminalToolDisplayModeOptions, useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { useCodexExplorationCollapse } from '@/hooks/useCodexExplorationCollapse'
 import { useReasoningCollapse } from '@/hooks/useReasoningCollapse'
+import { useExecutionProcess } from '@/hooks/useExecutionProcess'
 import {
     getChatSurfaceColorPickerValue,
     getChatSurfaceColorPresetOptions,
@@ -52,6 +53,7 @@ export default function SettingsChatPage() {
     const { terminalToolDisplayMode, setTerminalToolDisplayMode } = useTerminalToolDisplayMode()
     const { codexExplorationCollapsed, setCodexExplorationCollapsed } = useCodexExplorationCollapse()
     const { reasoningCollapsed, setReasoningCollapsed } = useReasoningCollapse()
+    const { executionProcessEnabled, setExecutionProcessEnabled } = useExecutionProcess()
     const { toolGroupBackground, userMessageBackground, setToolGroupBackground, setUserMessageBackground } = useChatSurfaceColors()
     return (
         <SettingsPageContent description={t('settings.chat.description')}>
@@ -82,6 +84,12 @@ export default function SettingsChatPage() {
                     description={t('settings.chat.reasoningCollapsed.desc')}
                     checked={reasoningCollapsed}
                     onChange={setReasoningCollapsed}
+                />
+                <SettingsSwitch
+                    label={t('settings.chat.executionProcessEnabled')}
+                    description={t('settings.chat.executionProcessEnabled.desc')}
+                    checked={executionProcessEnabled}
+                    onChange={setExecutionProcessEnabled}
                 />
             </SettingsSection>
             <SettingsSection title={t('settings.chat.colors')}>

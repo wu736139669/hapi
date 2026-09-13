@@ -1,11 +1,18 @@
-import { useId } from 'react'
+import {
+    useCallback,
+    useEffect,
+    useId,
+    useLayoutEffect,
+    useRef,
+    useState,
+    type CSSProperties
+} from 'react'
 import { useTranslation } from '@/lib/use-translation'
 import { HoverTooltip } from '@/components/HoverTooltip'
 import { safeCopyToClipboard } from '@/lib/clipboard'
 import { buildSessionReferenceText } from '@/lib/sessionReference'
 import { usePlatform } from '@/hooks/usePlatform'
-import { useAnchoredMenu } from '@/hooks/useAnchoredMenu'
-import { CopyIcon } from '@/components/icons'
+import { CopyIcon, ShareIcon } from '@/components/icons'
 
 type SessionActionMenuProps = {
     isOpen: boolean
@@ -17,10 +24,14 @@ type SessionActionMenuProps = {
     sessionPinned?: boolean
     sessionGlobalPinned?: boolean
     onSetPinMode?: (mode: 'none' | 'project' | 'global') => void
+    sessionPersonalPinned?: boolean
+    onSetPersonalPinned?: (pinned: boolean) => void
     onExport?: () => void
-    onMarkUnread?: () => void
+    onStudio?: () => void
+    onSessionShare?: () => void
     onSyncCodex?: () => void
     onSyncPi?: () => void
+    onSyncDsh?: () => void
     onArchive: () => void
     onReopen?: () => void
     reopenDisabledReason?: string
@@ -47,21 +58,6 @@ function EditIcon(props: { className?: string }) {
         >
             <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
             <path d="m15 5 4 4" />
-        </svg>
-    )
-}
-
-function UnreadIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            className={props.className}
-        >
-            <circle cx="12" cy="12" r="4" fill="currentColor" />
         </svg>
     )
 }
@@ -185,6 +181,12 @@ function TrashIcon(props: { className?: string }) {
     )
 }
 
+type MenuPosition = {
+    top: number
+    left: number
+    transformOrigin: string
+}
+
 export function SessionActionMenu(props: SessionActionMenuProps) {
     const { t } = useTranslation()
     const { haptic } = usePlatform()
@@ -198,10 +200,14 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         sessionPinned = false,
         sessionGlobalPinned = false,
         onSetPinMode,
+        sessionPersonalPinned = false,
+        onSetPersonalPinned,
         onExport,
-        onMarkUnread,
+        onStudio,
+        onSessionShare,
         onSyncCodex,
         onSyncPi,
+        onSyncDsh,
         onArchive,
         onReopen,
         reopenDisabledReason,
@@ -210,7 +216,8 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         anchorPoint,
         menuId
     } = props
-    const { menuRef, menuStyle } = useAnchoredMenu({ isOpen, onClose, anchorPoint })
+    const menuRef = useRef<HTMLDivElement | null>(null)
+    const [menuPosition, setMenuPosition] = useState<MenuPosition | null>(null)
     const internalId = useId()
     const resolvedMenuId = menuId ?? `session-action-menu-${internalId}`
     const headingId = `${resolvedMenuId}-heading`
@@ -235,6 +242,11 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onSetPinMode?.(mode)
     }
 
+    const handleSetPersonalPinned = (pinned: boolean) => {
+        onClose()
+        onSetPersonalPinned?.(pinned)
+    }
+
     const handleArchive = () => {
         onClose()
         onArchive()
@@ -250,10 +262,12 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onExport?.()
     }
 
-    const handleMarkUnread = () => {
+    const handleStudio = () => {
         onClose()
-        onMarkUnread?.()
+        onStudio?.()
     }
+
+    const handleSessionShare = () => { onClose(); onSessionShare?.() }
 
     const handleSyncCodex = () => {
         onClose()
@@ -265,12 +279,101 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onSyncPi?.()
     }
 
+    const handleSyncDsh = () => {
+        onClose()
+        onSyncDsh?.()
+    }
+
     const handleDelete = () => {
         onClose()
         onDelete()
     }
 
+    const updatePosition = useCallback(() => {
+        const menuEl = menuRef.current
+        if (!menuEl) return
+
+        const menuRect = menuEl.getBoundingClientRect()
+        const viewportWidth = window.innerWidth
+        const viewportHeight = window.innerHeight
+        const padding = 8
+        const gap = 8
+
+        const spaceBelow = viewportHeight - anchorPoint.y
+        const spaceAbove = anchorPoint.y
+        const openAbove = spaceBelow < menuRect.height + gap && spaceAbove > spaceBelow
+
+        let top = openAbove ? anchorPoint.y - menuRect.height - gap : anchorPoint.y + gap
+        // Keep the menu centered on the trigger, then clamp it only when it would leave the viewport.
+        let left = anchorPoint.x - menuRect.width / 2
+        const transformOrigin = openAbove ? 'bottom center' : 'top center'
+
+        top = Math.min(Math.max(top, padding), viewportHeight - menuRect.height - padding)
+        left = Math.min(Math.max(left, padding), viewportWidth - menuRect.width - padding)
+
+        setMenuPosition({ top, left, transformOrigin })
+    }, [anchorPoint])
+
+    useLayoutEffect(() => {
+        if (!isOpen) return
+        updatePosition()
+    }, [isOpen, updatePosition])
+
+    useEffect(() => {
+        if (!isOpen) {
+            setMenuPosition(null)
+            return
+        }
+
+        const handlePointerDown = (event: PointerEvent) => {
+            const target = event.target as Node
+            if (menuRef.current?.contains(target)) return
+            onClose()
+        }
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                onClose()
+            }
+        }
+
+        const handleReflow = () => {
+            updatePosition()
+        }
+
+        document.addEventListener('pointerdown', handlePointerDown)
+        document.addEventListener('keydown', handleKeyDown)
+        window.addEventListener('resize', handleReflow)
+        window.addEventListener('scroll', handleReflow, true)
+
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown)
+            document.removeEventListener('keydown', handleKeyDown)
+            window.removeEventListener('resize', handleReflow)
+            window.removeEventListener('scroll', handleReflow, true)
+        }
+    }, [isOpen, onClose, updatePosition])
+
+    useEffect(() => {
+        if (!isOpen) return
+
+        const frame = window.requestAnimationFrame(() => {
+            const firstItem = menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')
+            firstItem?.focus()
+        })
+
+        return () => window.cancelAnimationFrame(frame)
+    }, [isOpen])
+
     if (!isOpen) return null
+
+    const menuStyle: CSSProperties | undefined = menuPosition
+        ? {
+            top: `max(${menuPosition.top}px, calc(env(safe-area-inset-top) + 8px))`,
+            left: menuPosition.left,
+            transformOrigin: menuPosition.transformOrigin
+        }
+        : undefined
 
     // The left text inset includes the icon and gap; mirror it on the right so
     // the text-to-border distance is symmetric without counting the icon twice.
@@ -305,6 +408,25 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     {t('session.action.rename')}
                 </button>
 
+                {onStudio ? (
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                        onClick={handleStudio}
+                    >
+                        <ShareIcon className="h-[18px] w-[18px] text-[var(--app-hint)]" />
+                        {t('studio.action.create')}
+                    </button>
+                ) : null}
+
+                {onSessionShare ? (
+                    <button type="button" role="menuitem" className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`} onClick={handleSessionShare}>
+                        <ShareIcon className="h-[18px] w-[18px] text-[var(--app-hint)]" />
+                        {t('session.action.sessionShare')}
+                    </button>
+                ) : null}
+
                 <button
                     type="button"
                     role="menuitem"
@@ -315,15 +437,15 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     {t('session.action.copyReference')}
                 </button>
 
-                {onMarkUnread ? (
+                {onSetPersonalPinned ? (
                     <button
                         type="button"
                         role="menuitem"
                         className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
-                        onClick={handleMarkUnread}
+                        onClick={() => handleSetPersonalPinned(!sessionPersonalPinned)}
                     >
-                        <UnreadIcon className="text-[var(--app-hint)]" />
-                        {t('session.action.markUnread')}
+                        <PinIcon filled={sessionPersonalPinned} className="text-[var(--app-hint)]" />
+                        {t(sessionPersonalPinned ? 'session.action.unpinPersonal' : 'session.action.pinPersonal')}
                     </button>
                 ) : null}
 
@@ -383,6 +505,18 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     >
                         <SyncIcon className="text-[var(--app-hint)]" />
                         {t('session.action.syncPi')}
+                    </button>
+                ) : null}
+
+                {onSyncDsh ? (
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                        onClick={handleSyncDsh}
+                    >
+                        <SyncIcon className="text-[var(--app-hint)]" />
+                        {t('session.action.syncDsh')}
                     </button>
                 ) : null}
 

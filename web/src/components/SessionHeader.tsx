@@ -27,7 +27,10 @@ import { useSessionHeaderMetadata } from '@/hooks/useSessionHeaderMetadata'
 import { formatSessionHeaderTimestamp } from '@/lib/sessionHeaderTimestamp'
 import { selectMobileSessionHeaderSecondary } from '@/lib/sessionHeaderMobileMetadata'
 import { useMinuteTick } from '@/hooks/useMinuteTick'
-import { markSessionUnread } from '@/lib/sessionLastSeen'
+import { useOptionalAppContext } from '@/lib/app-context'
+import { SessionShareDialog } from '@/components/SessionShareDialog'
+import type { SessionShare } from '@/types/api'
+import { ApiError } from '@/api/client'
 
 /** Same preference order as session-list chips: display label → host → short id. */
 export function resolveSessionHeaderMachineLabel(
@@ -147,6 +150,7 @@ export function SessionHeader(props: {
     onToggleTerminal?: () => void
     terminalActive?: boolean
     api: ApiClient | null
+    baseUrl?: string
     titleSuggestionAvailable?: boolean
     canReopen?: boolean
     reopenDisabledReason?: string
@@ -155,6 +159,7 @@ export function SessionHeader(props: {
     onSessionReopened?: (newSessionId: string) => void | Promise<void>
 }) {
     const { t, locale } = useTranslation()
+    const isSessionGuest = useOptionalAppContext()?.isSessionGuest ?? false
     const queryClient = useQueryClient()
     const { addToast } = useToast()
     const { session, api, onSessionDeleted, onSessionReopened } = props
@@ -186,7 +191,11 @@ export function SessionHeader(props: {
     const piSessionId = session.metadata?.flavor === 'pi'
         ? session.metadata.piSessionId?.trim() || null
         : null
-    const { machines } = useMachines(api, Boolean(api))
+    const dshSessionId = session.metadata?.flavor === 'dsh'
+        ? session.metadata.dshSessionId?.trim() || null
+        : null
+    const actionApi = isSessionGuest ? null : api
+    const { machines } = useMachines(actionApi, Boolean(actionApi))
     const machineLabelsById = useMachineLabels(machines)
     const machineLabel = useMemo(
         () => resolveSessionHeaderMachineLabel(session, machineLabelsById),
@@ -223,9 +232,50 @@ export function SessionHeader(props: {
     const [deleteOpen, setDeleteOpen] = useState(false)
     const [isSyncingCodex, setIsSyncingCodex] = useState(false)
     const [isSyncingPi, setIsSyncingPi] = useState(false)
+    const [isSyncingDsh, setIsSyncingDsh] = useState(false)
+    const [isCreatingStudio, setIsCreatingStudio] = useState(false)
+    const [isCreatingSessionShare, setIsCreatingSessionShare] = useState(false)
+    const [sessionShareOpen, setSessionShareOpen] = useState(false)
+    const [sessionShare, setSessionShare] = useState<SessionShare | null>(null)
+    const [sessionShareCode, setSessionShareCode] = useState<string | null>(null)
+    const [sessionShareUrl, setSessionShareUrl] = useState<string | null>(null)
+
+    const buildSessionShareUrl = (shareToken: string): string => {
+        const configuredHub = props.baseUrl && props.baseUrl !== window.location.origin
+            ? props.baseUrl
+            : new URLSearchParams(window.location.search).get('hub')
+        const shareParams = new URLSearchParams()
+        if (configuredHub) shareParams.set('hub', configuredHub)
+        shareParams.set('lang', locale)
+        const shareQuery = shareParams.toString() ? `?${shareParams.toString()}` : ''
+        return `${window.location.origin}/shared-session/${encodeURIComponent(shareToken)}${shareQuery}`
+    }
+
+    // Rehydrate an existing share after a reload. The access code is never
+    // stored in the database, so it can be revoked here but is only shown
+    // again when the share is created or regenerated.
+    useEffect(() => {
+        let cancelled = false
+        setSessionShare(null)
+        setSessionShareCode(null)
+        setSessionShareUrl(null)
+        if (!api || isSessionGuest || typeof api.getSessionShare !== 'function') return () => { cancelled = true }
+
+        void api.getSessionShare(session.id)
+            .then(({ share }) => {
+                if (cancelled || !share) return
+                setSessionShare(share)
+                setSessionShareUrl(buildSessionShareUrl(share.shareToken))
+            })
+            .catch(() => {
+                // A missing share is not an error for the session header.
+            })
+
+        return () => { cancelled = true }
+    }, [api, isSessionGuest, locale, props.baseUrl, session.id])
 
     const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, setPinMode, deleteSession, isPending } = useSessionActions(
-        api,
+        actionApi,
         session.id,
         session.metadata?.flavor ?? null
     )
@@ -354,6 +404,126 @@ export function SessionHeader(props: {
         }
     }
 
+    const handleSyncDsh = async () => {
+        if (!api || !dshSessionId || session.active || isSyncingDsh) return
+
+        setIsSyncingDsh(true)
+        try {
+            const result = await api.importDshSessions({
+                sessionIds: [dshSessionId],
+                cwd: typeof session.metadata?.path === 'string' ? session.metadata.path : undefined,
+                machineId: typeof session.metadata?.machineId === 'string' ? session.metadata.machineId : undefined
+            })
+            const imported = result.results.find((item) => item.dshSessionId === dshSessionId)
+            if (imported?.error) {
+                const message = imported.error.code === 'transcript_diverged'
+                    ? t('dshImport.error.diverged')
+                    : imported.error.code === 'session_active'
+                        ? t('dshImport.error.active')
+                        : imported.error.message
+                throw new Error(message)
+            }
+            if (!imported) throw new Error(result.error || t('dshImport.failed.body'))
+
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: queryKeys.session(session.id) }),
+                queryClient.invalidateQueries({ queryKey: queryKeys.messages(session.id) }),
+                queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
+            ])
+            addToast({
+                title: t('dshImport.manual.success.title'),
+                body: (imported.appended ?? 0) === 0
+                    ? t('dshImport.manual.success.noNewMessages')
+                    : t('dshImport.manual.success.body', { n: imported.appended ?? 0 }),
+                sessionId: session.id,
+                url: `/sessions/${session.id}`
+            })
+        } catch (error) {
+            addToast({
+                title: t('dshImport.manual.failed.title'),
+                body: error instanceof Error ? error.message : t('dshImport.failed.body'),
+                sessionId: session.id,
+                url: `/sessions/${session.id}`
+            })
+        } finally {
+            setIsSyncingDsh(false)
+        }
+    }
+
+    const handleCreateSessionShare = async (force = false) => {
+        if (!api || isCreatingSessionShare) return
+        // An active share remains valid after reload, but its raw access code
+        // is intentionally not recoverable (only the hash is persisted). Do
+        // not rotate the share just because the code is unavailable locally.
+        if (!force && sessionShare && sessionShareUrl) {
+            setSessionShareOpen(true)
+            return
+        }
+        setIsCreatingSessionShare(true)
+        try {
+            const result = await api.createSessionShare(session.id)
+            const shareUrl = buildSessionShareUrl(result.share.shareToken)
+            setSessionShare(result.share)
+            setSessionShareCode(result.accessCode)
+            setSessionShareUrl(shareUrl)
+            setSessionShareOpen(true)
+            await queryClient.invalidateQueries({ queryKey: queryKeys.sessionShares })
+            await queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
+        } catch (error) {
+            addToast({ title: t('sessionShare.createFailed'), body: error instanceof Error ? error.message : t('dialog.error.default'), sessionId: session.id, url: `/sessions/${session.id}` })
+        } finally { setIsCreatingSessionShare(false) }
+    }
+
+    const handleRegenerateSessionShare = async () => {
+        if (!api || isCreatingSessionShare) return
+        if (!window.confirm(t('sessionShare.regenerateConfirm'))) return
+        await handleCreateSessionShare(true)
+    }
+
+    const handleRevokeSessionShare = async () => {
+        if (!api || !sessionShare) return
+        try {
+            await api.revokeSessionShare(sessionShare.id)
+            setSessionShareOpen(false)
+            setSessionShare(null)
+            setSessionShareCode(null)
+            setSessionShareUrl(null)
+            await queryClient.invalidateQueries({ queryKey: queryKeys.sessionShares })
+            await queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
+            addToast({
+                title: t('sessionShare.revoke'),
+                body: t('sessionShare.revoked'),
+                sessionId: session.id,
+                url: `/sessions/${session.id}`
+            })
+        } catch (error) {
+            addToast({
+                title: t('sessionShare.revokeFailed'),
+                body: error instanceof Error ? error.message : t('dialog.error.default'),
+                sessionId: session.id,
+                url: `/sessions/${session.id}`
+            })
+        }
+    }
+
+    const handleCreateStudio = async () => {
+        if (!api || isCreatingStudio) return
+        setIsCreatingStudio(true)
+        try {
+            const result = await api.createStudio({ sessionId: session.id, title })
+            window.location.assign(`/studios/${result.room.id}`)
+        } catch (error) {
+            addToast({
+                title: t('studio.owner.createFailed'),
+                body: error instanceof ApiError ? error.message : t('studio.owner.createFailed'),
+                sessionId: session.id,
+                url: `/sessions/${session.id}`
+            })
+        } finally {
+            setIsCreatingStudio(false)
+        }
+    }
+
     const handleMenuToggle = () => {
         if (!menuOpen && menuAnchorRef.current) {
             const rect = menuAnchorRef.current.getBoundingClientRect()
@@ -371,26 +541,29 @@ export function SessionHeader(props: {
         <>
             <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
                 <div className="mx-auto w-full max-w-content flex items-center gap-2 p-3">
-                    {/* Back button */}
-                    <button
-                        type="button"
-                        onClick={props.onBack}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
-                    >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="20"
-                            height="20"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
+                    {/* Guest shares have no session list to return to. */}
+                    {!isSessionGuest ? (
+                        <button
+                            type="button"
+                            onClick={props.onBack}
+                            aria-label={t('common.back')}
+                            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
                         >
-                            <polyline points="15 18 9 12 15 6" />
-                        </svg>
-                    </button>
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="20"
+                                height="20"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            >
+                                <polyline points="15 18 9 12 15 6" />
+                            </svg>
+                        </button>
+                    ) : null}
 
                     {/* Session info - two lines: title and path */}
                     <div className="min-w-0 flex-1">
@@ -482,7 +655,7 @@ export function SessionHeader(props: {
                         </button>
                     ) : null}
 
-                    {props.onToggleTerminal ? (
+                    {!isSessionGuest && props.onToggleTerminal ? (
                         <button
                             type="button"
                             onClick={props.onToggleTerminal}
@@ -495,7 +668,7 @@ export function SessionHeader(props: {
                         </button>
                     ) : null}
 
-                    <button
+                    {!isSessionGuest ? <button
                         type="button"
                         onClick={handleMenuToggle}
                         onPointerDown={(e) => e.stopPropagation()}
@@ -507,11 +680,11 @@ export function SessionHeader(props: {
                         title={t('session.more')}
                     >
                         <MoreVerticalIcon />
-                    </button>
+                    </button> : null}
                 </div>
             </div>
 
-            <SessionActionMenu
+            {!isSessionGuest ? <SessionActionMenu
                 isOpen={menuOpen}
                 onClose={() => setMenuOpen(false)}
                 sessionId={session.id}
@@ -520,11 +693,13 @@ export function SessionHeader(props: {
                 sessionPinned={Boolean(session.pinned)}
                 sessionGlobalPinned={Boolean(session.globalPinned)}
                 onRename={() => setRenameOpen(true)}
-                onMarkUnread={() => markSessionUnread(session.id, session.updatedAt)}
                 onSetPinMode={api ? (mode) => void handleSetPinMode(mode) : undefined}
                 onExport={() => setExportOpen(true)}
+                onStudio={api ? () => void handleCreateStudio() : undefined}
+                onSessionShare={api ? () => void handleCreateSessionShare() : undefined}
                 onSyncCodex={api && codexSessionId ? handleSyncCodex : undefined}
                 onSyncPi={api && piSessionId && !session.active ? handleSyncPi : undefined}
+                onSyncDsh={api && dshSessionId && !session.active ? handleSyncDsh : undefined}
                 onArchive={() => setArchiveOpen(true)}
                 onReopen={props.canReopen === false ? undefined : handleReopen}
                 reopenDisabledReason={props.reopenDisabledReason}
@@ -532,7 +707,9 @@ export function SessionHeader(props: {
                 onDelete={() => setDeleteOpen(true)}
                 anchorPoint={menuAnchorPoint}
                 menuId={menuId}
-            />
+            /> : null}
+
+            <SessionShareDialog isOpen={sessionShareOpen} share={sessionShare} accessCode={sessionShareCode} shareUrl={sessionShareUrl} onClose={() => setSessionShareOpen(false)} onRegenerate={api ? () => { void handleRegenerateSessionShare() } : undefined} isRegenerating={isCreatingSessionShare} onRevoke={api && sessionShare ? () => { void handleRevokeSessionShare() } : undefined} />
 
             {reopenError ? (
                 <ConfirmDialog

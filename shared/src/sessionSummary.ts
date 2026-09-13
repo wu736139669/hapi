@@ -157,6 +157,7 @@ const AGENT_SESSION_ID_FIELD_BY_FLAVOR: Partial<Record<AgentFlavor, keyof Metada
     grok: 'grokSessionId',
     agy: 'agySessionId',
     cursor: 'cursorSessionId',
+    dsh: 'dshSessionId',
     kimi: 'kimiSessionId',
     copilot: 'copilotSessionId',
     pi: 'piSessionId'
@@ -181,6 +182,7 @@ function getSummaryAgentSessionId(metadata: Metadata): string | undefined {
         ?? metadata.grokSessionId
         ?? metadata.agySessionId
         ?? metadata.cursorSessionId
+        ?? metadata.dshSessionId
         ?? metadata.kimiSessionId
         ?? metadata.copilotSessionId
         ?? undefined

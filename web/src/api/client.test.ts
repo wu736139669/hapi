@@ -57,22 +57,18 @@ describe('ApiClient error mapping', () => {
         }
     })
 
-    it('preserves the structured ambiguous-boundary code for Rewind fallbacks', async () => {
+    it('preserves public session-share verification error codes on 401', async () => {
         fetchMock.mockResolvedValueOnce(
             new Response(
-                JSON.stringify({
-                    error: 'Rewind is unavailable for this Codex history',
-                    code: 'ambiguous_native_boundary_fork_safe',
-                    hydrateFailed: false
-                }),
-                { status: 409, statusText: 'Conflict' }
+                JSON.stringify({ error: 'Invalid access code or revoked share', code: 'invalid_access_code' }),
+                { status: 401, statusText: 'Unauthorized' }
             )
         )
 
-        const api = new ApiClient('test-token')
-        await expect(api.rewindConversation('session-1', 'local-1')).rejects.toMatchObject({
-            status: 409,
-            code: 'ambiguous_native_boundary_fork_safe'
+        const api = new ApiClient('')
+        await expect(api.exchangeSessionShare('share-token', '000000')).rejects.toMatchObject({
+            status: 401,
+            code: 'invalid_access_code',
         })
     })
 
@@ -97,32 +93,6 @@ describe('ApiClient error mapping', () => {
             expect(apiError.status).toBe(422)
             expect(apiError.body).toContain('cursorSessionId')
         }
-    })
-
-    it('returns export warnings and sends explicit confirmation for large exports', async () => {
-        const warning = {
-            type: 'warning',
-            count: 20_001,
-            limit: 20_000,
-            estimatedBytes: 12_345_678
-        }
-        const payload = {
-            schemaVersion: 2,
-            exportedAt: 1_762_000_000_000,
-            session: { id: 'session-1' },
-            messages: [],
-            scratchlist: []
-        }
-        fetchMock
-            .mockResolvedValueOnce(new Response(JSON.stringify(warning), { status: 200 }))
-            .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
-
-        const api = new ApiClient('test-token')
-        await expect(api.getSessionExport('session-1')).resolves.toEqual(warning)
-        await expect(api.getSessionExport('session-1', { force: true })).resolves.toEqual(payload)
-
-        expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/sessions/session-1/export')
-        expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/sessions/session-1/export?force=true')
     })
 
     it('loads the Cursor chat store status for the selected session', async () => {
@@ -172,20 +142,6 @@ describe('ApiClient error mapping', () => {
         expect(fetchMock.mock.calls[0]?.[0]).toBe('/health')
     })
 
-    it('asks the machine to re-probe agy only when the caller forces a refresh', async () => {
-        fetchMock.mockImplementation(() => Promise.resolve(
-            new Response(JSON.stringify({ success: true, availableModels: [] }), { status: 200 })
-        ))
-
-        const api = new ApiClient('test-token')
-        await api.getMachineAgyModels('machine-1')
-        await api.getMachineAgyModels('machine-1', { refresh: true })
-
-        expect(fetchMock.mock.calls[0][0]).toContain('/api/machines/machine-1/agy-models')
-        expect(fetchMock.mock.calls[0][0]).not.toContain('refresh')
-        expect(fetchMock.mock.calls[1][0]).toContain('/api/machines/machine-1/agy-models?refresh=true')
-    })
-
     it('lists and imports Pi sessions through the selected machine', async () => {
         fetchMock
             .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, sessions: [], machineId: 'machine-1' }), { status: 200 }))
@@ -200,6 +156,37 @@ describe('ApiClient error mapping', () => {
         expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
             method: 'POST',
             body: JSON.stringify({ sessionIds: ['pi-1'], cwd: '/tmp/project', machineId: 'machine-1' })
+        })
+    })
+
+    it('lists and imports Claude sessions through the selected machine', async () => {
+        fetchMock
+            .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, sessions: [], machineId: 'machine-1' }), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, results: [], machineId: 'machine-1' }), { status: 200 }))
+        const api = new ApiClient('test-token')
+
+        await api.getClaudeSessions('/tmp/project', 'machine-1')
+        await api.importClaudeSessions({
+            sessionIds: ['claude-1'],
+            cwd: '/tmp/project',
+            machineId: 'machine-1',
+            model: 'claude-sonnet-4-5',
+            effort: 'high',
+            permissionMode: 'bypassPermissions'
+        })
+
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/claude/sessions?cwd=%2Ftmp%2Fproject&machineId=machine-1')
+        expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/claude/import-sessions')
+        expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+            method: 'POST',
+            body: JSON.stringify({
+                sessionIds: ['claude-1'],
+                cwd: '/tmp/project',
+                machineId: 'machine-1',
+                model: 'claude-sonnet-4-5',
+                effort: 'high',
+                permissionMode: 'bypassPermissions'
+            })
         })
     })
 

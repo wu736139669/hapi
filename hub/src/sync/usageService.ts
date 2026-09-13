@@ -255,6 +255,7 @@ function collectUsageEvents(store: Store, sessions: StoredSession[]): void {
         if (messages.length > 0 || replaceEvents) {
             store.usage.recordScan(
                 session.id,
+                session.namespace,
                 messageEpoch,
                 lastSeq,
                 Array.from(events.values()),
@@ -344,8 +345,9 @@ export function getUsageSummary(
     const now = Date.now()
     const days = range === '30d' ? 30 : range === 'all' ? null : 7
     const from = days === null ? null : now - days * 24 * 60 * 60 * 1000
-    const sessionIds = new Set(sessions.map((session) => session.id))
-    const events = store.usage.getEvents(Array.from(sessionIds))
+    // Read the durable namespace ledger rather than only live session ids;
+    // usage rows intentionally survive session deletion.
+    const events = store.usage.getEventsByNamespace(namespace)
     const isInRange = (event: UsageEvent) => (from === null || event.createdAt >= from) && event.createdAt <= now
 
     const totals = emptyTotals()
@@ -365,7 +367,9 @@ export function getUsageSummary(
         let duplicateCumulativeEvent = false
         if (event.kind === 'cumulative') {
             const sourceParts = event.sourceKey.split('|')
-            const streamKey = sourceParts.slice(0, 3).join('|')
+            // Provider thread ids are only unique within a HAPI session. Keep
+            // deleted-session history from altering a newer session's delta.
+            const streamKey = `${event.sessionId}|${sourceParts.slice(0, 3).join('|')}`
             const previous = cumulativePrevious.get(streamKey) ?? null
             const current: UsageSnapshot = [
                 event.inputTokens,

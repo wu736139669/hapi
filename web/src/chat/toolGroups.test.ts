@@ -217,6 +217,16 @@ describe('buildVisibleChatBlocks', () => {
         expect(isToolGroupBlock(visible[0]) && visible[0].defaultOpen).toBe(true)
     })
 
+    it('keeps every tool call inline when execution-process grouping is disabled', () => {
+        const visible = buildVisibleChatBlocks([
+            makeToolBlock('inline-read', 'Read', { file_path: '/repo/package.json' }),
+            makeToolBlock('inline-search', 'Grep', { pattern: 'nativeTitle' }),
+        ], { hasMoreMessages: false, executionProcessEnabled: false })
+
+        expect(visible).toHaveLength(2)
+        expect(visible.every((block) => block.kind === 'tool-call')).toBe(true)
+    })
+
     it('keeps structured general Codex commands separate from exploration groups', () => {
         const read = makeToolBlock('codex-read', 'CodexBash', {
             command: 'cat package.json',

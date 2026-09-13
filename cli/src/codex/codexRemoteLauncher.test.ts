@@ -95,6 +95,8 @@ const harness = vi.hoisted(() => ({
     emitRunningChildTurnBeforeSuppressedParent: false,
     emitCompletedChildTurnBeforeSuppressedParent: false,
     emitTurnAbortedOnInterrupt: false,
+    capacityErrorsRemaining: 0,
+    capacityErrorRetryAfterMs: null as number | null,
     bridgeOptions: [] as unknown[]
 }));
 
@@ -336,6 +338,25 @@ vi.mock('./codexAppServerClient', () => {
                 };
                 harness.notifications.push({ method: 'model/safetyBuffering/updated', params: notification });
                 this.notificationHandler?.('model/safetyBuffering/updated', notification);
+                return { turn: { id: turnId } };
+            }
+
+            if (harness.capacityErrorsRemaining > 0) {
+                harness.capacityErrorsRemaining -= 1;
+                const overloaded = {
+                    threadId,
+                    turnId,
+                    error: {
+                        message: 'Selected model is at capacity. Please try a different model.',
+                        codexErrorInfo: 'server_overloaded'
+                    },
+                    willRetry: false,
+                    ...(harness.capacityErrorRetryAfterMs !== null
+                        ? { retryAfterMs: harness.capacityErrorRetryAfterMs }
+                        : {})
+                };
+                harness.notifications.push({ method: 'error', params: overloaded });
+                this.notificationHandler?.('error', overloaded);
                 return { turn: { id: turnId } };
             }
 
@@ -1491,6 +1512,8 @@ describe('codexRemoteLauncher', () => {
         harness.emitRunningChildTurnBeforeSuppressedParent = false;
         harness.emitCompletedChildTurnBeforeSuppressedParent = false;
         harness.emitTurnAbortedOnInterrupt = false;
+        harness.capacityErrorsRemaining = 0;
+        harness.capacityErrorRetryAfterMs = null;
         harness.bridgeOptions = [];
     });
 
@@ -2230,7 +2253,7 @@ describe('codexRemoteLauncher', () => {
         expect(session.thinking).toBe(false);
     });
 
-    it('does not retry an explicitly non-retryable error even when its text is retryable', async () => {
+    it('does not retry an explicitly non-retryable fatal error', async () => {
         harness.suppressTurnCompletion = true;
         const { session, sessionEvents } = createSessionStub(['first message']);
 
@@ -2242,7 +2265,7 @@ describe('codexRemoteLauncher', () => {
         harness.dispatchNotification?.('error', {
             threadId: 'thread-1',
             turnId: 'turn-1',
-            error: { message: 'Selected model is at capacity' },
+            error: { message: 'permission denied' },
             willRetry: false
         });
 
@@ -2250,9 +2273,98 @@ describe('codexRemoteLauncher', () => {
         expect(harness.startTurnMessages).toEqual(['first message']);
         expect(sessionEvents).toContainEqual({
             type: 'message',
-            message: 'Task failed: Selected model is at capacity'
+            message: 'Task failed: permission denied'
         });
         expect(sessionEvents.some((event) => String(event.message ?? '').includes('retrying same conversation'))).toBe(false);
+        expect(session.thinking).toBe(false);
+    });
+
+    it('retries a server-overloaded model on the same thread after the advertised delay', async () => {
+        harness.capacityErrorsRemaining = 1;
+        harness.capacityErrorRetryAfterMs = 0;
+        const { session, sessionEvents } = createSessionStub(['first message']);
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.startThreadIds).toEqual(['thread-1']);
+        expect(harness.startTurnMessages).toEqual(['first message', 'first message']);
+        expect(sessionEvents).toContainEqual({
+            type: 'message',
+            message: 'Task failed: Selected model is at capacity. Please try a different model.; retrying same conversation (1/6)'
+        });
+        expect(sessionEvents.filter((event) => event.type === 'ready').length).toBeGreaterThanOrEqual(1);
+        expect(session.thinking).toBe(false);
+    });
+
+    it('keeps retrying a capacity failure past the old three-attempt budget', async () => {
+        // Four consecutive capacity failures exceed the previous limit of 3.
+        // The advertised retryAfterMs keeps the test fast while still
+        // exercising the scheduled-retry path.
+        harness.capacityErrorsRemaining = 4;
+        harness.capacityErrorRetryAfterMs = 50;
+        const { session, sessionEvents } = createSessionStub(['first message']);
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.startTurnMessages).toEqual(Array(5).fill('first message'));
+        const retryMessages = sessionEvents
+            .filter((event) => event.type === 'message' && String(event.message).includes('retrying same conversation'))
+            .map((event) => event.message);
+        expect(retryMessages).toEqual([
+            'Task failed: Selected model is at capacity. Please try a different model.; retrying same conversation in 1 second (1/6)',
+            'Task failed: Selected model is at capacity. Please try a different model.; retrying same conversation in 1 second (2/6)',
+            'Task failed: Selected model is at capacity. Please try a different model.; retrying same conversation in 1 second (3/6)',
+            'Task failed: Selected model is at capacity. Please try a different model.; retrying same conversation in 1 second (4/6)'
+        ]);
+        expect(sessionEvents.filter((event) => event.type === 'message'
+            && String(event.message).startsWith('Task failed: Selected model is at capacity')
+            && !String(event.message).includes('retrying same conversation'))).toEqual([]);
+        expect(session.thinking).toBe(false);
+    });
+
+    it('holds the thinking state across a capacity backoff window', async () => {
+        // While a retry waits out its 7s backoff the turn must not look
+        // finished: previously thinking toggled off for the whole window, so
+        // the conversation appeared to have failed until the retry re-armed it.
+        harness.capacityErrorsRemaining = 1;
+        harness.capacityErrorRetryAfterMs = null;
+        const { session, thinkingChanges } = createSessionStub(['first message']);
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.startTurnMessages).toEqual(['first message', 'first message']);
+        expect(session.sessionId).toBe('thread-1');
+        // The failure that arms the retry must not report the turn as
+        // finished: only the successful retried turn may clear thinking.
+        expect(thinkingChanges[0]).toBe(true);
+        const firstOffIndex = thinkingChanges.indexOf(false);
+        const lastOnIndex = thinkingChanges.lastIndexOf(true);
+        expect(firstOffIndex).toBeGreaterThan(lastOnIndex);
+        expect(session.thinking).toBe(false);
+    }, 20_000);
+
+    it('stops retrying a capacity failure once the extended budget is exhausted', async () => {
+        // More failures than the budget allows: the last one must surface as a
+        // terminal failure instead of scheduling another retry.
+        harness.capacityErrorsRemaining = 8;
+        harness.capacityErrorRetryAfterMs = 0;
+        const { session, sessionEvents } = createSessionStub(['first message']);
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.startTurnMessages).toHaveLength(7);
+        const retryMessages = sessionEvents
+            .filter((event) => event.type === 'message' && String(event.message).includes('retrying same conversation'));
+        expect(retryMessages).toHaveLength(6);
+        expect(retryMessages.at(-1)?.message).toContain('(6/6)');
+        expect(sessionEvents).toContainEqual({
+            type: 'message',
+            message: 'Task failed: Selected model is at capacity. Please try a different model.'
+        });
         expect(session.thinking).toBe(false);
     });
 

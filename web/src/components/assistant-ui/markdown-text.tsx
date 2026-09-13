@@ -31,6 +31,9 @@ import { classifyNoSchemeHref } from '@/lib/markdown-href-policy'
 import { remarkSessionPathLinks } from '@/lib/remark-session-path-links'
 import { buildSessionReferencePath, parseSessionPathHref } from '@/lib/sessionReference'
 import { UriConfirmDialog } from '@/components/UriConfirmDialog'
+import { ImagePreview } from '@/components/ImagePreview'
+import { isPreviewableFilePath } from '@/lib/file-preview'
+import { useOptionalFilePreview } from '@/lib/file-preview-context'
 
 import type { MarkdownTextPrimitiveProps } from '@assistant-ui/react-markdown'
 
@@ -505,6 +508,7 @@ function Code(props: ComponentPropsWithoutRef<'code'>) {
 function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { filePath: string; sessionId: string }) {
     const { filePath, sessionId, ...anchorProps } = props
     const navigate = useNavigate()
+    const filePreview = useOptionalFilePreview()
     const rel = anchorProps.target === '_blank' ? (anchorProps.rel ?? 'noreferrer') : anchorProps.rel
     const search = new URLSearchParams({ path: encodeBase64(filePath), origin: 'chat' }).toString()
     const href = `/sessions/${encodeURIComponent(sessionId)}/file?${search}`
@@ -513,6 +517,12 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { filePath: strin
         anchorProps.onClick?.(event)
         if (event.defaultPrevented) return
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+
+        if (filePreview && isPreviewableFilePath(filePath)) {
+            event.preventDefault()
+            filePreview.openFilePreview({ sessionId, filePath })
+            return
+        }
 
         event.preventDefault()
         void navigate({
@@ -837,7 +847,19 @@ function Em(props: ComponentPropsWithoutRef<'em'>) {
 }
 
 function Image(props: ComponentPropsWithoutRef<'img'>) {
-    return <img {...props} className={cn('aui-md-img my-3 max-w-full rounded-xl', props.className)} />
+    const src = typeof props.src === 'string' ? props.src : ''
+    const label = typeof props.alt === 'string' && props.alt ? props.alt : 'Image preview'
+    if (!src) return <img {...props} className={cn('aui-md-img my-3 max-w-full rounded-xl', props.className)} />
+
+    return (
+        <ImagePreview
+            src={src}
+            fileName={label}
+            label={label}
+            buttonClassName="group my-3 flex max-h-[32rem] min-h-[10rem] w-full items-center justify-center overflow-hidden rounded-xl bg-[var(--app-subtle-bg)] p-2 text-left"
+            imageClassName={cn('aui-md-img max-h-[30rem] max-w-full object-contain transition-transform group-hover:scale-[1.01]', props.className)}
+        />
+    )
 }
 
 type DefaultComponentsMap = {

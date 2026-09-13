@@ -31,6 +31,14 @@ export type TerminalHandlersDeps = {
 }
 
 export function registerTerminalHandlers(socket: SocketWithData, deps: TerminalHandlersDeps): void {
+    // Collaborative guests can chat in their shared session, but never receive
+    // a shell or the raw agent PTY. Keep this guard even though the namespace
+    // handshake also rejects guest JWTs, so a future connection-path refactor
+    // cannot accidentally expose terminal handlers.
+    if (socket.data.role === 'session-guest') {
+        return
+    }
+
     const { io, getSession, terminalRegistry, maxTerminalsPerSocket, maxTerminalsPerSession } = deps
     const cliNamespace = io.of('/cli')
     const namespace = typeof socket.data.namespace === 'string' ? socket.data.namespace : null

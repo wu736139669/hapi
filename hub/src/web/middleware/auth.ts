@@ -6,18 +6,24 @@ export type WebAppEnv = {
     Variables: {
         userId: number
         namespace: string
+        sessionId?: string
+        role?: 'session-guest'
+        shareToken?: string
     }
 }
 
 const jwtPayloadSchema = z.object({
     uid: z.number(),
-    ns: z.string()
+    ns: z.string(),
+    sid: z.string().min(1).optional(),
+    role: z.literal('session-guest').optional(),
+    sht: z.string().min(1).optional()
 })
 
-export function createAuthMiddleware(jwtSecret: Uint8Array): MiddlewareHandler<WebAppEnv> {
+export function createAuthMiddleware(jwtSecret: Uint8Array, options?: { isGuestTokenActive?: (shareToken: string) => boolean }): MiddlewareHandler<WebAppEnv> {
     return async (c, next) => {
         const path = c.req.path
-        if (path === '/api/auth' || path === '/api/bind') {
+        if (path === '/api/auth' || path === '/api/bind' || path.startsWith('/api/public/studios/') || path.startsWith('/api/public/session-shares/')) {
             await next()
             return
         }
@@ -40,6 +46,24 @@ export function createAuthMiddleware(jwtSecret: Uint8Array): MiddlewareHandler<W
 
             c.set('userId', parsed.data.uid)
             c.set('namespace', parsed.data.ns)
+            if (parsed.data.role === 'session-guest' && parsed.data.sid) {
+                if (!parsed.data.sht || options?.isGuestTokenActive?.(parsed.data.sht) !== true) {
+                    return c.json({ error: 'Share revoked or expired' }, 401)
+                }
+                c.set('role', parsed.data.role)
+                c.set('sessionId', parsed.data.sid)
+                c.set('shareToken', parsed.data.sht)
+                if (!(path === '/api/events' || path === '/api/sessions' || path.startsWith('/api/sessions/'))) {
+                    return c.json({ error: 'Guest access is limited to the shared session' }, 403)
+                }
+                const forbiddenGuestAction = /\/(fork|rewind|archive|reopen|resume|pin|summary|title-suggestion|switch|migrate-to-acp|permission-mode|collaboration-mode|copilot-agent-mode|model|model-reasoning-effort|effort|service-tier)(?:$|\/)/.test(path)
+                const forbiddenGuestModelDiscovery = /\/(codex-models|dsh-models|opencode-models|opencode-reasoning-effort-options|grok-models|grok-reasoning-effort-options|copilot-models|cursor-models|pi-models)(?:$|\/)/.test(path)
+                const isSessionMetadataPatch = path.match(/^\/api\/sessions\/[^/]+$/) && c.req.method === 'PATCH'
+                const isSessionDelete = path.match(/^\/api\/sessions\/[^/]+$/) && c.req.method === 'DELETE'
+                if (forbiddenGuestAction || forbiddenGuestModelDiscovery || isSessionMetadataPatch || isSessionDelete) {
+                    return c.json({ error: 'Guest cannot perform this action' }, 403)
+                }
+            }
             await next()
             return
         } catch {
