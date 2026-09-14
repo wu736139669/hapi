@@ -309,6 +309,37 @@ describe('SessionHeader', () => {
         expect(screen.queryByRole('button', { name: 'Terminal' })).not.toBeInTheDocument()
     })
 
+    it('hides owner-facing session metadata for collaborative guests', () => {
+        render(
+            <QueryClientProvider client={new QueryClient()}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <AppContextProvider value={{
+                            api: {} as ApiClient,
+                            token: 'guest-token',
+                            baseUrl: 'http://localhost',
+                            isSessionGuest: true
+                        }}>
+                            <SessionHeader
+                                session={baseSession({
+                                    model: 'deepseek-v4.1-flash',
+                                    modelReasoningEffort: 'max',
+                                    metadata: { flavor: 'opencode', path: '/repo', host: 'machine' }
+                                })}
+                                onBack={vi.fn()}
+                                api={null}
+                            />
+                        </AppContextProvider>
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        expect(screen.queryByTestId('session-header-machine')).not.toBeInTheDocument()
+        expect(screen.queryByTestId('session-header-age')).not.toBeInTheDocument()
+        expect(screen.queryByTestId('session-header-reasoning')).not.toBeInTheDocument()
+    })
+
     it('shows an inherited catalog-default Fast tier', () => {
         renderHeader(baseSession(), { serviceTier: 'priority' })
         expect(screen.getByText('fast')).toBeInTheDocument()

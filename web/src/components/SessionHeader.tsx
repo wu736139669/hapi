@@ -220,7 +220,10 @@ export function SessionHeader(props: {
         worktree: headerMetadata.worktree && Boolean(worktreeBranch),
         fastMode: headerMetadata.fastMode && showFastBadge,
     })
-    const showMobileMetadata = (headerMetadata.agent && agentLabel !== null) || mobileSecondary !== null
+    // Collaborative guests only need the session title and controls for
+    // returning to the share entry point.  Machine/model/runtime details are
+    // owner-facing metadata and should not leak into the shared view.
+    const showMobileMetadata = !isSessionGuest && ((headerMetadata.agent && agentLabel !== null) || mobileSecondary !== null)
 
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -588,45 +591,47 @@ export function SessionHeader(props: {
                                 {mobileSecondary === 'fastMode' ? <span className="truncate text-[#34C759]">fast</span> : null}
                             </div>
                         ) : null}
-                        <div className="hidden flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-[var(--app-hint)] sm:flex">
-                            {headerMetadata.agent && agentLabel ? (
-                                <span className="inline-flex items-center gap-1">
-                                    <AgentFlavorIcon flavor={session.metadata?.flavor} className="h-3.5 w-3.5 shrink-0 -translate-y-px" />
-                                    {agentLabel}
-                                </span>
-                            ) : null}
-                            {headerMetadata.machine && machineLabel ? (
-                                <span data-testid="session-header-machine" className="max-w-[12rem] truncate" title={machineLabel}>
-                                    {headerMetadata.showLabels ? `${t('session.item.machine')}: ` : ''}{machineLabel}
-                                </span>
-                            ) : null}
-                            {ageLabel ? (
-                                <span data-testid="session-header-age" title={ageAbsolute ?? undefined}>
-                                    {ageLabel}
-                                </span>
-                            ) : null}
-                            {headerMetadata.model && modelLabel ? (
-                                <span className="inline-flex items-center gap-1.5">
-                                    <span>{headerMetadata.showLabels ? `${t(modelLabel.key)}: ` : ''}{modelLabel.value}</span>
-                                    {isModelChanging ? <ModelChangingStatus /> : null}
-                                </span>
-                            ) : null}
-                            {headerMetadata.reasoning && reasoningLabel ? (
-                                <span data-testid="session-header-reasoning">
-                                    {reasoningLabel}
-                                </span>
-                            ) : null}
-                            {headerMetadata.fastMode && showFastBadge ? (
-                                <span data-testid="session-header-fast" className="text-[#34C759]">
-                                    fast
-                                </span>
-                            ) : null}
-                            {createdAtLabel ? <span>{headerMetadata.showLabels ? `${t('session.header.createdAt')}: ` : ''}{createdAtLabel}</span> : null}
-                            {updatedAtLabel ? <span>{headerMetadata.showLabels ? `${t('session.header.updatedAt')}: ` : ''}{updatedAtLabel}</span> : null}
-                            {headerMetadata.worktree && worktreeBranch ? (
-                                <span>{headerMetadata.showLabels ? `${t('session.item.worktree')}: ` : ''}{worktreeBranch}</span>
-                            ) : null}
-                        </div>
+                        {!isSessionGuest ? (
+                            <div className="hidden flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-[var(--app-hint)] sm:flex">
+                                {headerMetadata.agent && agentLabel ? (
+                                    <span className="inline-flex items-center gap-1">
+                                        <AgentFlavorIcon flavor={session.metadata?.flavor} className="h-3.5 w-3.5 shrink-0 -translate-y-px" />
+                                        {agentLabel}
+                                    </span>
+                                ) : null}
+                                {headerMetadata.machine && machineLabel ? (
+                                    <span data-testid="session-header-machine" className="max-w-[12rem] truncate" title={machineLabel}>
+                                        {headerMetadata.showLabels ? `${t('session.item.machine')}: ` : ''}{machineLabel}
+                                    </span>
+                                ) : null}
+                                {ageLabel ? (
+                                    <span data-testid="session-header-age" title={ageAbsolute ?? undefined}>
+                                        {ageLabel}
+                                    </span>
+                                ) : null}
+                                {headerMetadata.model && modelLabel ? (
+                                    <span className="inline-flex items-center gap-1.5">
+                                        <span>{headerMetadata.showLabels ? `${t(modelLabel.key)}: ` : ''}{modelLabel.value}</span>
+                                        {isModelChanging ? <ModelChangingStatus /> : null}
+                                    </span>
+                                ) : null}
+                                {headerMetadata.reasoning && reasoningLabel ? (
+                                    <span data-testid="session-header-reasoning">
+                                        {reasoningLabel}
+                                    </span>
+                                ) : null}
+                                {headerMetadata.fastMode && showFastBadge ? (
+                                    <span data-testid="session-header-fast" className="text-[#34C759]">
+                                        fast
+                                    </span>
+                                ) : null}
+                                {createdAtLabel ? <span>{headerMetadata.showLabels ? `${t('session.header.createdAt')}: ` : ''}{createdAtLabel}</span> : null}
+                                {updatedAtLabel ? <span>{headerMetadata.showLabels ? `${t('session.header.updatedAt')}: ` : ''}{updatedAtLabel}</span> : null}
+                                {headerMetadata.worktree && worktreeBranch ? (
+                                    <span>{headerMetadata.showLabels ? `${t('session.item.worktree')}: ` : ''}{worktreeBranch}</span>
+                                ) : null}
+                            </div>
+                        ) : null}
                     </div>
 
                     {props.onToggleFiles ? (
