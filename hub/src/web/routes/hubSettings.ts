@@ -6,18 +6,26 @@ import {
     updateSettings,
     type Settings
 } from '../../config/settings'
+import { writeTeamsEnabled } from '../../config/teamsSetting'
 import type { WebAppEnv } from '../middleware/auth'
 
 const OWNER_ONLY_ERROR = 'Hub settings are only available to the hub owner'
 
-function toHubSettings(settings: Settings): HubSettingsResponse {
+function toHubSettings(settings: Settings, teamsEnabledActive: boolean): HubSettingsResponse {
     return {
         sessionSummaryContract: settings.sessionSummaryContract === true,
-        sessionSummaryInChat: settings.sessionSummaryInChat === true
+        sessionSummaryInChat: settings.sessionSummaryInChat === true,
+        // Persisted Agent Team gate; `teamsEnabledActive` reflects the running
+        // process (env override wins, file edits apply on restart).
+        teamsEnabled: settings.teamsEnabled === true,
+        teamsEnabledActive
     }
 }
 
-export function createHubSettingsRoutes(dataDir: string): Hono<WebAppEnv> {
+export function createHubSettingsRoutes(
+    dataDir: string,
+    getActiveTeamsEnabled: () => boolean = () => false
+): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
     // Authenticated readers (any namespace) can observe hub-wide display/emit
@@ -25,7 +33,7 @@ export function createHubSettingsRoutes(dataDir: string): Hono<WebAppEnv> {
     app.get('/hub-settings', async (c) => {
         c.header('Cache-Control', 'no-store')
         const settings = await readSettingsOrThrow(getSettingsFile(dataDir))
-        return c.json(toHubSettings(settings))
+        return c.json(toHubSettings(settings, getActiveTeamsEnabled()))
     })
 
     app.put('/hub-settings', async (c) => {
@@ -37,6 +45,9 @@ export function createHubSettingsRoutes(dataDir: string): Hono<WebAppEnv> {
         if (!parsed.success) {
             return c.json({ error: 'Invalid body' }, 400)
         }
+        if (parsed.data.teamsEnabled !== undefined) {
+            await writeTeamsEnabled(dataDir, parsed.data.teamsEnabled)
+        }
         const response = await updateSettings(getSettingsFile(dataDir), (current) => {
             const settings: Settings = { ...current }
             if (parsed.data.sessionSummaryContract !== undefined) {
@@ -47,7 +58,7 @@ export function createHubSettingsRoutes(dataDir: string): Hono<WebAppEnv> {
             }
             return {
                 settings,
-                result: toHubSettings(settings)
+                result: toHubSettings(settings, getActiveTeamsEnabled())
             }
         })
         c.header('Cache-Control', 'no-store')

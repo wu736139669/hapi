@@ -289,6 +289,72 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       );
     }
 
+    const forwardTeamTool = async (name: string, args: Record<string, unknown>) => {
+      try {
+        const client = await ensureHttpClient();
+        const response = await client.callTool({ name, arguments: args });
+        return response as any;
+      } catch (error) {
+        return {
+          content: [
+            { type: 'text' as const, text: `${name} failed: ${error instanceof Error ? error.message : String(error)}` },
+          ],
+          isError: true,
+        };
+      }
+    };
+
+    const TEAM_TOOL_DEFS: Array<{ name: string; title: string; description: string; inputSchema: z.ZodTypeAny }> = [
+      {
+        name: 'team_status',
+        title: 'Team Status',
+        description: 'Agent Team: show your team, members, pending tasks and remaining budget. Call this right after starting as a team member to pick up your assignment.',
+        inputSchema: z.object({}),
+      },
+      {
+        name: 'team_read',
+        title: 'Read Team Messages',
+        description: 'Agent Team: read the shared team message log. Broadcasts are pull-only: call this to catch up before starting work.',
+        inputSchema: z.object({
+          afterSeq: z.number().int().nonnegative().optional().describe('Return messages with seq greater than this'),
+          limit: z.number().int().positive().max(2000).optional().describe('Max messages to return (default 100)'),
+        }),
+      },
+      {
+        name: 'team_send',
+        title: 'Send Team Message',
+        description: 'Agent Team: send a message to teammates. to="all" (default) writes to the shared log only; to="<role or session id prefix>" or to="lead" wakes that member; to="human" notifies the human out-of-band (use it or kind="decision" when you need a human decision). Use inReplyTo=<seq> when answering a peer message.',
+        inputSchema: z.object({
+          text: z.string().min(1).describe('Message text'),
+          to: z.string().min(1).optional().describe('"all" (default), "lead", "human", or a member session id/prefix'),
+          kind: z.enum(['chat', 'status', 'question', 'task-update', 'decision']).optional(),
+          inReplyTo: z.number().int().positive().optional().describe('seq of the message you are replying to'),
+        }),
+      },
+      {
+        name: 'spawn_peer',
+        title: 'Spawn Team Peer',
+        description: 'Agent Team: spawn a new teammate session with a role and an initial task. Requires user approval.',
+        inputSchema: z.object({
+          role: z.string().min(1).describe('Role / display name, unique in the team'),
+          task: z.string().min(1).optional().describe('Initial task brief delivered to the new member'),
+          agent: z.string().min(1).optional().describe('Agent flavor (claude, codex, ...). Defaults to the caller flavor.'),
+          model: z.string().min(1).optional().describe('Optional model override'),
+          worktree: z.boolean().optional().describe('Run the member in an isolated git worktree'),
+          worktreeName: z.string().min(1).max(80).optional(),
+        }),
+      },
+    ];
+
+    for (const def of TEAM_TOOL_DEFS) {
+      if (!toolNames.has(def.name)) continue;
+      server.registerTool<any, any>(
+        def.name,
+        { description: def.description, title: def.title, inputSchema: def.inputSchema },
+        async (args: Record<string, unknown>) => forwardTeamTool(def.name, args)
+      );
+    }
+
     const skillLookupInputSchema: z.ZodTypeAny = z.object({
       name: z.string().trim().min(1).max(128).describe('Exact skill name shown by HAPI skill autocomplete'),
     });

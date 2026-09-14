@@ -1,6 +1,6 @@
 import type { Session, SyncEngine, SyncEvent } from '../sync/syncEngine'
 import type { SessionEndReason } from '@hapi/protocol'
-import type { NotificationChannel, NotificationHubOptions, TaskNotification } from './notificationTypes'
+import type { NotificationChannel, NotificationHubOptions, TaskNotification, TeamAttentionNotification } from './notificationTypes'
 import type { NotificationSendContext } from './notificationSendContext'
 import { extractMessageEventType, extractTaskNotification } from './eventParsing'
 
@@ -48,6 +48,13 @@ export class NotificationHub {
                 return
             }
             this.checkForPermissionNotification(session)
+            return
+        }
+
+        if (event.type === 'team-attention') {
+            this.sendTeamAttention(event).catch((error) => {
+                console.error('[NotificationHub] Failed to send team attention notification:', error)
+            })
             return
         }
 
@@ -224,6 +231,33 @@ export class NotificationHub {
                 await channel.sendSessionCompletion(session, reason)
             } catch (error) {
                 console.error('[NotificationHub] Failed to send session completion notification:', error)
+            }
+        }
+    }
+
+    private async sendTeamAttention(event: Extract<SyncEvent, { type: 'team-attention' }>): Promise<void> {
+        const namespace = event.namespace
+        if (!namespace) {
+            return
+        }
+        const notification: TeamAttentionNotification = {
+            namespace,
+            teamId: event.teamId,
+            teamName: event.data.teamName,
+            seq: event.data.seq,
+            kind: event.data.kind,
+            fromRole: event.data.fromRole,
+            text: event.data.text
+        }
+        const ctx: NotificationSendContext = { nativeGate: { sent: false } }
+        for (const channel of this.channels) {
+            if (typeof channel.sendTeamAttention !== 'function') {
+                continue
+            }
+            try {
+                await channel.sendTeamAttention(notification, ctx)
+            } catch (error) {
+                console.error('[NotificationHub] Failed to send team attention notification:', error)
             }
         }
     }

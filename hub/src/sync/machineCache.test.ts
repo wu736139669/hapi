@@ -25,6 +25,34 @@ const BASE_METADATA = {
     workspaceRoots: ['/home/user']
 }
 
+describe('MachineCache runner capabilities', () => {
+    it('exposes the agentTeam capability when the runner advertises it', () => {
+        const { store, cache } = createCache()
+        store.machines.getOrCreateMachine(
+            'machine-1',
+            BASE_METADATA,
+            { status: 'running', capabilities: { agentTeam: true } },
+            'ns'
+        )
+        cache.reloadAll()
+
+        expect(cache.getMachine('machine-1')?.runnerState?.capabilities?.agentTeam).toBe(true)
+    })
+
+    it('treats absence of the capability as unsupported', () => {
+        const { store, cache } = createCache()
+        store.machines.getOrCreateMachine(
+            'machine-1',
+            BASE_METADATA,
+            { status: 'running', capabilities: { piExistingSessionResume: true } },
+            'ns'
+        )
+        cache.reloadAll()
+
+        expect(cache.getMachine('machine-1')?.runnerState?.capabilities?.agentTeam).toBeUndefined()
+    })
+})
+
 describe('MachineCache.renameMachine', () => {
     it('sets displayName without touching CLI-reported fields', async () => {
         const { store, cache } = createCache()

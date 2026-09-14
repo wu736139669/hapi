@@ -37,8 +37,10 @@ import { createWorkGraphRoutes } from './routes/workGraph'
 import { createClaudeModelsRoutes } from './routes/claudeModels'
 import { createPublicStudioRoutes, createStudioRoutes } from './routes/studios'
 import { createSessionShareRoutes } from './routes/sessionShares'
+import { createTeamsRoutes } from './routes/teams'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
+import type { TeamService } from '../teams/teamService'
 import type { Server as BunServer, ServerWebSocket } from 'bun'
 import { applyDefaultWsCompression } from './wsCompression'
 import { acceptsGzip } from './sseCompression'
@@ -228,6 +230,7 @@ function createWebApp(options: {
     getSyncEngine: () => SyncEngine | null
     getSseManager: () => SSEManager | null
     getVisibilityTracker: () => VisibilityTracker | null
+    getTeamService?: () => TeamService | null
     jwtSecret: Uint8Array
     store: Store
     vapidPublicKey: string
@@ -315,7 +318,11 @@ function createWebApp(options: {
     app.route('/api', createPermissionsRoutes(options.getSyncEngine))
     app.route('/api', createMachinesRoutes(options.getSyncEngine))
     app.route('/api', createStorageRoutes(configuration.dbPath))
-    app.route('/api', createHubSettingsRoutes(configuration.dataDir))
+    app.route('/api', createHubSettingsRoutes(configuration.dataDir, () => configuration.teamsEnabled))
+    const teamService = options.getTeamService?.() ?? null
+    if (teamService) {
+        app.route('/api', createTeamsRoutes(teamService))
+    }
     app.route('/api', createUsageRoutes(options.store))
     app.route('/api', createStudioRoutes({
         store: options.store,
@@ -466,6 +473,7 @@ export async function startWebServer(options: {
     getSyncEngine: () => SyncEngine | null
     getSseManager: () => SSEManager | null
     getVisibilityTracker: () => VisibilityTracker | null
+    getTeamService?: () => TeamService | null
     jwtSecret: Uint8Array
     store: Store
     vapidPublicKey: string
@@ -481,6 +489,7 @@ export async function startWebServer(options: {
         getSyncEngine: options.getSyncEngine,
         getSseManager: options.getSseManager,
         getVisibilityTracker: options.getVisibilityTracker,
+        getTeamService: options.getTeamService,
         jwtSecret: options.jwtSecret,
         store: options.store,
         vapidPublicKey: options.vapidPublicKey,

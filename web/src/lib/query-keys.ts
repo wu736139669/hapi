@@ -42,4 +42,9 @@ export const queryKeys = {
     skills: (sessionId: string) => ['skills', sessionId] as const,
     scratchlist: (sessionId: string) => ['scratchlist', sessionId] as const,
     studio: (studioId: string) => ['studio', studioId] as const,
+    teams: ['teams'] as const,
+    team: (teamId: string) => ['team', teamId] as const,
+    teamMessages: (teamId: string) => ['team-messages', teamId] as const,
+    teamMemory: (teamId: string) => ['team-memory', teamId] as const,
+    teamMemoryFile: (teamId: string, path: string) => ['team-memory-file', teamId, path] as const,
 }

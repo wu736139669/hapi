@@ -191,4 +191,78 @@ describe('PushNotificationChannel', () => {
         expect(toasts).toHaveLength(0)
         expect(pushed).toHaveLength(0)
     })
+
+    it('renders team attention as a toast for visible clients and deep-links to the team page', async () => {
+        const pushed: Array<{ namespace: string; payload: PushPayload }> = []
+        const toasts: Array<{ data: { title: string; body: string; url: string; sessionId: string } }> = []
+        const channel = new PushNotificationChannel(
+            {
+                sendToNamespace: async (namespace: string, payload: PushPayload) => {
+                    pushed.push({ namespace, payload })
+                }
+            } as never,
+            {
+                sendToast: async (_namespace: string, event: unknown) => {
+                    toasts.push(event as { data: { title: string; body: string; url: string; sessionId: string } })
+                    return 1
+                }
+            } as never,
+            {
+                hasVisibleConnection: () => true
+            } as never,
+            ''
+        )
+
+        await channel.sendTeamAttention!({
+            namespace: 'alpha',
+            teamId: 'team-1',
+            teamName: 'Refactor auth',
+            seq: 7,
+            kind: 'decision',
+            fromRole: 'Reviewer',
+            text: 'token TTL: config or constant?'
+        })
+
+        expect(pushed).toHaveLength(0)
+        expect(toasts).toHaveLength(1)
+        expect(toasts[0]?.data.title).toContain('Decision needed')
+        expect(toasts[0]?.data.title).toContain('Refactor auth')
+        expect(toasts[0]?.data.body).toContain('token TTL')
+        expect(toasts[0]?.data.url).toBe('/sessions/teams/team-1')
+        expect(toasts[0]?.data.sessionId).toBe('')
+    })
+
+    it('falls back to web push for team attention when no client is visible', async () => {
+        const pushed: Array<{ namespace: string; payload: PushPayload }> = []
+        const channel = new PushNotificationChannel(
+            {
+                sendToNamespace: async (namespace: string, payload: PushPayload) => {
+                    pushed.push({ namespace, payload })
+                }
+            } as never,
+            {
+                sendToast: async () => 0
+            } as never,
+            {
+                hasVisibleConnection: () => false
+            } as never,
+            ''
+        )
+
+        await channel.sendTeamAttention!({
+            namespace: 'alpha',
+            teamId: 'team-1',
+            teamName: 'Refactor auth',
+            seq: 8,
+            kind: 'chat',
+            fromRole: 'Builder A',
+            text: 'please review the interface'
+        })
+
+        expect(pushed).toHaveLength(1)
+        expect(pushed[0]?.namespace).toBe('alpha')
+        expect(pushed[0]?.payload.data?.type).toBe('team-attention')
+        expect(pushed[0]?.payload.data?.url).toBe('/sessions/teams/team-1')
+        expect(pushed[0]?.payload.title).toContain('Builder A')
+    })
 })

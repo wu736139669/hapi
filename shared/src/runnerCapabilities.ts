@@ -11,13 +11,18 @@ import { RPC_METHODS } from './rpcMethods'
  * socket heartbeat owns the persisted runner_state afterwards — without the
  * socket-side advertisement, a runner upgraded in place would never get its
  * new capabilities observed by the hub.
+ *
+ * `agentTeam` gates the Agent Team feature (team spawning / peer messaging).
+ * Old runners omit it; the hub must treat absence as unsupported and keep
+ * those machines fully usable for regular single sessions.
  */
 import { getBuiltinAgentConfigDescriptors } from './agentConfig'
 
 export const RUNNER_CAPABILITIES = {
     codexSharedRuntime: true as const,
     piExistingSessionResume: true as const,
-    agentConfigs: getBuiltinAgentConfigDescriptors()
+    agentConfigs: getBuiltinAgentConfigDescriptors(),
+    agentTeam: true as const
 }
 
 export type RunnerCapabilities = typeof RUNNER_CAPABILITIES

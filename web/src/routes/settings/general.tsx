@@ -41,7 +41,7 @@ export default function SettingsGeneralPage() {
     })
 
     const hubSettingsMutation = useMutation({
-        mutationFn: async (patch: { sessionSummaryContract?: boolean; sessionSummaryInChat?: boolean }) => {
+        mutationFn: async (patch: { sessionSummaryContract?: boolean; sessionSummaryInChat?: boolean; teamsEnabled?: boolean }) => {
             if (!api) throw new Error('API unavailable')
             return await api.updateHubSettings(patch)
         },
@@ -78,6 +78,19 @@ export default function SettingsGeneralPage() {
                                 onChange={(checked) => {
                                     if (hubSettingsMutation.isPending) return
                                     hubSettingsMutation.mutate({ sessionSummaryInChat: checked })
+                                }}
+                            />
+                            <SettingsSwitch
+                                label={t('settings.general.teamsEnabled')}
+                                description={
+                                    hubSettingsQuery.data.teamsEnabledActive
+                                        ? t('settings.general.teamsEnabled.activeDesc')
+                                        : t('settings.general.teamsEnabled.restartDesc')
+                                }
+                                checked={hubSettingsQuery.data.teamsEnabled ?? false}
+                                onChange={(checked) => {
+                                    if (hubSettingsMutation.isPending) return
+                                    hubSettingsMutation.mutate({ teamsEnabled: checked })
                                 }}
                             />
                         </>

@@ -50,6 +50,7 @@ export interface ServerSettings {
     apnsTeamId: string | null
     apnsBundleId: string | null
     apnsEnv: string | null
+    teamsEnabled: boolean
 }
 
 export interface ServerSettingsResult {
@@ -64,6 +65,7 @@ export interface ServerSettingsResult {
         listenPort: 'env' | 'file' | 'default'
         publicUrl: 'env' | 'file' | 'default'
         corsOrigins: 'env' | 'file' | 'default'
+        teamsEnabled: 'env' | 'file' | 'default'
     } & Record<PushSettingKey, 'env' | 'file' | 'default'>
     savedToFile: boolean
 }
@@ -144,6 +146,7 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
             apnsTeamId: 'default',
             apnsBundleId: 'default',
             apnsEnv: 'default',
+            teamsEnabled: 'default',
         }
         // telegramBotToken: env > file > null
         let telegramBotToken: string | null = null
@@ -307,6 +310,20 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
             }
         }
 
+        // teamsEnabled: env > file > false
+        let teamsEnabled = false
+        if (process.env.TEAMS_ENABLED !== undefined) {
+            teamsEnabled = process.env.TEAMS_ENABLED === 'true'
+            sources.teamsEnabled = 'env'
+            if (settings.teamsEnabled === undefined) {
+                settings.teamsEnabled = teamsEnabled
+                needsSave = true
+            }
+        } else if (settings.teamsEnabled !== undefined) {
+            teamsEnabled = settings.teamsEnabled
+            sources.teamsEnabled = 'file'
+        }
+
         return {
             settings,
             write: needsSave,
@@ -322,6 +339,7 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
                     publicUrl,
                     corsOrigins,
                     ...push,
+                    teamsEnabled,
                 },
                 sources,
                 savedToFile: needsSave,

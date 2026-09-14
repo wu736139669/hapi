@@ -11,9 +11,11 @@ function makeTempDir(): string {
 describe('loadServerSettings', () => {
     let dir: string | null = null
     const originalBackgroundOnly = process.env.SERVERCHAN_BACKGROUND_ONLY
+    const originalTeamsEnabled = process.env.TEAMS_ENABLED
 
     beforeEach(() => {
         delete process.env.SERVERCHAN_BACKGROUND_ONLY
+        delete process.env.TEAMS_ENABLED
     })
 
     afterEach(() => {
@@ -25,6 +27,11 @@ describe('loadServerSettings', () => {
             delete process.env.SERVERCHAN_BACKGROUND_ONLY
         } else {
             process.env.SERVERCHAN_BACKGROUND_ONLY = originalBackgroundOnly
+        }
+        if (originalTeamsEnabled === undefined) {
+            delete process.env.TEAMS_ENABLED
+        } else {
+            process.env.TEAMS_ENABLED = originalTeamsEnabled
         }
     })
 
@@ -143,5 +150,38 @@ describe('loadServerSettings', () => {
         expect(result.sources.fcmServiceAccountPath).toBe('file')
         expect(result.settings.iosPushMode).toBe('off')
         expect(result.sources.iosPushMode).toBe('file')
+    })
+
+    it('defaults teamsEnabled to false without touching settings.json', async () => {
+        dir = makeTempDir()
+        delete process.env.TEAMS_ENABLED
+
+        const result = await loadServerSettings(dir)
+
+        expect(result.settings.teamsEnabled).toBe(false)
+        expect(result.sources.teamsEnabled).toBe('default')
+        expect(result.savedToFile).toBe(false)
+    })
+
+    it('reads teamsEnabled from settings.json when no env override is set', async () => {
+        dir = makeTempDir()
+        delete process.env.TEAMS_ENABLED
+        writeFileSync(join(dir, 'settings.json'), JSON.stringify({ teamsEnabled: true }))
+
+        const result = await loadServerSettings(dir)
+
+        expect(result.settings.teamsEnabled).toBe(true)
+        expect(result.sources.teamsEnabled).toBe('file')
+    })
+
+    it('lets TEAMS_ENABLED override settings.json', async () => {
+        dir = makeTempDir()
+        process.env.TEAMS_ENABLED = 'true'
+        writeFileSync(join(dir, 'settings.json'), JSON.stringify({ teamsEnabled: false }))
+
+        const result = await loadServerSettings(dir)
+
+        expect(result.settings.teamsEnabled).toBe(true)
+        expect(result.sources.teamsEnabled).toBe('env')
     })
 })

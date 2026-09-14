@@ -257,6 +257,15 @@ export class SyncEngine {
         return this.eventPublisher.subscribe(listener)
     }
 
+    /**
+     * Publish a hub-originated event through the standard pipeline: SSE
+     * broadcast (namespace-filtered) plus in-process subscribers such as the
+     * NotificationHub. Used by the Agent Team service.
+     */
+    publishEvent(event: SyncEvent): void {
+        this.eventPublisher.emit(event)
+    }
+
     private resolveNamespace(event: SyncEvent): string | undefined {
         if (event.namespace) {
             return event.namespace
@@ -1026,7 +1035,7 @@ export class SyncEngine {
                 path: string
                 previewUrl?: string
             }>
-            sentFrom?: 'telegram-bot' | 'webapp'
+            sentFrom?: 'telegram-bot' | 'webapp' | 'team'
             scheduledAt?: number | null
             deliveryMode?: MessageDeliveryMode
         }
@@ -2078,8 +2087,31 @@ export class SyncEngine {
         existingSessionId?: string,
         collaborationMode?: CodexCollaborationMode,
         copilotAgentMode?: CopilotAgentMode,
-        startingMode?: 'remote' | 'pty'
+        startingMode?: 'remote' | 'pty',
+        team?: { id: string; name: string; role: string }
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
+        if (team) {
+            return await this.rpcGateway.spawnSession(
+                machineId,
+                directory,
+                agent,
+                model,
+                modelReasoningEffort,
+                yolo,
+                sessionType,
+                worktreeName,
+                resumeSessionId,
+                effort,
+                permissionMode,
+                serviceTier,
+                existingSessionId,
+                collaborationMode,
+                copilotAgentMode,
+                startingMode,
+                undefined,
+                team
+            )
+        }
         return await this.rpcGateway.spawnSession(
             machineId,
             directory,

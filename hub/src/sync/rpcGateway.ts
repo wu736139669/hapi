@@ -198,7 +198,10 @@ export class RpcGateway {
         // Hub session id to reuse for this spawn. When set, the runner boots the
         // CLI with `--hapi-session-id`, so the child reuses the existing hub
         // session row (same id) instead of minting a new one.
-        forkSession?: boolean
+        forkSession?: boolean,
+        // Agent Team context. The runner exports HAPI_TEAM_* env vars so the
+        // child CLI can inject team context and register team MCP tools.
+        team?: { id: string; name: string; role: string }
     ): Promise<
         | { type: 'success'; sessionId: string }
         | {
@@ -230,7 +233,8 @@ export class RpcGateway {
                     collaborationMode,
                     copilotAgentMode,
                     startingMode,
-                    forkSession: forkSession === true
+                    forkSession: forkSession === true,
+                    ...(team ? { team } : {})
                 }
             )
             if (result && typeof result === 'object') {

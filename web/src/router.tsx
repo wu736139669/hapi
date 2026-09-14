@@ -20,6 +20,9 @@ import {
 import { App } from '@/App'
 import { SessionChat } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
+import { TeamChatPage } from '@/components/teams/TeamChatPage'
+import { TeamCreateDialog } from '@/components/teams/TeamCreateDialog'
+import { TeamSidebarSection } from '@/components/teams/TeamSidebarSection'
 import { SessionShareManagerDialog } from '@/components/SessionShareManagerDialog'
 import { NewSession } from '@/components/NewSession'
 import { WorkspaceBrowser } from '@/components/WorkspaceBrowser'
@@ -34,6 +37,7 @@ import { useMachineLabels } from '@/hooks/useMachineLabels'
 import { useSession } from '@/hooks/queries/useSession'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { useSessions } from '@/hooks/queries/useSessions'
+import { useTeams } from '@/hooks/queries/useTeams'
 import { useSessionShares } from '@/hooks/queries/useSessionShares'
 import { useSlashCommands } from '@/hooks/queries/useSlashCommands'
 import { useSkills } from '@/hooks/queries/useSkills'
@@ -204,6 +208,8 @@ function SessionsPage() {
     const { addToast } = useToast()
     const { preferences: toolbarPreferences } = useSessionListToolbar()
     const { sessions, isLoading, error, refetch } = useSessions(isSessionGuest ? null : api)
+    const { teams, supported: teamsSupported } = useTeams(isSessionGuest ? null : api)
+    const [createTeamOpen, setCreateTeamOpen] = useState(false)
     const {
         shares: sessionShares,
         isLoading: sessionSharesLoading,
@@ -248,6 +254,8 @@ function SessionsPage() {
     )
     const sessionMatch = matchRoute({ to: '/sessions/$sessionId', fuzzy: true })
     const selectedSessionId = sessionMatch && sessionMatch.sessionId !== 'new' ? sessionMatch.sessionId : null
+    const teamMatch = matchRoute({ to: '/sessions/teams/$teamId', fuzzy: true })
+    const selectedTeamId = teamMatch ? teamMatch.teamId : null
     const selectedSession = useMemo(
         () => selectedSessionId ? sessions.find((session) => session.id === selectedSessionId) ?? null : null,
         [selectedSessionId, sessions]
@@ -295,6 +303,17 @@ function SessionsPage() {
                         key={initializedHub === baseUrl ? 'last-seen-ready' : 'last-seen-pending'}
                         sessions={sessions}
                         selectedSessionId={selectedSessionId}
+                        topSection={teamsSupported ? (
+                            <TeamSidebarSection
+                                teams={teams}
+                                selectedTeamId={selectedTeamId}
+                                onSelectTeam={(teamId) => navigate({
+                                    to: '/sessions/teams/$teamId',
+                                    params: { teamId },
+                                })}
+                                onCreateTeam={() => setCreateTeamOpen(true)}
+                            />
+                        ) : undefined}
                         onSelect={(sessionId) => navigate(getSessionListSelectionNavigation(sessionId))}
                         onNewSession={() => navigate({
                             to: '/sessions/new',
@@ -353,6 +372,15 @@ function SessionsPage() {
                 </div>
             </div>
             </div>
+            <TeamCreateDialog
+                open={createTeamOpen}
+                sessions={sessions}
+                onClose={() => setCreateTeamOpen(false)}
+                onCreated={(teamId) => {
+                    setCreateTeamOpen(false)
+                    navigate({ to: '/sessions/teams/$teamId', params: { teamId } })
+                }}
+            />
             <SessionShareManagerDialog
                 isOpen={sessionSharesOpen}
                 shares={sessionShares}
@@ -1254,6 +1282,12 @@ type NewSessionSearch = {
     shareTransferId?: string
 }
 
+const teamChatRoute = createRoute({
+    getParentRoute: () => sessionsRoute,
+    path: 'teams/$teamId',
+    component: TeamChatPage,
+})
+
 const newSessionRoute = createRoute({
     getParentRoute: () => sessionsRoute,
     path: 'new',
@@ -1400,6 +1434,7 @@ export const routeTree = rootRoute.addChildren([
     sessionsRoute.addChildren([
         sessionsIndexRoute,
         newSessionRoute,
+        teamChatRoute,
         sessionDetailRoute.addChildren([
             sessionTerminalRoute,
             sessionFilesRoute,

@@ -29,6 +29,8 @@
  *   direct-APNs credentials (settings: apnsKeyP8Path, apnsKeyId, apnsTeamId, apnsBundleId, apnsEnv)
  * - HAPI_HOME: Data directory (default: ~/.hapi)
  * - DB_PATH: SQLite database path (default: {HAPI_HOME}/hapi.db)
+ * - TEAMS_ENABLED: Enable the Agent Team feature (default: false)
+ * - TEAMS_DB_PATH: Agent Team database path (default: {HAPI_HOME}/teams.db)
  */
 
 import { existsSync, mkdirSync } from 'node:fs'
@@ -51,15 +53,13 @@ export interface ConfigSources {
     listenPort: ConfigSource
     publicUrl: ConfigSource
     corsOrigins: ConfigSource
-    androidPushMode: ConfigSource
-    fcmServiceAccountPath: ConfigSource
-    iosPushMode: ConfigSource
     iosPushRelayUrl: ConfigSource
     apnsKeyP8Path: ConfigSource
     apnsKeyId: ConfigSource
     apnsTeamId: ConfigSource
     apnsBundleId: ConfigSource
     apnsEnv: ConfigSource
+    teamsEnabled: ConfigSource
     cliApiToken: 'env' | 'file' | 'generated'
 }
 
@@ -99,6 +99,12 @@ class Configuration {
 
     /** SQLite DB path */
     public readonly dbPath: string
+
+    /** Whether the Agent Team feature is enabled (default false) */
+    public readonly teamsEnabled: boolean
+
+    /** Agent Team SQLite DB path (independent from dbPath) */
+    public readonly teamsDbPath: string
 
     /** Port for the HTTP service */
     public readonly listenPort: number
@@ -158,6 +164,10 @@ class Configuration {
         this.apnsTeamId = serverSettings.apnsTeamId
         this.apnsBundleId = serverSettings.apnsBundleId
         this.apnsEnv = serverSettings.apnsEnv
+        this.teamsEnabled = serverSettings.teamsEnabled
+        this.teamsDbPath = process.env.TEAMS_DB_PATH
+            ? process.env.TEAMS_DB_PATH.replace(/^~/, homedir())
+            : join(dataDir, 'teams.db')
 
         // CLI API token - will be set by _setCliApiToken() before create() returns
         this.cliApiToken = ''
@@ -167,7 +177,7 @@ class Configuration {
         // Store sources for logging (cliApiToken will be set by _setCliApiToken)
         this.sources = {
             ...sources,
-        } as ConfigSources
+        } as unknown as ConfigSources
 
         // Ensure data directory exists
         if (!existsSync(this.dataDir)) {

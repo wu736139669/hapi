@@ -26,9 +26,14 @@ import { TunnelManager } from './tunnel'
 import { refreshRejectedRelayAuthKey, resolveRelayAuthKey } from './tunnel/relayAuth'
 import { waitForTunnelTlsReady } from './tunnel/tlsGate'
 import { ServerChanChannel } from './serverchan/channel'
+import { TeamService, type TeamRuntime } from './teams/teamService'
+import { TeamStore } from './teams/teamStore'
 import QRCode from 'qrcode'
+import { join } from 'node:path'
 import type { Server as BunServer } from 'bun'
 import type { WebSocketData } from '@socket.io/bun-engine'
+import { AgentFlavorSchema } from '@hapi/protocol'
+import type { AgentFlavor } from '@hapi/protocol/types'
 
 /** Format config source for logging */
 function formatSource(source: ConfigSource | 'generated'): string {
@@ -212,6 +217,83 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     syncEngine.setHubOwnerUserId(await getOrCreateOwnerId())
 
     const androidPushConfig = resolveAndroidPushConfig(config)
+
+    // Agent Team (P0/P1): opt-in. When disabled, teams.db is never created and
+    // no team routes or events exist, so hub behavior is unchanged.
+    const teamRuntime: TeamRuntime = {
+        resolveSession: (sessionId) => {
+            const session = syncEngine?.getSession(sessionId)
+            if (!session) return null
+            const flavor = session.metadata?.flavor
+            return {
+                id: session.id,
+                active: session.active,
+                thinking: session.thinking,
+                machineId: session.metadata?.machineId ?? null,
+                directory: session.metadata?.path ?? null,
+                flavor: AgentFlavorSchema.safeParse(flavor).success ? (flavor as AgentFlavor) : null,
+                inWorktree: session.metadata?.worktree != null
+            }
+        },
+        spawnMember: async (input) => {
+            if (!syncEngine) {
+                return { ok: false, message: 'Hub is not ready' }
+            }
+            const result = await syncEngine.spawnSession(
+                input.machineId,
+                input.directory,
+                input.agent,
+                input.model,
+                undefined,
+                input.yolo === true,
+                input.sessionType,
+                input.worktreeName,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                { id: input.teamId, name: input.teamName, role: input.teamRole }
+            )
+            if (result.type === 'success') {
+                return { ok: true, sessionId: result.sessionId }
+            }
+            return { ok: false, message: result.message }
+        },
+        deliverPeerMessage: async ({ sessionId, text }) => {
+            if (!syncEngine) {
+                throw new Error('Hub is not ready')
+            }
+            await syncEngine.sendMessage(sessionId, { text, sentFrom: 'team' })
+        },
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+    }
+    const teamService = config.teamsEnabled
+        ? new TeamService(
+            new TeamStore(config.teamsDbPath),
+            (event) => syncEngine?.publishEvent(event),
+            teamRuntime,
+            { memoryRoot: join(config.dataDir, 'teams') }
+        )
+        : null
+    if (teamService) {
+        console.log(`[Hub] Agent Team: enabled (${config.teamsDbPath})`)
+        // Member session ended -> announce in the team log and wake the lead
+        // (or notify the human when the lead itself went down).
+        syncEngine.subscribe((event) => {
+            if (event.type !== 'session-ended' || !event.sessionId) {
+                return
+            }
+            const namespace = store.sessions.getSession(event.sessionId)?.namespace
+            if (!namespace) {
+                return
+            }
+            void teamService.handleSessionDown(event.sessionId, namespace, event.reason)
+        })
+    }
     const notificationChannels: NotificationChannel[] = []
     if (androidPushConfig.mode === 'fcm') {
         const { fcm } = androidPushConfig
@@ -281,6 +363,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         getSyncEngine: () => syncEngine,
         getSseManager: () => sseManager,
         getVisibilityTracker: () => visibilityTracker,
+        getTeamService: () => teamService,
         jwtSecret,
         store,
         vapidPublicKey: vapidKeys.publicKey,
@@ -397,6 +480,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
             syncEngine?.stop()
             sseManager?.stop()
             webServer?.stop()
+            teamService?.close()
         }
     }
 }

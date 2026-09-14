@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import type { Session, SyncEvent, SyncEventListener, SyncEngine } from '../sync/syncEngine'
 import type { SessionEndReason } from '@hapi/protocol'
-import type { NotificationChannel, TaskNotification } from './notificationTypes'
+import type { NotificationChannel, TaskNotification, TeamAttentionNotification } from './notificationTypes'
 import { NotificationHub } from './notificationHub'
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -35,6 +35,7 @@ class StubChannel implements NotificationChannel {
     readonly permissionSessions: Session[] = []
     readonly taskNotifications: Array<{ session: Session; notification: TaskNotification }> = []
     readonly sessionCompletions: Session[] = []
+    readonly teamAttention: TeamAttentionNotification[] = []
 
     async sendReady(session: Session): Promise<void> {
         this.readySessions.push(session)
@@ -50,6 +51,10 @@ class StubChannel implements NotificationChannel {
 
     async sendSessionCompletion(session: Session): Promise<void> {
         this.sessionCompletions.push(session)
+    }
+
+    async sendTeamAttention(notification: TeamAttentionNotification): Promise<void> {
+        this.teamAttention.push(notification)
     }
 }
 
@@ -242,6 +247,42 @@ describe('NotificationHub', () => {
 
         expect(channel.sessionCompletions).toHaveLength(1)
         expect(channel.sessionCompletions[0]?.id).toBe(completedSession.id)
+
+        hub.stop()
+    })
+
+    it('forwards team attention events to channels that support them', async () => {
+        const engine = new FakeSyncEngine()
+        const channel = new StubChannel()
+        const hub = new NotificationHub(engine as unknown as SyncEngine, [channel], {
+            permissionDebounceMs: 1,
+            readyCooldownMs: 5
+        })
+
+        engine.emit({
+            type: 'team-attention',
+            namespace: 'alpha',
+            teamId: 'team-1',
+            data: {
+                teamName: 'Refactor auth',
+                seq: 7,
+                kind: 'decision',
+                fromRole: 'Reviewer',
+                text: 'token TTL: config or constant?'
+            }
+        })
+        await sleep(5)
+
+        expect(channel.teamAttention).toHaveLength(1)
+        expect(channel.teamAttention[0]).toEqual({
+            namespace: 'alpha',
+            teamId: 'team-1',
+            teamName: 'Refactor auth',
+            seq: 7,
+            kind: 'decision',
+            fromRole: 'Reviewer',
+            text: 'token TTL: config or constant?'
+        })
 
         hub.stop()
     })

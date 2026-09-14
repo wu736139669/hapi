@@ -270,9 +270,11 @@ export function useSSE(options: {
     const pendingInvalidationsRef = useRef<{
         sessions: boolean
         machines: boolean
+        teamsList: boolean
         sessionIds: Set<string>
         scratchlistSessionIds: Set<string>
-    }>({ sessions: false, machines: false, sessionIds: new Set(), scratchlistSessionIds: new Set() })
+        teamIds: Set<string>
+    }>({ sessions: false, machines: false, teamsList: false, sessionIds: new Set(), scratchlistSessionIds: new Set(), teamIds: new Set() })
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const reconnectAttemptRef = useRef(0)
     // Set when a reconnect was due while the tab was hidden. Hidden tabs do
@@ -325,8 +327,10 @@ export function useSSE(options: {
             }
             pendingInvalidationsRef.current.sessions = false
             pendingInvalidationsRef.current.machines = false
+            pendingInvalidationsRef.current.teamsList = false
             pendingInvalidationsRef.current.sessionIds.clear()
             pendingInvalidationsRef.current.scratchlistSessionIds.clear()
+            pendingInvalidationsRef.current.teamIds.clear()
             if (reconnectTimerRef.current) {
                 clearTimeout(reconnectTimerRef.current)
                 reconnectTimerRef.current = null
@@ -411,21 +415,27 @@ export function useSSE(options: {
             if (
                 !pending.sessions
                 && !pending.machines
+                && !pending.teamsList
                 && pending.sessionIds.size === 0
                 && pending.scratchlistSessionIds.size === 0
+                && pending.teamIds.size === 0
             ) {
                 return
             }
 
             const shouldInvalidateSessions = pending.sessions
             const shouldInvalidateMachines = pending.machines
+            const shouldInvalidateTeamsList = pending.teamsList
             const sessionIds = Array.from(pending.sessionIds)
             const scratchlistSessionIds = Array.from(pending.scratchlistSessionIds)
+            const teamIds = Array.from(pending.teamIds)
 
             pending.sessions = false
             pending.machines = false
+            pending.teamsList = false
             pending.sessionIds.clear()
             pending.scratchlistSessionIds.clear()
+            pending.teamIds.clear()
 
             const tasks: Array<Promise<unknown>> = []
             if (shouldInvalidateSessions) {
@@ -439,6 +449,13 @@ export function useSSE(options: {
             }
             if (shouldInvalidateMachines) {
                 tasks.push(queryClient.invalidateQueries({ queryKey: queryKeys.machines }))
+            }
+            if (shouldInvalidateTeamsList) {
+                tasks.push(queryClient.invalidateQueries({ queryKey: queryKeys.teams }))
+            }
+            for (const teamId of teamIds) {
+                tasks.push(queryClient.invalidateQueries({ queryKey: queryKeys.team(teamId) }))
+                tasks.push(queryClient.invalidateQueries({ queryKey: queryKeys.teamMessages(teamId) }))
             }
 
             if (tasks.length === 0) {
@@ -474,6 +491,12 @@ export function useSSE(options: {
 
         const queueMachinesInvalidation = () => {
             pendingInvalidationsRef.current.machines = true
+            scheduleInvalidationFlush()
+        }
+
+        const queueTeamInvalidation = (teamId: string) => {
+            pendingInvalidationsRef.current.teamsList = true
+            pendingInvalidationsRef.current.teamIds.add(teamId)
             scheduleInvalidationFlush()
         }
 
@@ -773,6 +796,10 @@ export function useSSE(options: {
                 }
             }
 
+            if (event.type === 'team-updated') {
+                queueTeamInvalidation(event.teamId)
+            }
+
             onEventRef.current(event)
         }
 
@@ -897,7 +924,9 @@ export function useSSE(options: {
             }
             pendingInvalidationsRef.current.sessions = false
             pendingInvalidationsRef.current.machines = false
+            pendingInvalidationsRef.current.teamsList = false
             pendingInvalidationsRef.current.sessionIds.clear()
+            pendingInvalidationsRef.current.teamIds.clear()
             if (reconnectTimerRef.current) {
                 clearTimeout(reconnectTimerRef.current)
                 reconnectTimerRef.current = null

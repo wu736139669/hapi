@@ -29,6 +29,11 @@ export interface SpawnSessionOptions {
     forkSession?: boolean
     /** Runner-internal post-create containment revalidation. Never serialized. */
     validateDirectory?: (path: string) => Promise<boolean>
+    /**
+     * Agent Team context (hub-set). The runner exports HAPI_TEAM_* env vars so
+     * the child CLI can register team MCP tools and identify its role.
+     */
+    team?: { id: string; name: string; role: string }
 }
 
 export type SpawnSessionResult =

@@ -641,6 +641,15 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           };
         }
 
+        if (options.team?.id) {
+          extraEnv = {
+            ...extraEnv,
+            HAPI_TEAM_ID: options.team.id,
+            HAPI_TEAM_NAME: options.team.name,
+            HAPI_TEAM_ROLE: options.team.role
+          };
+        }
+
         const args = buildCliArgs(agent, options, yolo);
 
         // sessionId reserved for future use

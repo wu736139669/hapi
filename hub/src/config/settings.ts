@@ -34,6 +34,12 @@ export interface Settings {
     apnsTeamId?: string
     apnsBundleId?: string
     apnsEnv?: string
+    /**
+     * Agent Team feature gate. Default false. When disabled the hub never
+     * touches teams.db and team routes/events are not registered, so existing
+     * single-session behavior is unchanged.
+     */
+    teamsEnabled?: boolean
     /** Per-hub relay auth key issued by the relay server (/issue) */
     relayAuthKey?: string
     /**

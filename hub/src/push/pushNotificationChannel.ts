@@ -1,5 +1,5 @@
 import type { Session } from '../sync/syncEngine'
-import type { NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
+import type { NotificationChannel, TaskNotification, TeamAttentionNotification } from '../notifications/notificationTypes'
 import type { NotificationSendContext } from '../notifications/notificationSendContext'
 import { getAgentName, getSessionName } from '../notifications/sessionInfo'
 import type { SSEManager } from '../sse/sseManager'
@@ -138,5 +138,53 @@ export class PushNotificationChannel implements NotificationChannel {
 
     private buildSessionPath(sessionId: string): string {
         return `/sessions/${sessionId}`
+    }
+
+    /**
+     * Team attention (@human / decision): reuse the session notification
+     * pattern - in-app toast when a client is visible, web push otherwise.
+     * There is no session context, so the toast/push payload carries an empty
+     * sessionId and deep-links to the team chat page.
+     */
+    async sendTeamAttention(notification: TeamAttentionNotification, ctx?: NotificationSendContext): Promise<void> {
+        if (ctx?.nativeGate?.sent) {
+            return
+        }
+
+        const namespace = notification.namespace
+        const title = notification.kind === 'decision'
+            ? `Decision needed · ${notification.teamName}`
+            : `${notification.fromRole} needs you · ${notification.teamName}`
+        const body = notification.text.replace(/\s+/g, ' ').slice(0, 200)
+        const url = `/sessions/teams/${notification.teamId}`
+        const payload: PushPayload = {
+            title,
+            body,
+            tag: `team-${notification.teamId}`,
+            data: {
+                type: 'team-attention',
+                sessionId: '',
+                url
+            }
+        }
+
+        if (this.visibilityTracker.hasVisibleConnection(namespace)) {
+            const delivered = await this.sseManager.sendToast(namespace, {
+                type: 'toast',
+                data: {
+                    title,
+                    body,
+                    sessionId: '',
+                    url
+                }
+            })
+            if (delivered > 0) {
+                this.logBranch('team-attention', namespace, 'sse-toast-delivered', `count=${delivered}`)
+                return
+            }
+        }
+
+        this.logBranch('team-attention', namespace, 'web-push-fired')
+        await this.pushService.sendToNamespace(namespace, payload)
     }
 }

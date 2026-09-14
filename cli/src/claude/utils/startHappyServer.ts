@@ -27,6 +27,16 @@ import {
     SESSION_ID_PREFIX_PARAM_DESCRIPTION,
 } from '@hapi/protocol/sessionCitation'
 import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer } from "@/modules/pingPeer/pingPeer";
+import {
+    TeamClientError,
+    formatTeamMessages,
+    formatTeamStatus,
+    readTeamMessages,
+    probeTeamsSupport,
+    resolveCurrentTeam,
+    sendTeamMessage,
+    spawnTeamMember
+} from "@/modules/team/teamClient";
 
 type StartHappyServerOptions = {
     emitTitleSummary?: boolean;
@@ -42,7 +52,8 @@ const CLAUDE_MANUAL_APPROVAL_HAPI_TOOLS = new Set([
     'display_media',
     'display_video',
     'ping_peer',
-    'inspect_peer'
+    'inspect_peer',
+    'spawn_peer'
 ]);
 
 /**
@@ -61,7 +72,8 @@ function createHapiMcpServer(
     client: ApiSessionClient,
     emitTitleSummary: boolean,
     enableChangeTitle: boolean,
-    skillLookup: StartHappyServerOptions['skillLookup']
+    skillLookup: StartHappyServerOptions['skillLookup'],
+    teamToolsEnabled: boolean
 ): McpServer {
     const handler = async (title: string) => {
         logger.debug('[hapiMCP] Changing title to:', title);
@@ -413,6 +425,123 @@ function createHapiMcpServer(
         }
     });
 
+    if (teamToolsEnabled) {
+        const teamErrorText = (error: unknown): string => {
+            if (error instanceof TeamClientError) return error.message;
+            return error instanceof Error ? error.message : String(error);
+        };
+        // Membership is resolved per call so sessions that join a team after
+        // startup (e.g. adopted as lead) get working tools without a restart.
+        const requireTeam = async () => {
+            const status = await resolveCurrentTeam({ sessionId: client.sessionId });
+            if (!status) {
+                throw new TeamClientError('not_in_team', 'This session is not a member of any team yet. Ask the human to add it to a team first.');
+            }
+            return status;
+        };
+
+        mcp.registerTool<any, any>('team_status', {
+            description: 'Agent Team: show your team, members (live status), pending tasks and remaining budget. Call this right after starting as a team member to pick up your assignment.',
+            title: 'Team Status',
+            inputSchema: z.object({}),
+        }, async () => {
+            try {
+                const status = await requireTeam();
+                return { content: [{ type: 'text' as const, text: formatTeamStatus(status) }], isError: false };
+            } catch (error) {
+                const message = teamErrorText(error);
+                return { content: [{ type: 'text' as const, text: `Failed to load team status: ${message}` }], isError: error instanceof TeamClientError && error.code === 'not_in_team' ? false : true };
+            }
+        });
+
+        mcp.registerTool<any, any>('team_read', {
+            description: 'Agent Team: read the shared team message log (all members see the same log). Use afterSeq from a previous read to fetch only new messages. Broadcasts are pull-only: call this before starting work to catch up.',
+            title: 'Read Team Messages',
+            inputSchema: z.object({
+                afterSeq: z.number().int().nonnegative().optional().describe('Return messages with seq greater than this'),
+                limit: z.number().int().positive().max(2000).optional().describe('Max messages to return (default 100)'),
+            }),
+        }, async (args: { afterSeq?: number; limit?: number }) => {
+            try {
+                const status = await requireTeam();
+                const messages = await readTeamMessages({
+                    sessionId: client.sessionId,
+                    teamId: status.team.id,
+                    afterSeq: args.afterSeq,
+                    limit: args.limit ?? 100,
+                });
+                return { content: [{ type: 'text' as const, text: formatTeamMessages(messages, client.sessionId) }], isError: false };
+            } catch (error) {
+                return { content: [{ type: 'text' as const, text: `Failed to read team messages: ${teamErrorText(error)}` }], isError: true };
+            }
+        });
+
+        mcp.registerTool<any, any>('team_send', {
+            description: 'Agent Team: send a message to teammates. to="all" (default) writes to the shared log only; to="<role or session id prefix>" or to="lead" wakes that member; to="human" notifies the human out-of-band (use it or kind="decision" when you need a human decision). Use inReplyTo=<seq> when answering a peer message so the hub can stop runaway back-and-forth. Do NOT use this for routine replies to the human.',
+            title: 'Send Team Message',
+            inputSchema: z.object({
+                text: z.string().min(1).describe('Message text'),
+                to: z.string().min(1).optional().describe('"all" (default), "lead", "human", or a member session id/prefix'),
+                kind: z.enum(['chat', 'status', 'question', 'task-update', 'decision']).optional().describe('Message kind (default chat)'),
+                inReplyTo: z.number().int().positive().optional().describe('seq of the message you are replying to'),
+            }),
+        }, async (args: { text: string; to?: string; kind?: string; inReplyTo?: number }) => {
+            try {
+                const status = await requireTeam();
+                const message = await sendTeamMessage({
+                    sessionId: client.sessionId,
+                    teamId: status.team.id,
+                    text: args.text,
+                    to: args.to,
+                    kind: args.kind,
+                    inReplyTo: args.inReplyTo,
+                });
+                return {
+                    content: [{ type: 'text' as const, text: `Sent as team message #${message.seq}${args.to && args.to !== 'all' ? ` to ${args.to}` : ' (broadcast)'}` }],
+                    isError: false,
+                };
+            } catch (error) {
+                return { content: [{ type: 'text' as const, text: `Failed to send team message: ${teamErrorText(error)}` }], isError: true };
+            }
+        });
+
+        mcp.registerTool<any, any>('spawn_peer', {
+            description: 'Agent Team: spawn a new teammate session (own context window) with a role and an initial task. The member joins this team and reports back via team messages. Spawning costs tokens - prefer reusing idle members; requires user approval.',
+            title: 'Spawn Team Peer',
+            inputSchema: z.object({
+                role: z.string().min(1).describe('Role / display name, e.g. "Builder A" or "Reviewer". Must be unique in the team.'),
+                task: z.string().min(1).optional().describe('Initial task brief delivered to the new member'),
+                agent: z.string().min(1).optional().describe('Agent flavor (claude, codex, ...). Defaults to the caller flavor.'),
+                model: z.string().min(1).optional().describe('Optional model override'),
+                worktree: z.boolean().optional().describe('Run the member in an isolated git worktree (default: follow the caller)'),
+                worktreeName: z.string().min(1).max(80).optional().describe('Explicit worktree name'),
+            }),
+        }, async (args: { role: string; task?: string; agent?: string; model?: string; worktree?: boolean; worktreeName?: string }) => {
+            try {
+                const status = await requireTeam();
+                const result = await spawnTeamMember({
+                    sessionId: client.sessionId,
+                    teamId: status.team.id,
+                    role: args.role,
+                    task: args.task,
+                    agent: args.agent,
+                    model: args.model,
+                    sessionType: args.worktree === undefined ? undefined : (args.worktree ? 'worktree' : 'simple'),
+                    worktreeName: args.worktreeName,
+                });
+                return {
+                    content: [{
+                        type: 'text' as const,
+                        text: `Spawned ${result.role} (session ${result.sessionId.slice(0, 8)})${result.taskId ? ` with task ${result.taskId}` : ''}. The task is delivered when the member is ready.`,
+                    }],
+                    isError: false,
+                };
+            } catch (error) {
+                return { content: [{ type: 'text' as const, text: `Failed to spawn peer: ${teamErrorText(error)}` }], isError: true };
+            }
+        });
+    }
+
 
     if (skillLookup) {
         mcp.registerTool<any, any>('skill_lookup', {
@@ -475,11 +604,15 @@ function readMcpSessionId(req: IncomingMessage): string | undefined {
 export async function startHappyServer(client: ApiSessionClient, options: StartHappyServerOptions = {}) {
     const emitTitleSummary = options.emitTitleSummary ?? true;
     const enableChangeTitle = options.enableChangeTitle ?? true;
+    // Team tools are registered only when the hub reports the feature enabled
+    // (probe -> 404 when disabled, so nothing changes for non-team hubs).
+    // Membership itself is resolved per tool call, so mid-life team joins work.
+    const teamToolsEnabled = await probeTeamsSupport();
     const transports = new Map<string, StreamableHTTPServerTransport>();
     const mcps = new Map<string, McpServer>();
 
     const createMcpTransport = () => {
-        const mcp = createHapiMcpServer(client, emitTitleSummary, enableChangeTitle, options.skillLookup);
+        const mcp = createHapiMcpServer(client, emitTitleSummary, enableChangeTitle, options.skillLookup, teamToolsEnabled);
         const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
             onsessioninitialized: (sessionId) => {
@@ -536,6 +669,9 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     const toolNames = enableChangeTitle
         ? ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer']
         : ['display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer'];
+    if (teamToolsEnabled) {
+        toolNames.push('team_status', 'team_read', 'team_send', 'spawn_peer');
+    }
     if (options.skillLookup) {
         toolNames.push('skill_lookup');
     }

@@ -60,7 +60,11 @@ export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>
 export const HubSettingsResponseSchema = z.object({
     sessionSummaryContract: z.boolean(),
     /** Show compact AGENT_NOTIFY_SUMMARY in chat (default off / hide). */
-    sessionSummaryInChat: z.boolean()
+    sessionSummaryInChat: z.boolean(),
+    /** Persisted Agent Team feature gate (applies after a hub restart). */
+    teamsEnabled: z.boolean().optional(),
+    /** Whether the running hub process currently has teams enabled. */
+    teamsEnabledActive: z.boolean().optional()
 })
 
 export type HubSettingsResponse = z.infer<typeof HubSettingsResponseSchema>
@@ -68,10 +72,13 @@ export type HubSettingsResponse = z.infer<typeof HubSettingsResponseSchema>
 export const UpdateHubSettingsRequestSchema = z
     .object({
         sessionSummaryContract: z.boolean().optional(),
-        sessionSummaryInChat: z.boolean().optional()
+        sessionSummaryInChat: z.boolean().optional(),
+        teamsEnabled: z.boolean().optional()
     })
     .refine(
-        (data) => data.sessionSummaryContract !== undefined || data.sessionSummaryInChat !== undefined,
+        (data) => data.sessionSummaryContract !== undefined
+            || data.sessionSummaryInChat !== undefined
+            || data.teamsEnabled !== undefined,
         { message: 'At least one hub setting field is required' }
     )
 
@@ -439,6 +446,76 @@ export const SetSessionPinnedRequestSchema = z.object({
 })
 
 export type SetSessionPinnedRequest = z.infer<typeof SetSessionPinnedRequestSchema>
+
+export const CreateTeamRequestSchema = z.object({
+    name: z.string().min(1).max(200),
+    leadSessionId: z.string().min(1).optional(),
+    config: z.record(z.string(), z.unknown()).optional()
+})
+
+export type CreateTeamRequest = z.infer<typeof CreateTeamRequestSchema>
+
+export const TeamSendMessageRequestSchema = z.object({
+    fromSessionId: z.string().min(1),
+    text: z.string().min(1).max(20000),
+    /** 'all' (default) | 'lead' | member session id or unique prefix. */
+    to: z.string().min(1).max(200).optional(),
+    kind: z.enum(['chat', 'status', 'question', 'task-update', 'decision']).optional(),
+    /** Team message seq this message replies to (budget chain-depth tracking). */
+    inReplyTo: z.number().int().positive().optional()
+})
+
+export type TeamSendMessageRequest = z.infer<typeof TeamSendMessageRequestSchema>
+
+export const TeamSpawnMemberRequestSchema = z.object({
+    fromSessionId: z.string().min(1),
+    role: z.string().min(1).max(80),
+    task: z.string().min(1).max(20000).optional(),
+    agent: AgentFlavorSchema.optional(),
+    model: z.string().min(1).max(200).optional(),
+    sessionType: z.enum(['simple', 'worktree']).optional(),
+    worktreeName: z.string().min(1).max(80).optional(),
+    /** Run the member with bypassed permission prompts (autonomous work). */
+    yolo: z.boolean().optional()
+})
+
+export type TeamSpawnMemberRequest = z.infer<typeof TeamSpawnMemberRequestSchema>
+
+export const TeamTaskUpdateRequestSchema = z.object({
+    /** Session caller (CLI/MCP). Absent = human web caller. */
+    fromSessionId: z.string().min(1).optional(),
+    status: z.enum(['todo', 'doing', 'done', 'blocked']).optional(),
+    assigneeSessionId: z.string().min(1).nullable().optional()
+}).refine((value) => value.status !== undefined || value.assigneeSessionId !== undefined, {
+    message: 'status or assigneeSessionId is required'
+})
+
+export type TeamTaskUpdateRequest = z.infer<typeof TeamTaskUpdateRequestSchema>
+
+export const CreateTeamTaskRequestSchema = z.object({
+    title: z.string().min(1).max(200),
+    assigneeSessionId: z.string().min(1).nullable().optional()
+})
+
+export type CreateTeamTaskRequest = z.infer<typeof CreateTeamTaskRequestSchema>
+
+export const UpdateTeamRequestSchema = z.object({
+    name: z.string().min(1).max(200).optional(),
+    status: z.enum(['active', 'archived']).optional()
+}).refine((value) => value.name !== undefined || value.status !== undefined, {
+    message: 'name or status is required'
+})
+
+export type UpdateTeamRequest = z.infer<typeof UpdateTeamRequestSchema>
+
+export const TeamHumanMessageRequestSchema = z.object({
+    text: z.string().min(1).max(20000),
+    /** 'all' (default) | 'lead' | member session id or unique prefix. */
+    to: z.string().min(1).max(200).optional(),
+    kind: z.enum(['chat', 'status', 'question', 'task-update', 'decision']).optional()
+})
+
+export type TeamHumanMessageRequest = z.infer<typeof TeamHumanMessageRequestSchema>
 export type SessionPinMode = SetSessionPinnedRequest['mode']
 
 /**

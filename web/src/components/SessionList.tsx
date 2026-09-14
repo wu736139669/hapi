@@ -1251,6 +1251,8 @@ export function SessionList(props: {
     selectedSessionId?: string | null
     /** Compact directory/session index used while the detail sidebar is collapsed. */
     compact?: boolean
+    /** Optional content rendered at the top of the scroll area (e.g. team list). */
+    topSection?: React.ReactNode
 }) {
     const { t } = useTranslation()
     const {
@@ -2083,6 +2085,7 @@ export function SessionList(props: {
             ) : null}
             <div ref={scrollContainerRef} className="app-scroll-y session-list-scrollbar-left min-h-0 flex-1">
             <div className="mx-auto flex w-full max-w-content flex-col gap-1 pl-1.5 pr-2 pb-2">
+                {props.topSection}
                 {props.sessions.length === 0 && !props.isLoading ? (
                     <SessionsEmptyState
                         onNewSession={props.onNewSession}

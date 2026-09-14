@@ -43,6 +43,7 @@ import type {
     SessionShareCreateResponse,
     SessionShareExchangeResponse
 } from '@/types/api'
+import type { TeamDetail, TeamMemoryFile, TeamMemoryFileContent, TeamMessage, TeamSummary, TeamTask } from '@/types/team'
 import type {
     AgentAvailabilityResponse,
     AgyModelsResponse,
@@ -401,6 +402,113 @@ export class ApiClient {
 
     async getSession(sessionId: string): Promise<SessionResponse> {
         return await this.request<SessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}`)
+    }
+
+    // ------------------------------------------------------------- Agent Team
+
+    async getTeams(): Promise<{ teams: TeamSummary[] }> {
+        return await this.request<{ teams: TeamSummary[] }>('/api/teams')
+    }
+
+    async getTeam(teamId: string): Promise<TeamDetail> {
+        return await this.request<TeamDetail>(`/api/teams/${encodeURIComponent(teamId)}`)
+    }
+
+    async getTeamMessages(
+        teamId: string,
+        options: { afterSeq?: number; limit?: number } = {}
+    ): Promise<{ messages: TeamMessage[] }> {
+        const params = new URLSearchParams()
+        if (options.afterSeq !== undefined) params.set('afterSeq', String(options.afterSeq))
+        if (options.limit !== undefined) params.set('limit', String(options.limit))
+        const query = params.toString()
+        return await this.request<{ messages: TeamMessage[] }>(
+            `/api/teams/${encodeURIComponent(teamId)}/messages${query ? `?${query}` : ''}`
+        )
+    }
+
+    async sendHumanTeamMessage(
+        teamId: string,
+        body: { text: string; to?: string; kind?: string }
+    ): Promise<{ message: TeamMessage }> {
+        return await this.request<{ message: TeamMessage }>(
+            `/api/teams/${encodeURIComponent(teamId)}/human-messages`,
+            { method: 'POST', body: JSON.stringify(body) }
+        )
+    }
+
+    async getTeamMemory(teamId: string): Promise<{ files: TeamMemoryFile[] }> {
+        return await this.request<{ files: TeamMemoryFile[] }>(
+            `/api/teams/${encodeURIComponent(teamId)}/memory`
+        )
+    }
+
+    async getTeamMemoryFile(teamId: string, path: string): Promise<TeamMemoryFileContent> {
+        const params = new URLSearchParams({ path })
+        return await this.request<TeamMemoryFileContent>(
+            `/api/teams/${encodeURIComponent(teamId)}/memory/file?${params.toString()}`
+        )
+    }
+
+    async createTeamTask(
+        teamId: string,
+        body: { title: string; assigneeSessionId?: string | null }
+    ): Promise<{ task: TeamTask }> {
+        return await this.request<{ task: TeamTask }>(
+            `/api/teams/${encodeURIComponent(teamId)}/tasks`,
+            { method: 'POST', body: JSON.stringify(body) }
+        )
+    }
+
+    async updateTeamTask(
+        teamId: string,
+        taskId: string,
+        body: { status?: string; assigneeSessionId?: string | null }
+    ): Promise<{ task: TeamTask }> {
+        return await this.request<{ task: TeamTask }>(
+            `/api/teams/${encodeURIComponent(teamId)}/tasks/${encodeURIComponent(taskId)}`,
+            { method: 'PATCH', body: JSON.stringify(body) }
+        )
+    }
+
+    async updateTeam(
+        teamId: string,
+        body: { name?: string; status?: 'active' | 'archived' }
+    ): Promise<{ team: TeamSummary }> {
+        return await this.request<{ team: TeamSummary }>(
+            `/api/teams/${encodeURIComponent(teamId)}`,
+            { method: 'PATCH', body: JSON.stringify(body) }
+        )
+    }
+
+    async deleteTeam(teamId: string): Promise<void> {
+        await this.request(`/api/teams/${encodeURIComponent(teamId)}`, { method: 'DELETE' })
+    }
+
+    async createTeam(body: { name: string; leadSessionId?: string }): Promise<{ team: TeamSummary }> {
+        return await this.request<{ team: TeamSummary }>('/api/teams', {
+            method: 'POST',
+            body: JSON.stringify(body)
+        })
+    }
+
+    async spawnTeamMember(
+        teamId: string,
+        body: {
+            fromSessionId: string
+            role: string
+            task?: string
+            agent?: string
+            model?: string
+            sessionType?: 'simple' | 'worktree'
+            worktreeName?: string
+            yolo?: boolean
+        }
+    ): Promise<{ teamId: string; sessionId: string; role: string; taskId: string | null }> {
+        return await this.request(
+            `/api/teams/${encodeURIComponent(teamId)}/spawn`,
+            { method: 'POST', body: JSON.stringify(body) }
+        )
     }
 
     async createSessionShare(sessionId: string): Promise<SessionShareCreateResponse> {

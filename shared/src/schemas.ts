@@ -502,7 +502,8 @@ export const RunnerStateSchema = z.object({
     capabilities: z.object({
         codexSharedRuntime: z.literal(true).optional(),
         piExistingSessionResume: z.literal(true).optional(),
-        agentConfigs: z.array(AgentConfigDescriptorSchema).optional()
+        agentConfigs: z.array(AgentConfigDescriptorSchema).optional(),
+        agentTeam: z.literal(true).optional()
     }).optional(),
     shutdownRequestedAt: z.number().optional(),
     shutdownSource: z.union([z.enum(['mobile-app', 'cli', 'os-signal', 'unknown']), z.string()]).optional(),
@@ -660,6 +661,22 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
              */
             resume: z.enum(['ok', 'gap']).optional()
         }).optional()
+    }),
+    SessionEventBaseSchema.extend({
+        type: z.literal('team-updated'),
+        teamId: z.string(),
+        data: z.unknown().optional()
+    }),
+    SessionEventBaseSchema.extend({
+        type: z.literal('team-attention'),
+        teamId: z.string(),
+        data: z.object({
+            teamName: z.string(),
+            seq: z.number(),
+            kind: z.string(),
+            fromRole: z.string(),
+            text: z.string()
+        })
     })
 ])
 

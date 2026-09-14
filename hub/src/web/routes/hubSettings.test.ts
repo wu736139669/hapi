@@ -34,7 +34,9 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(response.headers.get('cache-control')).toBe('no-store')
         expect(await response.json()).toEqual({
             sessionSummaryContract: false,
-            sessionSummaryInChat: false
+            sessionSummaryInChat: false,
+            teamsEnabled: false,
+            teamsEnabledActive: false
         })
     })
 
@@ -48,13 +50,17 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(put.status).toBe(200)
         expect(await put.json()).toEqual({
             sessionSummaryContract: true,
-            sessionSummaryInChat: false
+            sessionSummaryInChat: false,
+            teamsEnabled: false,
+            teamsEnabledActive: false
         })
 
         const get = await app.request('/api/hub-settings')
         expect(await get.json()).toEqual({
             sessionSummaryContract: true,
-            sessionSummaryInChat: false
+            sessionSummaryInChat: false,
+            teamsEnabled: false,
+            teamsEnabledActive: false
         })
     })
 
@@ -70,7 +76,9 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(put.status).toBe(200)
         expect(await put.json()).toEqual({
             sessionSummaryContract: true,
-            sessionSummaryInChat: true
+            sessionSummaryInChat: true,
+            teamsEnabled: false,
+            teamsEnabledActive: false
         })
     })
 
@@ -109,7 +117,9 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(get.status).toBe(200)
         expect(await get.json()).toEqual({
             sessionSummaryContract: false,
-            sessionSummaryInChat: true
+            sessionSummaryInChat: true,
+            teamsEnabled: false,
+            teamsEnabledActive: false
         })
 
         const put = await tenantApp.request('/api/hub-settings', {
@@ -120,14 +130,35 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(put.status).toBe(403)
     })
 
-    it('survives a prior write via settings helpers', async () => {
+    it('persists the teams toggle and reports the active runtime value', async () => {
+        const { app } = await createApp()
+        const put = await app.request('/api/hub-settings', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ teamsEnabled: true })
+        })
+        expect(put.status).toBe(200)
+        expect(await put.json()).toEqual({
+            sessionSummaryContract: false,
+            sessionSummaryInChat: false,
+            teamsEnabled: true,
+            teamsEnabledActive: false
+        })
+
+        const stored = await (await app.request('/api/hub-settings')).json() as { teamsEnabled: boolean }
+        expect(stored.teamsEnabled).toBe(true)
+    })
+
+    it('survives a prior write via settings helper', async () => {
         const { app, dataDir } = await createApp()
         await writeSessionSummaryContractEnabled(dataDir, true)
         await writeSessionSummaryInChatEnabled(dataDir, true)
         const response = await app.request('/api/hub-settings')
         expect(await response.json()).toEqual({
             sessionSummaryContract: true,
-            sessionSummaryInChat: true
+            sessionSummaryInChat: true,
+            teamsEnabled: false,
+            teamsEnabledActive: false
         })
     })
 })
