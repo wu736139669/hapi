@@ -88,6 +88,14 @@ export function TeamSidePanel(props: {
     const detail = props.detail
     const members = detail?.members ?? []
     const tasks = detail?.tasks ?? []
+    // Show `<repo>/.hapi/teams/<team>/...` derived from the absolute memory root.
+    const memoryLabel = (() => {
+        const root = props.memory.root
+        if (!root) return '.hapi/teams'
+        const marker = '/.hapi/'
+        const index = root.lastIndexOf(marker)
+        return index >= 0 ? `.hapi/${root.slice(index + marker.length)}` : root
+    })()
     const todo = tasks.filter((task) => task.status === 'todo')
     const doing = tasks.filter((task) => task.status === 'doing' || task.status === 'blocked')
     const done = tasks.filter((task) => task.status === 'done')
@@ -258,7 +266,7 @@ export function TeamSidePanel(props: {
                                     </button>
                                 ) : null}
                                 <span className="min-w-0 truncate">
-                                    .hapi/team{props.memory.relativeDir ? `/${props.memory.relativeDir}` : ''}
+                                    {memoryLabel}{props.memory.relativeDir ? `/${props.memory.relativeDir}` : ''}
                                 </span>
                             </div>
                             {props.memory.isLoading ? (
