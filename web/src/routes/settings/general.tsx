@@ -4,6 +4,7 @@ import { useAppContext } from '@/lib/app-context'
 import { CompanionPairing } from '@/components/settings/CompanionPairing'
 import { SettingsChoiceGroup, SettingsPageContent, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
 import { queryKeys } from '@/lib/query-keys'
+import { useShowUnavailableAgents } from '@/hooks/useShowUnavailableAgents'
 
 const locales: ReadonlyArray<{ value: Locale; label: string }> = [
     { value: 'en', label: 'English' },
@@ -26,6 +27,7 @@ function getNamespace(token: string | null): string | null {
 export default function SettingsGeneralPage() {
     const { t, locale, setLocale } = useTranslation()
     const { api, baseUrl, token } = useAppContext()
+    const { showUnavailableAgents, setShowUnavailableAgents } = useShowUnavailableAgents()
     const queryClient = useQueryClient()
     const isOwner = getNamespace(token) === 'default'
 
@@ -56,46 +58,59 @@ export default function SettingsGeneralPage() {
                 <SettingsChoiceGroup hideLabel label={t('settings.language.label')} value={locale} options={locales} onChange={setLocale} />
             </SettingsSection>
             {isOwner ? (
-                <SettingsSection
-                    title={t('settings.general.sessionSummary.title')}
-                    description={t('settings.general.sessionSummary.description')}
-                >
-                    {hubSettingsQuery.data ? (
-                        <>
-                            <SettingsSwitch
-                                label={t('settings.general.sessionSummaryContract')}
-                                description={t('settings.general.sessionSummaryContract.desc')}
-                                checked={hubSettingsQuery.data.sessionSummaryContract}
-                                onChange={(checked) => {
-                                    if (hubSettingsMutation.isPending) return
-                                    hubSettingsMutation.mutate({ sessionSummaryContract: checked })
-                                }}
-                            />
-                            <SettingsSwitch
-                                label={t('settings.general.sessionSummaryInChat')}
-                                description={t('settings.general.sessionSummaryInChat.desc')}
-                                checked={hubSettingsQuery.data.sessionSummaryInChat}
-                                onChange={(checked) => {
-                                    if (hubSettingsMutation.isPending) return
-                                    hubSettingsMutation.mutate({ sessionSummaryInChat: checked })
-                                }}
-                            />
-                            <SettingsSwitch
-                                label={t('settings.general.teamsEnabled')}
-                                description={
-                                    hubSettingsQuery.data.teamsEnabledActive
-                                        ? t('settings.general.teamsEnabled.activeDesc')
-                                        : t('settings.general.teamsEnabled.restartDesc')
-                                }
-                                checked={hubSettingsQuery.data.teamsEnabled ?? false}
-                                onChange={(checked) => {
-                                    if (hubSettingsMutation.isPending) return
-                                    hubSettingsMutation.mutate({ teamsEnabled: checked })
-                                }}
-                            />
-                        </>
-                    ) : null}
-                </SettingsSection>
+                <>
+                    <SettingsSection
+                        title={t('settings.general.sessionSummary.title')}
+                        description={t('settings.general.sessionSummary.description')}
+                    >
+                        {hubSettingsQuery.data ? (
+                            <>
+                                <SettingsSwitch
+                                    label={t('settings.general.sessionSummaryContract')}
+                                    description={t('settings.general.sessionSummaryContract.desc')}
+                                    checked={hubSettingsQuery.data.sessionSummaryContract}
+                                    onChange={(checked) => {
+                                        if (hubSettingsMutation.isPending) return
+                                        hubSettingsMutation.mutate({ sessionSummaryContract: checked })
+                                    }}
+                                />
+                                <SettingsSwitch
+                                    label={t('settings.general.sessionSummaryInChat')}
+                                    description={t('settings.general.sessionSummaryInChat.desc')}
+                                    checked={hubSettingsQuery.data.sessionSummaryInChat}
+                                    onChange={(checked) => {
+                                        if (hubSettingsMutation.isPending) return
+                                        hubSettingsMutation.mutate({ sessionSummaryInChat: checked })
+                                    }}
+                                />
+                                <SettingsSwitch
+                                    label={t('settings.general.teamsEnabled')}
+                                    description={
+                                        hubSettingsQuery.data.teamsEnabledActive
+                                            ? t('settings.general.teamsEnabled.activeDesc')
+                                            : t('settings.general.teamsEnabled.restartDesc')
+                                    }
+                                    checked={hubSettingsQuery.data.teamsEnabled ?? false}
+                                    onChange={(checked) => {
+                                        if (hubSettingsMutation.isPending) return
+                                        hubSettingsMutation.mutate({ teamsEnabled: checked })
+                                    }}
+                                />
+                            </>
+                        ) : null}
+                    </SettingsSection>
+                    <SettingsSection
+                        title={t('settings.general.agents.title')}
+                        description={t('settings.general.agents.description')}
+                    >
+                        <SettingsSwitch
+                            label={t('settings.general.showUnavailableAgents')}
+                            description={t('settings.general.showUnavailableAgents.desc')}
+                            checked={showUnavailableAgents}
+                            onChange={setShowUnavailableAgents}
+                        />
+                    </SettingsSection>
+                </>
             ) : null}
             <SettingsSection title={t('settings.companion.title')}>
                 <div className="px-3 py-3">

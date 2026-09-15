@@ -66,6 +66,7 @@ import { collectMachineHealth } from '@/utils/machineHealth'
 import { inspectCursorChatStore } from '@/cursor/cursorChatStoreStatus'
 import { homedir } from 'node:os'
 import type { CursorChatStoreStatus } from '@hapi/protocol/apiTypes'
+import { getAgentAvailabilityResponse } from '@/agent/agentAvailability'
 import { MachinePathPolicy } from './machinePathPolicy'
 
 type MachineRpcHandlers = {
@@ -186,6 +187,11 @@ export class ApiMachineClient {
                     cursorSessionId: typeof params?.cursorSessionId === 'string' ? params.cursorSessionId : ''
                 })
             }
+        )
+
+        this.rpcHandlerManager.registerHandler<Record<string, never>, AgentAvailabilityResponse>(
+            RPC_METHODS.AgentAvailability,
+            async () => getAgentAvailabilityResponse()
         )
 
         this.rpcHandlerManager.registerHandler<ListMachineDirectoryRequest, MachineListDirectoryResponse>(RPC_METHODS.ListMachineDirectory, async (params) => {

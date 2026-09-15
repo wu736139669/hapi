@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from 'node:fs'
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { basename, dirname, join, relative } from 'node:path'
 import { homedir } from 'node:os'
@@ -6,6 +6,7 @@ import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
 import { isCodexSubagentSource } from '@/codex/utils/codexSessionMetadata'
 
 const DEFAULT_CODEX_SESSION_SCAN_LIMIT = 200
+const CODEX_SESSION_SUMMARY_READ_BYTES = 64 * 1024
 
 type CodexSessionIndexTitle = {
     threadName: string
@@ -140,6 +141,39 @@ function readCodexSessionIndexTitles(): Map<string, CodexSessionIndexTitle> {
         }
     }
     return titles
+}
+
+function readFileChunk(descriptor: number, position: number, length: number): string {
+    const buffer = Buffer.alloc(length)
+    const bytesRead = readSync(descriptor, buffer, 0, length, position)
+    return buffer.toString('utf-8', 0, bytesRead)
+}
+
+function readCodexSessionSummaryContent(filePath: string): { head: string; tail: string; modifiedAt: number } | null {
+    let descriptor: number
+    try {
+        descriptor = openSync(filePath, 'r')
+    } catch {
+        return null
+    }
+
+    try {
+        const fileStats = fstatSync(descriptor)
+        const modifiedAt = fileStats.mtimeMs
+        const fileSize = fileStats.size
+        const headLength = Math.min(fileSize, CODEX_SESSION_SUMMARY_READ_BYTES)
+        const head = readFileChunk(descriptor, 0, headLength)
+        if (fileSize <= CODEX_SESSION_SUMMARY_READ_BYTES) {
+            return { head, tail: head, modifiedAt }
+        }
+
+        const tail = readFileChunk(descriptor, fileSize - CODEX_SESSION_SUMMARY_READ_BYTES, CODEX_SESSION_SUMMARY_READ_BYTES)
+        return { head, tail, modifiedAt }
+    } catch {
+        return null
+    } finally {
+        closeSync(descriptor)
+    }
 }
 
 function extractCodexChangedTitle(record: Record<string, unknown>): string | null {
@@ -304,9 +338,24 @@ function parseCodexLocalSession(
     includeMessages: boolean,
     sessionIndexTitles = new Map<string, CodexSessionIndexTitle>()
 ): LocalCodexSessionWithMessages | LocalCodexSessionSummary | null {
-    let content: string
-    try { content = readFileSync(filePath, 'utf-8') } catch { return null }
-    const lines = content.split(/\r?\n/).filter(Boolean)
+    let lines: string[]
+    let summaryTailLines: string[]
+    let modifiedAt = Date.now()
+    if (includeMessages) {
+        let content: string
+        try {
+            content = readFileSync(filePath, 'utf-8')
+            modifiedAt = statSync(filePath).mtimeMs
+        } catch { return null }
+        lines = content.split(/\r?\n/).filter(Boolean)
+        summaryTailLines = lines
+    } else {
+        const content = readCodexSessionSummaryContent(filePath)
+        if (!content) return null
+        lines = content.head.split(/\r?\n/).filter(Boolean)
+        summaryTailLines = content.tail.split(/\r?\n/).filter(Boolean)
+        modifiedAt = content.modifiedAt
+    }
     const headLines = lines.slice(0, 200)
     let sessionId: string | null = null
     let cwd: string | null = null
@@ -356,10 +405,8 @@ function parseCodexLocalSession(
     sessionId = sessionId ?? inferSessionIdFromFileName(filePath)
     if (!sessionId) return null
     const sessionIndexTitle = sessionIndexTitles.get(sessionId)?.threadName ?? null
-    const changedTitle = getLatestCodexChangedTitle(lines)
-    const lastUserMessage = getLatestCodexUserMessage(lines)
-    let modifiedAt = Date.now()
-    try { modifiedAt = statSync(filePath).mtimeMs } catch {}
+    const changedTitle = getLatestCodexChangedTitle(summaryTailLines)
+    const lastUserMessage = getLatestCodexUserMessage(summaryTailLines)
     const summary = {
         id: sessionId,
         title: getCodexSessionTitle(cwd, sessionId, sessionIndexTitle, changedTitle, firstUserMessage),

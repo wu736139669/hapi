@@ -14,6 +14,7 @@ import { useOpencodeModelsForCwd } from '@/hooks/queries/useOpencodeModelsForCwd
 import { useGrokModelsForCwd } from '@/hooks/queries/useGrokModelsForCwd'
 import { useCopilotModelsForCwd } from '@/hooks/queries/useCopilotModelsForCwd'
 import { usePiModelsForMachine } from '@/hooks/queries/usePiModelsForMachine'
+import { useAgentAvailability } from '@/hooks/queries/useAgentAvailability'
 import { useSessions } from '@/hooks/queries/useSessions'
 import { useActiveSuggestions, type Suggestion } from '@/hooks/useActiveSuggestions'
 import { useDirectorySuggestions } from '@/hooks/useDirectorySuggestions'
@@ -82,6 +83,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { formatRunnerSpawnError } from '../../utils/formatRunnerSpawnError'
 import { markCodexSessionsImported } from '@/lib/codexImportedSessions'
 import { useToast } from '@/lib/toast-context'
+import { useShowUnavailableAgents } from '@/hooks/useShowUnavailableAgents'
 
 
 
@@ -107,6 +109,7 @@ export function NewSession(props: {
     const { spawnSession, isPending, error: spawnError } = useSpawnSession(props.api)
     const { sessions, refetch: refetchSessions } = useSessions(props.api)
     const { getRecentPaths, addRecentPath, getLastUsedMachineId, setLastUsedMachineId } = useRecentPaths()
+    const { showUnavailableAgents } = useShowUnavailableAgents()
 
     const [machineId, setMachineId] = useState<string | null>(props.initialMachineId ?? null)
     const [directory, setDirectory] = useState(props.initialDirectory ?? '')
@@ -332,15 +335,54 @@ export function NewSession(props: {
         () => (machineId ? props.machines.find((machine) => machine.id === machineId) ?? null : null),
         [machineId, props.machines]
     )
+    const agentAvailabilityState = useAgentAvailability({
+        api: props.api,
+        machineId,
+    })
+    const availableAgentFlavors = useMemo(
+        () => new Set(
+            agentAvailabilityState.agents
+                .filter((entry) => entry.available)
+                .map((entry) => entry.agent)
+        ),
+        [agentAvailabilityState.agents]
+    )
+    // Only a concrete response can identify which agents are installed. An
+    // older runner (upgradeRequired) falls back to the legacy full list so it
+    // remains usable while its model probes keep working.
+    const agentAvailabilityKnown = agentAvailabilityState.agents.length > 0
+    const visibleAgentFlavors = useMemo(
+        () => agentAvailabilityKnown && !showUnavailableAgents
+            ? CREATABLE_AGENT_FLAVORS.filter((flavor) => availableAgentFlavors.has(flavor))
+            : CREATABLE_AGENT_FLAVORS,
+        [agentAvailabilityKnown, availableAgentFlavors, showUnavailableAgents]
+    )
+    const canUseSelectedAgent = !agentAvailabilityKnown || availableAgentFlavors.has(agent)
+
+    useEffect(() => {
+        if (!agentAvailabilityKnown || showUnavailableAgents || visibleAgentFlavors.length === 0) {
+            return
+        }
+        if (!availableAgentFlavors.has(agent)) {
+            setAgent(visibleAgentFlavors[0]!)
+        }
+    }, [agent, agentAvailabilityKnown, availableAgentFlavors, showUnavailableAgents, visibleAgentFlavors])
+
+    const agentIsAvailableForQueries = useCallback((flavor: AgentType): boolean => {
+        return agentAvailabilityKnown
+            ? availableAgentFlavors.has(flavor)
+            : agentAvailabilityState.upgradeRequired
+    }, [agentAvailabilityKnown, agentAvailabilityState.upgradeRequired, availableAgentFlavors])
+
     const codexModelsState = useCodexModels({
         api: props.api,
         machineId,
-        enabled: agent === 'codex' && Boolean(machineId)
+        enabled: agent === 'codex' && Boolean(machineId) && agentIsAvailableForQueries('codex')
     })
     const dshModelsState = useDshModels({
         api: props.api,
         machineId,
-        enabled: agent === 'dsh' && Boolean(machineId)
+        enabled: agent === 'dsh' && Boolean(machineId) && agentIsAvailableForQueries('dsh')
     })
     const [agySelectedModel, setAgySelectedModel] = useState<string | null>(null)
     const [claudeCustomModels, setClaudeCustomModels] = useState<string[]>([])
@@ -495,7 +537,7 @@ export function NewSession(props: {
     const cursorModelsState = useCursorModelsForMachine({
         api: props.api,
         machineId,
-        enabled: agent === 'cursor' && Boolean(machineId)
+        enabled: agent === 'cursor' && Boolean(machineId) && agentIsAvailableForQueries('cursor')
     })
     const cursorPicker = useMemo(
         () => buildNewSessionCursorPickerState(
@@ -665,7 +707,7 @@ export function NewSession(props: {
         // Gate on positive existence: typing partial paths must not spawn an
         // expensive `opencode acp` probe for a non-existent cwd while the
         // existence check is in flight.
-        enabled: shouldEnableOpencodeModelDiscovery({
+        enabled: agentIsAvailableForQueries('opencode') && shouldEnableOpencodeModelDiscovery({
             agent,
             machineId,
             cwd: deferredDirectory,
@@ -676,7 +718,7 @@ export function NewSession(props: {
         api: props.api,
         machineId,
         cwd: deferredDirectory,
-        enabled: shouldEnableGrokModelDiscovery({
+        enabled: agentIsAvailableForQueries('grok') && shouldEnableGrokModelDiscovery({
             agent,
             machineId,
             cwd: deferredDirectory,
@@ -687,7 +729,9 @@ export function NewSession(props: {
         api: props.api,
         machineId,
         cwd: deferredDirectory,
-        enabled: agent === 'copilot' && deferredDirectoryExists === true
+        enabled: agent === 'copilot'
+            && agentIsAvailableForQueries('copilot')
+            && deferredDirectoryExists === true
     })
     const copilotModelOptions = useMemo(
         () => [
@@ -725,12 +769,12 @@ export function NewSession(props: {
     const agyModelsState = useAgyModels({
         api: props.api,
         machineId,
-        enabled: agent === 'agy' && Boolean(machineId)
+        enabled: agent === 'agy' && Boolean(machineId) && agentIsAvailableForQueries('agy')
     })
     const piModelsState = usePiModelsForMachine({
         api: props.api,
         machineId,
-        enabled: agent === 'pi' && Boolean(machineId)
+        enabled: agent === 'pi' && Boolean(machineId) && agentIsAvailableForQueries('pi')
     })
     // Pi models are grouped by provider (optionSource: 'machine' in the agent
     // config descriptor). Option values are provider-qualified
@@ -2057,6 +2101,7 @@ export function NewSession(props: {
         && !missingWorktreeDirectory
         && !isLaunchPreferenceValidationPending
         && !fastModeSelectionPending
+        && canUseSelectedAgent
     )
 
     return (
@@ -2132,10 +2177,15 @@ export function NewSession(props: {
             />
             <AgentSelector
                 agent={agent}
-                agents={CREATABLE_AGENT_FLAVORS}
-                isDisabled={isFormDisabled}
+                agents={visibleAgentFlavors}
+                isDisabled={isFormDisabled || agentAvailabilityState.isLoading}
                 onAgentChange={handleAgentChange}
             />
+            {agentAvailabilityKnown && !canUseSelectedAgent ? (
+                <div className="px-3 pb-3 text-xs text-[var(--app-hint)]">
+                    {t('newSession.agentUnavailableOnMachine')}
+                </div>
+            ) : null}
             {sessionType !== 'team' && !props.teamId && agent === 'claude' ? (
                 <ClaudeImportActions
                     selectedSession={selectedClaudeImportSession}

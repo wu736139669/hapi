@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
     piModels: [] as PiModelSummary[],
     piModelsLoading: false,
     piModelsError: null as string | null,
+    agentAvailability: [] as Array<{ agent: string; available: boolean; reason?: string }>,
     opencodeModels: [] as Array<{ modelId: string; name?: string }>,
     opencodeModelsLoading: false,
     nextModelValue: 'gpt-5.6-terra',
@@ -55,6 +56,15 @@ vi.mock('@/hooks/mutations/useSpawnSession', () => ({
 }))
 vi.mock('@/hooks/queries/useSessions', () => ({
     useSessions: () => ({ sessions: [], refetch: mocks.refetchSessions })
+}))
+vi.mock('@/hooks/queries/useAgentAvailability', () => ({
+    useAgentAvailability: () => ({
+        agents: mocks.agentAvailability,
+        isLoading: false,
+        error: null,
+        upgradeRequired: false,
+        refetch: vi.fn()
+    })
 }))
 vi.mock('@/hooks/useRecentPaths', () => ({
     useRecentPaths: () => ({
@@ -358,6 +368,7 @@ describe('NewSession launch preferences', () => {
         mocks.piModels = []
         mocks.piModelsLoading = false
         mocks.piModelsError = null
+        mocks.agentAvailability = []
         mocks.nextModelValue = 'gpt-5.6-terra'
         mocks.refetchSessions.mockReset()
         mocks.refetchSessions.mockResolvedValue(undefined)
@@ -392,6 +403,30 @@ describe('NewSession launch preferences', () => {
             expect(screen.getByTestId('reasoning')).toHaveTextContent('xhigh')
             expect(screen.getByTestId('permission-mode')).toHaveTextContent('safe-yolo')
         })
+    })
+
+    it('hides agents unavailable on the selected machine by default', async () => {
+        mocks.agentAvailability = [
+            { agent: 'claude', available: true },
+            { agent: 'codex', available: true },
+            { agent: 'copilot', available: false, reason: 'not_found' },
+        ]
+
+        render(
+            <NewSession
+                api={api}
+                machines={[machine]}
+                initialMachineId="machine-1"
+                initialDirectory="C:\\repo"
+                onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+                onCancel={() => {}}
+            />
+        )
+
+        expect(screen.getByDisplayValue('claude')).toBeInTheDocument()
+        expect(screen.getByDisplayValue('codex')).toBeInTheDocument()
+        expect(screen.queryByDisplayValue('copilot')).not.toBeInTheDocument()
     })
 
     it('does not migrate a legacy YOLO value owned by a non-Codex agent', async () => {

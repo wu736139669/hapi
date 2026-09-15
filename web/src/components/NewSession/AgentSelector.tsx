@@ -35,6 +35,11 @@ export function AgentSelector(props: {
                         <span className="text-sm">{getFlavorLabel(agentType)}</span>
                     </label>
                 ))}
+                {props.agents.length === 0 ? (
+                    <span className="text-sm text-[var(--app-hint)]">
+                        {t('newSession.agentUnavailable')}
+                    </span>
+                ) : null}
             </div>
         </div>
     )

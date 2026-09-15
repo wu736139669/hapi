@@ -136,6 +136,33 @@ describe('listLocalCodexSessionSummaries', () => {
         rmSync(root, { recursive: true, force: true })
     })
 
+    it('keeps the summary scan bounded for large transcripts while retaining the tail preview', () => {
+        const root = mkdtempSync(join(tmpdir(), 'codex-home-'))
+        process.env.CODEX_HOME = root
+        const sessionsDir = join(root, 'sessions', '2026', '07', '19')
+        mkdirSync(sessionsDir, { recursive: true })
+        const sessionFile = join(sessionsDir, 'large.jsonl')
+        const lastMessage = JSON.stringify({
+            type: 'response_item',
+            payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'last prompt' }] }
+        })
+        writeFileSync(sessionFile, [
+            JSON.stringify({ type: 'session_meta', payload: { id: 'large-session-id', cwd: '/tmp/project' } }),
+            JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'first prompt' }] } }),
+            'x'.repeat(96 * 1024),
+            lastMessage
+        ].join('\n'))
+
+        expect(listLocalCodexSessionSummaries()).toEqual([
+            expect.objectContaining({
+                id: 'large-session-id',
+                lastUserMessage: 'last prompt'
+            })
+        ])
+
+        rmSync(root, { recursive: true, force: true })
+    })
+
     it('skips subagent transcripts', () => {
         const root = mkdtempSync(join(tmpdir(), 'codex-home-'))
         process.env.CODEX_HOME = root

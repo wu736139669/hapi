@@ -3,6 +3,7 @@ import { createMessageConnection, StreamMessageReader, StreamMessageWriter } fro
 import { asString, isObject } from '@hapi/protocol';
 import type { CopilotModelsResponse, CopilotModelSummary } from '@hapi/protocol/apiTypes';
 import { createCopilotBackend } from '@/copilot/utils/copilotBackend';
+import { getAgentAvailability } from '@/agent/agentAvailability';
 import { getErrorMessage } from './rpcResponses';
 
 export interface ListCopilotModelsForCwdRequest {
@@ -167,6 +168,16 @@ async function listModelsViaAcpProbe(cwd: string): Promise<{
 }
 
 async function runCopilotProbe(cwd: string): Promise<ListCopilotModelsForCwdResponse> {
+    const availability = getAgentAvailability('copilot');
+    if (!availability.available) {
+        return {
+            success: false,
+            error: `Copilot CLI ${availability.reason === 'invalid_configuration' ? 'configuration is invalid' : 'is not installed or not on PATH'}`,
+            availableModels: [],
+            currentModelId: null,
+        };
+    }
+
     try {
         // Prefer SDK headless models.list — subscription-aware (Student → auto only).
         const sdkModels = await listModelsViaSdkHeadless();
