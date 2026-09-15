@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
     onTeamSuccess: vi.fn(),
     onTeamMemberAdded: vi.fn(),
     addTeamMember: vi.fn(),
+    updateTeam: vi.fn(),
     notification: vi.fn(),
     checkPathsExists: vi.fn(),
     codexModelsLoading: false,
@@ -1179,6 +1180,10 @@ describe('NewSession launch preferences', () => {
         }))
         expect(mocks.onTeamMemberAdded).toHaveBeenCalledWith('team-1')
         expect(mocks.onSuccess).not.toHaveBeenCalled()
+        // Spawn carries the team context so the member gets HAPI_TEAM_* env.
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            team: { id: 'team-1', name: 'Auth 重构', role: 'Builder A' }
+        }))
         // Team type is hidden while adding a member.
         expect(screen.queryByLabelText('team')).toBeNull()
     })
@@ -1186,6 +1191,8 @@ describe('NewSession launch preferences', () => {
     it('creates a team from the team session type', async () => {
         const createTeam = vi.fn().mockResolvedValue({ team: { id: 'team-1' } })
         ;(api as unknown as { createTeam: typeof createTeam }).createTeam = createTeam
+        ;(api as unknown as { updateTeam: typeof mocks.updateTeam }).updateTeam = mocks.updateTeam
+        mocks.updateTeam.mockResolvedValue({ team: { id: 'team-1' } })
         mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-team-lead' })
 
         render(
@@ -1208,12 +1215,15 @@ describe('NewSession launch preferences', () => {
         await waitFor(() => expect(screen.getByTestId('create')).toBeEnabled())
         fireEvent.click(screen.getByTestId('create'))
 
-        await waitFor(() => expect(createTeam).toHaveBeenCalledWith({
-            name: 'Auth 重构',
+        await waitFor(() => expect(createTeam).toHaveBeenCalledWith({ name: 'Auth 重构' }))
+        // The lead is a plain session spawned with the team context, then attached.
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+            sessionType: 'simple',
+            team: { id: 'team-1', name: 'Auth 重构', role: 'lead' }
+        }))
+        await waitFor(() => expect(mocks.updateTeam).toHaveBeenCalledWith('team-1', {
             leadSessionId: 'session-team-lead'
         }))
-        // The lead itself is a plain session.
-        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({ sessionType: 'simple' }))
         expect(mocks.onTeamSuccess).toHaveBeenCalledWith('team-1')
         expect(mocks.onSuccess).not.toHaveBeenCalled()
     })

@@ -823,7 +823,13 @@ export const SpawnSessionRequestSchema = z.object({
     serviceTier: z.enum(['fast', 'standard']).optional(),
     collaborationMode: CodexCollaborationModeSchema.optional(),
     copilotAgentMode: CopilotAgentModeSchema.optional(),
-    startingMode: z.enum(['remote', 'pty']).optional()
+    startingMode: z.enum(['remote', 'pty']).optional(),
+    /** Agent Team context: runner exports HAPI_TEAM_* into the child CLI. */
+    team: z.object({
+        id: z.string().min(1),
+        name: z.string(),
+        role: z.string().min(1)
+    }).optional()
 })
 
 export type SpawnSessionRequest = z.infer<typeof SpawnSessionRequestSchema>

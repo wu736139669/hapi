@@ -483,7 +483,7 @@ export class ApiClient {
 
     async updateTeam(
         teamId: string,
-        body: { name?: string; status?: 'active' | 'archived' }
+        body: { name?: string; status?: 'active' | 'archived'; leadSessionId?: string | null }
     ): Promise<{ team: TeamSummary }> {
         return await this.request<{ team: TeamSummary }>(
             `/api/teams/${encodeURIComponent(teamId)}`,
@@ -1117,7 +1117,8 @@ export class ApiClient {
         serviceTier?: 'fast' | 'standard',
         collaborationMode?: CodexCollaborationMode,
         copilotAgentMode?: CopilotAgentMode,
-        startingMode?: 'remote' | 'pty'
+        startingMode?: 'remote' | 'pty',
+        team?: { id: string; name: string; role: string }
     ): Promise<SpawnResponse> {
         return await this.request<SpawnResponse>(`/api/machines/${encodeURIComponent(machineId)}/spawn`, {
             method: 'POST',
@@ -1134,7 +1135,8 @@ export class ApiClient {
                 serviceTier,
                 collaborationMode,
                 copilotAgentMode,
-                startingMode
+                startingMode,
+                ...(team ? { team } : {})
             })
         })
     }

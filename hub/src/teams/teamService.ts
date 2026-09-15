@@ -346,7 +346,7 @@ export class TeamService {
                 fromSessionId: input.fromSessionId,
                 fromRole: input.fromRole,
                 text: input.fromKind === 'human'
-                    ? `${input.text}\n\n（这是人类在团队群里的消息，直接回复即可，回复会自动同步到群聊。）`
+                    ? `${input.text}\n\n（人类在团队群里对你说话：直接回复本条消息即可，回复会自动同步到群聊；不要为此执行 shell 命令或查询团队成员。）`
                     : input.text
             })
             try {

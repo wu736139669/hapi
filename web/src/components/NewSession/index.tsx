@@ -1923,6 +1923,24 @@ export function NewSession(props: {
                 return
             }
 
+            // Team sessions get their team context at spawn time so the runner
+            // exports HAPI_TEAM_* and the agent's system prompt carries the team
+            // rules. Team mode creates the team first (lead is attached after the
+            // session exists); member mode adopts the session afterwards.
+            let teamForSpawn: { id: string; name: string; role: string } | undefined
+            let createdTeamId: string | undefined
+            if (sessionType === 'team') {
+                const created = await props.api.createTeam({ name: teamName.trim() })
+                createdTeamId = created.team.id
+                teamForSpawn = { id: createdTeamId, name: teamName.trim(), role: 'lead' }
+            } else if (props.teamId) {
+                teamForSpawn = {
+                    id: props.teamId,
+                    name: props.teamName ?? '',
+                    role: memberRole.trim()
+                }
+            }
+
             const result = await spawnSession({
                 machineId,
                 directory: trimmedDirectory,
@@ -1941,6 +1959,7 @@ export function NewSession(props: {
                 serviceTier: resolvedServiceTier,
                 collaborationMode: resolvedCollaborationMode,
                 copilotAgentMode: agent === 'copilot' ? copilotAgentMode : undefined,
+                team: teamForSpawn
             })
 
 
@@ -1950,12 +1969,9 @@ export function NewSession(props: {
                 clearNewSessionFormDraft()
                 setLastUsedMachineId(machineId)
                 addRecentPath(machineId, trimmedDirectory)
-                if (sessionType === 'team') {
-                    const created = await props.api.createTeam({
-                        name: teamName.trim(),
-                        leadSessionId: result.sessionId,
-                    })
-                    props.onTeamSuccess(created.team.id)
+                if (sessionType === 'team' && createdTeamId) {
+                    await props.api.updateTeam(createdTeamId, { leadSessionId: result.sessionId })
+                    props.onTeamSuccess(createdTeamId)
                     return
                 }
                 if (props.teamId) {
