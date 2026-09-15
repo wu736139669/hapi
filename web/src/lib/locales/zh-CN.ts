@@ -1381,6 +1381,8 @@ export default {
   'team.panel.done': '完成',
   'team.panel.empty': '空',
   'team.panel.unassigned': '未指派',
+  'team.task.meta.deps': '依赖 {n}',
+  'team.task.meta.deliverable': '交付物 {text}',
   'team.panel.openSession': '打开成员会话',
   'team.panel.budget': '预算',
   'team.panel.budget.members': '成员 {n}/{max}',

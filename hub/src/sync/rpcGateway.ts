@@ -201,7 +201,7 @@ export class RpcGateway {
         forkSession?: boolean,
         // Agent Team context. The runner exports HAPI_TEAM_* env vars so the
         // child CLI can inject team context and register team MCP tools.
-        team?: { id: string; name: string; role: string }
+        team?: { id: string; name: string; role: string; token?: string }
     ): Promise<
         | { type: 'success'; sessionId: string }
         | {

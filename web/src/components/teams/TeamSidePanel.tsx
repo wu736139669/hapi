@@ -12,6 +12,15 @@ function TaskColumn(props: {
     onSelectTask: (taskId: string) => void
 }) {
     const { t } = useTranslation()
+    const taskMetaSummary = (task: TeamTask): string => {
+        const meta = task.meta ?? {}
+        const deps = Array.isArray(meta.dependsOn) ? (meta.dependsOn as string[]) : []
+        const deliverable = typeof meta.deliverable === 'string' ? meta.deliverable.trim() : ''
+        const parts: string[] = []
+        if (deps.length > 0) parts.push(t('team.task.meta.deps', { n: deps.length }))
+        if (deliverable) parts.push(t('team.task.meta.deliverable', { text: deliverable.slice(0, 40) }))
+        return parts.join(' · ')
+    }
     return (
         <div className="rounded-lg bg-[var(--app-subtle-bg)]/50 p-2">
             <div className="mb-1 text-[11px] font-semibold text-[var(--app-hint)]">
@@ -26,6 +35,7 @@ function TaskColumn(props: {
                 {props.tasks.map((task) => {
                     const assignee = props.members.find((member) => member.sessionId === task.assigneeSessionId)
                     const active = props.activeTaskId === task.id
+                    const metaSummary = taskMetaSummary(task)
                     return (
                         <button
                             key={task.id}
@@ -45,6 +55,9 @@ function TaskColumn(props: {
                                 <span className="truncate">{assignee?.role ?? t('team.panel.unassigned')}</span>
                                 {task.status === 'blocked' ? <span className="text-amber-500">⚠</span> : null}
                             </div>
+                            {metaSummary ? (
+                                <div className="mt-0.5 truncate text-[10px] text-[var(--app-hint)]">{metaSummary}</div>
+                            ) : null}
                         </button>
                     )
                 })}

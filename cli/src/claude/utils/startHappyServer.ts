@@ -31,11 +31,13 @@ import {
     TeamClientError,
     formatTeamMessages,
     formatTeamStatus,
+    formatTeamTasks,
     readTeamMessages,
     probeTeamsSupport,
     resolveCurrentTeam,
     sendTeamMessage,
-    spawnTeamMember
+    spawnTeamMember,
+    updateTeamTask
 } from "@/modules/team/teamClient";
 
 type StartHappyServerOptions = {
@@ -506,17 +508,19 @@ function createHapiMcpServer(
         });
 
         mcp.registerTool<any, any>('spawn_peer', {
-            description: 'Agent Team: spawn a new teammate session (own context window) with a role and an initial task. The member joins this team and reports back via team messages. Spawning costs tokens - prefer reusing idle members; requires user approval.',
+            description: 'Agent Team: spawn a new teammate session (own context window) with a role and an initial task. Members inherit your tool/model/thinking level/permission by default - only override when the human asks. Spawning costs tokens - prefer reusing idle members; requires user approval.',
             title: 'Spawn Team Peer',
             inputSchema: z.object({
                 role: z.string().min(1).describe('Role / display name, e.g. "Builder A" or "Reviewer". Must be unique in the team.'),
                 task: z.string().min(1).optional().describe('Initial task brief delivered to the new member'),
                 agent: z.string().min(1).optional().describe('Agent flavor (claude, codex, ...). Defaults to the caller flavor.'),
-                model: z.string().min(1).optional().describe('Optional model override'),
+                model: z.string().min(1).optional().describe('Optional model override (defaults to yours)'),
+                modelReasoningEffort: z.string().min(1).max(50).optional().describe('Optional thinking-level override (defaults to yours)'),
+                permissionMode: z.string().min(1).max(50).optional().describe('Optional permission-mode override (defaults to yours)'),
                 worktree: z.boolean().optional().describe('Run the member in an isolated git worktree (default: follow the caller)'),
                 worktreeName: z.string().min(1).max(80).optional().describe('Explicit worktree name'),
             }),
-        }, async (args: { role: string; task?: string; agent?: string; model?: string; worktree?: boolean; worktreeName?: string }) => {
+        }, async (args: { role: string; task?: string; agent?: string; model?: string; modelReasoningEffort?: string; permissionMode?: string; worktree?: boolean; worktreeName?: string }) => {
             try {
                 const status = await requireTeam();
                 const result = await spawnTeamMember({
@@ -526,6 +530,8 @@ function createHapiMcpServer(
                     task: args.task,
                     agent: args.agent,
                     model: args.model,
+                    modelReasoningEffort: args.modelReasoningEffort,
+                    permissionMode: args.permissionMode,
                     sessionType: args.worktree === undefined ? undefined : (args.worktree ? 'worktree' : 'simple'),
                     worktreeName: args.worktreeName,
                 });
@@ -538,6 +544,39 @@ function createHapiMcpServer(
                 };
             } catch (error) {
                 return { content: [{ type: 'text' as const, text: `Failed to spawn peer: ${teamErrorText(error)}` }], isError: true };
+            }
+        });
+
+        mcp.registerTool<any, any>('team_task', {
+            description: 'Agent Team: list team tasks or update one. Moving a task to doing/done requires its dependencies to be done; marking a task done requires a deliverable (evidence: branch/commit/files/test result).',
+            title: 'Team Tasks',
+            inputSchema: z.object({
+                action: z.enum(['list', 'update']).describe('list = show team tasks; update = change one task'),
+                taskId: z.string().min(1).optional().describe('Required for action=update'),
+                status: z.enum(['todo', 'doing', 'done', 'blocked']).optional().describe('New status'),
+                deliverable: z.string().min(1).max(2000).optional().describe('Evidence for done: branch/commit/files/test result'),
+                dependsOn: z.array(z.string().min(1)).max(20).optional().describe('Task ids that must be done first'),
+            }),
+        }, async (args: { action: 'list' | 'update'; taskId?: string; status?: 'todo' | 'doing' | 'done' | 'blocked'; deliverable?: string; dependsOn?: string[] }) => {
+            try {
+                const status = await requireTeam();
+                if (args.action === 'list') {
+                    return { content: [{ type: 'text' as const, text: formatTeamTasks(status.tasks, client.sessionId) }], isError: false };
+                }
+                if (!args.taskId) {
+                    return { content: [{ type: 'text' as const, text: 'taskId is required for action=update' }], isError: true };
+                }
+                const task = await updateTeamTask({
+                    sessionId: client.sessionId,
+                    teamId: status.team.id,
+                    taskId: args.taskId,
+                    status: args.status,
+                    deliverable: args.deliverable,
+                    dependsOn: args.dependsOn
+                });
+                return { content: [{ type: 'text' as const, text: `任务「${task?.title ?? args.taskId}」已更新为 ${task?.status ?? 'ok'}` }], isError: false };
+            } catch (error) {
+                return { content: [{ type: 'text' as const, text: `Failed to update task: ${teamErrorText(error)}` }], isError: true };
             }
         });
     }
@@ -670,7 +709,7 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
         ? ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer']
         : ['display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer'];
     if (teamToolsEnabled) {
-        toolNames.push('team_status', 'team_read', 'team_send', 'spawn_peer');
+        toolNames.push('team_status', 'team_read', 'team_send', 'spawn_peer', 'team_task');
     }
     if (options.skillLookup) {
         toolNames.push('skill_lookup');

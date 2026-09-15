@@ -9,11 +9,15 @@ import {
 import { Hono } from 'hono'
 import { RPC_TARGET_MISSING_ERROR_CODE } from '@hapi/protocol/rpcMethods'
 import type { SyncEngine } from '../../sync/syncEngine'
+import type { TeamService } from '../../teams/teamService'
 import { RpcTargetMissingError } from '../../sync/rpcGateway'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireMachine } from './guards'
 
-export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
+export function createMachinesRoutes(
+    getSyncEngine: () => SyncEngine | null,
+    getTeamService?: () => TeamService | null
+): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
     app.get('/machines', (c) => {
@@ -97,6 +101,14 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: `${parsed.data.agent.toUpperCase()} only supports remote mode` }, 400)
         }
         const startingMode = parsed.data.startingMode
+        // Team spawns carry a team-scoped agent token so the child session can
+        // call hub APIs without reading the operator credentials.
+        const teamAgentToken = parsed.data.team
+            ? getTeamService?.()?.getOrCreateAgentToken(c.get('namespace'), parsed.data.team.id) ?? undefined
+            : undefined
+        const teamPayload = parsed.data.team
+            ? { ...parsed.data.team, ...(teamAgentToken ? { token: teamAgentToken } : {}) }
+            : undefined
 
         const result = await engine.spawnSession(
             machineId,
@@ -115,7 +127,7 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             parsed.data.collaborationMode,
             parsed.data.copilotAgentMode,
             startingMode,
-            parsed.data.team
+            teamPayload
         )
         return c.json(result)
     })

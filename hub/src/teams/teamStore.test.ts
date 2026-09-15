@@ -50,6 +50,45 @@ describe('TeamStore pending pings', () => {
     })
 })
 
+describe('TeamStore agent tokens', () => {
+    it('stores tokens, reuses the latest live one and drops expired ones', () => {
+        const directory = mkdtempSync(join(tmpdir(), 'hapi-team-store-'))
+        const dbPath = join(directory, 'teams.db')
+        try {
+            const store = new TeamStore(dbPath)
+            const team = store.createTeam({ namespace: 'default', name: 'Growth' })
+            store.insertAgentToken({
+                token: 'hapi_team_old',
+                teamId: team.id,
+                namespace: 'default',
+                label: null,
+                createdAt: 1_000,
+                expiresAt: 2_000
+            })
+            expect(store.findAgentToken('hapi_team_old')?.teamId).toBe(team.id)
+            expect(store.latestAgentToken(team.id, 1_500)?.token).toBe('hapi_team_old')
+            // Expired tokens are not reused.
+            expect(store.latestAgentToken(team.id, 2_500)).toBeNull()
+
+            store.insertAgentToken({
+                token: 'hapi_team_new',
+                teamId: team.id,
+                namespace: 'default',
+                label: 'lead',
+                createdAt: 3_000,
+                expiresAt: 4_000
+            })
+            expect(store.latestAgentToken(team.id, 3_500)?.token).toBe('hapi_team_new')
+
+            expect(store.deleteExpiredAgentTokens(2_500)).toBe(1)
+            expect(store.findAgentToken('hapi_team_old')).toBeNull()
+            store.close()
+        } finally {
+            rmSync(directory, { recursive: true, force: true })
+        }
+    })
+})
+
 describe('TeamStore schema', () => {
     it('creates the v1 schema in a dedicated file', () => {
         withStore((store, dbPath) => {
@@ -68,6 +107,7 @@ describe('TeamStore schema', () => {
             expect(names).toContain('team_tasks')
             expect(names).toContain('team_messages')
             expect(names).toContain('team_pending_pings')
+            expect(names).toContain('team_agent_tokens')
         })
     })
 

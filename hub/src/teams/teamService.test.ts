@@ -368,6 +368,71 @@ describe('TeamService spawning', () => {
         }
     })
 
+    it('spawned members inherit the caller runtime config', async () => {
+        const { runtime, sessions, spawnInputs } = createRuntime()
+        const service = new TeamService(new TeamStore(':memory:'), () => {}, runtime)
+        sessions.set('sess-lead', {
+            id: 'sess-lead',
+            active: true,
+            thinking: false,
+            machineId: 'machine-1',
+            directory: '/repo',
+            flavor: 'opencode',
+            inWorktree: false,
+            model: 'opencode-go/deepseek-v4.1-flash',
+            modelReasoningEffort: 'max',
+            effort: null,
+            permissionMode: 'yolo'
+        })
+        try {
+            service.createTeam('alpha', { name: 'Refactor auth', leadSessionId: 'sess-lead' })
+            await service.spawnMember('sess-lead', 'alpha', { role: 'builder' })
+            expect(spawnInputs[0]).toMatchObject({
+                agent: 'opencode',
+                model: 'opencode-go/deepseek-v4.1-flash',
+                modelReasoningEffort: 'max',
+                permissionMode: 'yolo',
+                yolo: true
+            })
+        } finally {
+            service.close()
+        }
+    })
+
+    it('explicit spawn fields override the inherited config', async () => {
+        const { runtime, sessions, spawnInputs } = createRuntime()
+        const service = new TeamService(new TeamStore(':memory:'), () => {}, runtime)
+        sessions.set('sess-lead', {
+            id: 'sess-lead',
+            active: true,
+            thinking: false,
+            machineId: 'machine-1',
+            directory: '/repo',
+            flavor: 'opencode',
+            inWorktree: false,
+            model: 'opencode-go/deepseek-v4.1-flash',
+            modelReasoningEffort: 'max',
+            permissionMode: 'yolo'
+        })
+        try {
+            service.createTeam('alpha', { name: 'Refactor auth', leadSessionId: 'sess-lead' })
+            await service.spawnMember('sess-lead', 'alpha', {
+                role: 'builder',
+                model: 'opencode/other-model',
+                modelReasoningEffort: 'low',
+                permissionMode: 'acceptEdits'
+            })
+            expect(spawnInputs[0]).toMatchObject({
+                model: 'opencode/other-model',
+                modelReasoningEffort: 'low',
+                permissionMode: 'acceptEdits',
+                yolo: false
+            })
+        } finally {
+            service.close()
+        }
+    })
+
     it('enforces member budget and duplicate roles', async () => {
         const { runtime, sessions } = createRuntime()
         const service = new TeamService(new TeamStore(':memory:'), () => {}, runtime)
@@ -829,7 +894,10 @@ describe('TeamService task updates', () => {
             const spawned = await service.spawnMember('sess-lead', 'alpha', { role: 'builder', task: 'do it' })
             delivered.length = 0
 
-            const updated = await service.updateTask('sess-builder', 'alpha', spawned.taskId!, { status: 'done' })
+            const updated = await service.updateTask('sess-builder', 'alpha', spawned.taskId!, {
+                status: 'done',
+                deliverable: 'branch hapi-builder; tests pass'
+            })
             expect(updated.status).toBe('done')
             expect(updated.teamId).toBe(team.id)
             expect(delivered).toHaveLength(1)
@@ -839,6 +907,86 @@ describe('TeamService task updates', () => {
             await expect(
                 service.updateTask('sess-builder', 'alpha', 'missing-task', { status: 'done' })
             ).rejects.toThrow('not found')
+        } finally {
+            service.close()
+        }
+    })
+
+    it('requires a deliverable when a member marks a task done', async () => {
+        const { runtime, sessions } = createRuntime()
+        const service = new TeamService(new TeamStore(':memory:'), () => {}, runtime)
+        addCallerSession(sessions)
+        try {
+            service.createTeam('alpha', { name: 'Refactor auth', leadSessionId: 'sess-lead' })
+            const spawned = await service.spawnMember('sess-lead', 'alpha', { role: 'builder', task: 'do it' })
+            await expect(
+                service.updateTask('sess-builder', 'alpha', spawned.taskId!, { status: 'done' })
+            ).rejects.toThrow('交付物')
+
+            // Humans may close tasks freely.
+            const closed = await service.updateTask(null, 'alpha', spawned.taskId!, { status: 'done' })
+            expect(closed.status).toBe('done')
+        } finally {
+            service.close()
+        }
+    })
+
+    it('requires dependencies to be done before a member can progress', async () => {
+        const { runtime, sessions } = createRuntime()
+        const service = new TeamService(new TeamStore(':memory:'), () => {}, runtime)
+        addCallerSession(sessions)
+        try {
+            const team = service.createTeam('alpha', { name: 'Refactor auth', leadSessionId: 'sess-lead' })
+            const first = await service.spawnMember('sess-lead', 'alpha', { role: 'builder', task: 'design' })
+            const second = await service.createTaskForHuman('alpha', team.id, {
+                title: 'implement',
+                dependsOn: [first.taskId!]
+            })
+            await expect(
+                service.updateTask('sess-builder', 'alpha', second.id, { status: 'doing' })
+            ).rejects.toThrow('依赖未完成')
+            await expect(
+                service.updateTask('sess-builder', 'alpha', second.id, { dependsOn: ['not-a-task'] })
+            ).rejects.toThrow('依赖任务不存在')
+
+            await service.updateTask('sess-builder', 'alpha', first.taskId!, {
+                status: 'done',
+                deliverable: 'design doc'
+            })
+            const progressed = await service.updateTask('sess-builder', 'alpha', second.id, { status: 'doing' })
+            expect(progressed.status).toBe('doing')
+        } finally {
+            service.close()
+        }
+    })
+})
+
+describe('TeamService agent tokens', () => {
+    it('issues, resolves and reuses team-scoped tokens', () => {
+        const service = new TeamService(new TeamStore(':memory:'), () => {}, createRuntime().runtime)
+        try {
+            const team = service.createTeam('alpha', { name: 'Refactor auth' })
+            const issued = service.issueAgentToken('alpha', team.id, { label: 'lead' })
+            expect(issued.token.startsWith('hapi_team_')).toBe(true)
+            expect(service.resolveAgentToken(issued.token)).toEqual({ teamId: team.id, namespace: 'alpha' })
+            expect(service.resolveAgentToken('hapi_team_nope')).toBeNull()
+            expect(service.resolveAgentToken('not-a-team-token')).toBeNull()
+            expect(service.getOrCreateAgentToken('alpha', team.id)).toBe(issued.token)
+        } finally {
+            service.close()
+        }
+    })
+
+    it('rejects expired tokens', () => {
+        const store = new TeamStore(':memory:')
+        const service = new TeamService(store, () => {}, null)
+        try {
+            const team = service.createTeam('alpha', { name: 'Refactor auth' })
+            const issued = service.issueAgentToken('alpha', team.id)
+            const record = store.findAgentToken(issued.token)
+            expect(record).not.toBeNull()
+            store.insertAgentToken({ ...record!, expiresAt: Date.now() - 1000 })
+            expect(service.resolveAgentToken(issued.token)).toBeNull()
         } finally {
             service.close()
         }

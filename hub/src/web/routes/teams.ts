@@ -4,6 +4,7 @@ import {
     AddTeamMemberRequestSchema,
     CreateTeamRequestSchema,
     CreateTeamTaskRequestSchema,
+    IssueTeamAgentTokenRequestSchema,
     TeamHumanMessageRequestSchema,
     TeamSendMessageRequestSchema,
     TeamSpawnMemberRequestSchema,
@@ -116,6 +117,8 @@ export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
                 task: parsed.data.task,
                 agent: parsed.data.agent,
                 model: parsed.data.model,
+                modelReasoningEffort: parsed.data.modelReasoningEffort,
+                permissionMode: parsed.data.permissionMode,
                 sessionType: parsed.data.sessionType,
                 worktreeName: parsed.data.worktreeName,
                 yolo: parsed.data.yolo
@@ -155,10 +158,29 @@ export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
         try {
             const task = await teams.createTaskForHuman(c.get('namespace'), c.req.param('id'), {
                 title: parsed.data.title,
-                assigneeSessionId: parsed.data.assigneeSessionId ?? null
+                assigneeSessionId: parsed.data.assigneeSessionId ?? null,
+                dependsOn: parsed.data.dependsOn
             })
             c.header('Cache-Control', 'no-store')
             return c.json({ task }, 201)
+        } catch (error) {
+            return teamErrorResponse(c, error)
+        }
+    })
+
+    app.post('/teams/:id/agent-tokens', async (c) => {
+        const json = await c.req.json().catch(() => ({}))
+        const parsed = IssueTeamAgentTokenRequestSchema.safeParse(json ?? {})
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+        try {
+            const issued = teams.issueAgentToken(c.get('namespace'), c.req.param('id'), {
+                ...(parsed.data.label ? { label: parsed.data.label } : {}),
+                ...(parsed.data.ttlMs ? { ttlMs: parsed.data.ttlMs } : {})
+            })
+            c.header('Cache-Control', 'no-store')
+            return c.json(issued, 201)
         } catch (error) {
             return teamErrorResponse(c, error)
         }
@@ -185,7 +207,9 @@ export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
                 c.req.param('taskId'),
                 {
                     ...(parsed.data.status !== undefined ? { status: parsed.data.status } : {}),
-                    ...(parsed.data.assigneeSessionId !== undefined ? { assigneeSessionId: parsed.data.assigneeSessionId } : {})
+                    ...(parsed.data.assigneeSessionId !== undefined ? { assigneeSessionId: parsed.data.assigneeSessionId } : {}),
+                    ...(parsed.data.deliverable !== undefined ? { deliverable: parsed.data.deliverable } : {}),
+                    ...(parsed.data.dependsOn !== undefined ? { dependsOn: parsed.data.dependsOn } : {})
                 }
             )
             c.header('Cache-Control', 'no-store')

@@ -307,7 +307,8 @@ function createWebApp(options: {
     }))
 
     app.use('/api/*', createAuthMiddleware(options.jwtSecret, {
-        isGuestTokenActive: (shareToken) => options.store.sessionShares.getActiveByToken(shareToken) !== null
+        isGuestTokenActive: (shareToken) => options.store.sessionShares.getActiveByToken(shareToken) !== null,
+        resolveTeamAgentToken: (token) => options.getTeamService?.()?.resolveAgentToken(token) ?? null
     }))
     app.route('/api', createSessionShareRoutes({ store: options.store, jwtSecret: options.jwtSecret, getSyncEngine: options.getSyncEngine }))
     app.route('/api', createEventsRoutes(options.getSseManager, options.getSyncEngine, options.getVisibilityTracker, {
@@ -316,7 +317,7 @@ function createWebApp(options: {
     app.route('/api', createSessionsRoutes(options.getSyncEngine))
     app.route('/api', createMessagesRoutes(options.getSyncEngine))
     app.route('/api', createPermissionsRoutes(options.getSyncEngine))
-    app.route('/api', createMachinesRoutes(options.getSyncEngine))
+    app.route('/api', createMachinesRoutes(options.getSyncEngine, options.getTeamService))
     app.route('/api', createStorageRoutes(configuration.dbPath))
     app.route('/api', createHubSettingsRoutes(configuration.dataDir, () => configuration.teamsEnabled))
     const teamService = options.getTeamService?.() ?? null
