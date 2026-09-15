@@ -1419,4 +1419,5 @@ export default {
   'newSession.member.task': 'Task brief (optional)',
   'newSession.member.taskPlaceholder': 'What should this member do first?',
   'newSession.member.roleRequired': 'Enter a role name for the new member',
+  'team.memory.repoHint': 'Team memory lives with the code: <repo>/.hapi/team/ (created when the lead session starts). Open it here or in the lead session files.',
 } as const

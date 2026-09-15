@@ -106,6 +106,8 @@ export const MetadataSchema = z.object({
     tools: z.array(z.string()).optional(),
     slashCommands: z.array(z.string()).optional(),
     homeDir: z.string().optional(),
+    /** Absolute path of the team memory dir (repo-local, team sessions only). */
+    teamMemoryPath: z.string().optional(),
     happyHomeDir: z.string().optional(),
     happyLibDir: z.string().optional(),
     happyToolsDir: z.string().optional(),

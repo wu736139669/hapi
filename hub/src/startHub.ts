@@ -289,8 +289,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         ? new TeamService(
             new TeamStore(config.teamsDbPath),
             (event) => syncEngine?.publishEvent(event),
-            teamRuntime,
-            { memoryRoot: join(config.dataDir, 'teams') }
+            teamRuntime
         )
         : null
     if (teamService) {

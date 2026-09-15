@@ -224,30 +224,6 @@ export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
         }
     })
 
-    app.get('/teams/:id/memory', async (c) => {
-        c.header('Cache-Control', 'no-store')
-        try {
-            const files = await teams.listMemoryFiles(c.get('namespace'), c.req.param('id'))
-            return c.json({ files })
-        } catch (error) {
-            return teamErrorResponse(c, error)
-        }
-    })
-
-    app.get('/teams/:id/memory/file', async (c) => {
-        c.header('Cache-Control', 'no-store')
-        const path = c.req.query('path')
-        if (!path) {
-            return c.json({ error: 'path is required' }, 400)
-        }
-        try {
-            const file = await teams.readMemoryFile(c.get('namespace'), c.req.param('id'), path)
-            return c.json(file)
-        } catch (error) {
-            return teamErrorResponse(c, error)
-        }
-    })
-
     app.post('/teams/:id/human-messages', async (c) => {
         const json = await c.req.json().catch(() => null)
         const parsed = TeamHumanMessageRequestSchema.safeParse(json)

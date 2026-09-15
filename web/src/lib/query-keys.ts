@@ -45,6 +45,4 @@ export const queryKeys = {
     teams: ['teams'] as const,
     team: (teamId: string) => ['team', teamId] as const,
     teamMessages: (teamId: string) => ['team-messages', teamId] as const,
-    teamMemory: (teamId: string) => ['team-memory', teamId] as const,
-    teamMemoryFile: (teamId: string, path: string) => ['team-memory-file', teamId, path] as const,
 }

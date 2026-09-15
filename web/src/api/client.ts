@@ -43,7 +43,7 @@ import type {
     SessionShareCreateResponse,
     SessionShareExchangeResponse
 } from '@/types/api'
-import type { TeamDetail, TeamMemoryFile, TeamMemoryFileContent, TeamMessage, TeamSummary, TeamTask, TeamWithMembers } from '@/types/team'
+import type { TeamDetail, TeamMessage, TeamSummary, TeamTask, TeamWithMembers } from '@/types/team'
 import type {
     AgentAvailabilityResponse,
     AgyModelsResponse,
@@ -434,19 +434,6 @@ export class ApiClient {
         return await this.request<{ message: TeamMessage }>(
             `/api/teams/${encodeURIComponent(teamId)}/human-messages`,
             { method: 'POST', body: JSON.stringify(body) }
-        )
-    }
-
-    async getTeamMemory(teamId: string): Promise<{ files: TeamMemoryFile[] }> {
-        return await this.request<{ files: TeamMemoryFile[] }>(
-            `/api/teams/${encodeURIComponent(teamId)}/memory`
-        )
-    }
-
-    async getTeamMemoryFile(teamId: string, path: string): Promise<TeamMemoryFileContent> {
-        const params = new URLSearchParams({ path })
-        return await this.request<TeamMemoryFileContent>(
-            `/api/teams/${encodeURIComponent(teamId)}/memory/file?${params.toString()}`
         )
     }
 

@@ -7,14 +7,9 @@ import { TeamDialog } from './TeamDialog'
 
 const MARKDOWN_EXTENSIONS = ['.md', '.markdown']
 
-function formatSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
 export function TeamMemoryDialog(props: {
-    teamId: string
+    leadSessionId: string
+    /** Absolute path of the file on the lead's machine. */
     path: string | null
     onClose: () => void
 }) {
@@ -22,47 +17,45 @@ export function TeamMemoryDialog(props: {
     const { t } = useTranslation()
 
     const query = useQuery({
-        queryKey: queryKeys.teamMemoryFile(props.teamId, props.path ?? ''),
+        queryKey: queryKeys.sessionFile(props.leadSessionId, props.path ?? ''),
         queryFn: async () => {
             if (!api || !props.path) throw new Error('API unavailable')
-            return await api.getTeamMemoryFile(props.teamId, props.path)
+            return await api.readSessionFile(props.leadSessionId, props.path)
         },
         enabled: Boolean(api && props.path),
-        staleTime: 10_000,
+        staleTime: 5_000,
         retry: false,
     })
 
-    const isMarkdown = props.path ? MARKDOWN_EXTENSIONS.some((extension) => props.path!.toLowerCase().endsWith(extension)) : false
+    const isMarkdown = props.path
+        ? MARKDOWN_EXTENSIONS.some((extension) => props.path!.toLowerCase().endsWith(extension))
+        : false
+    const content = query.data?.success ? query.data.content ?? '' : ''
 
     return (
         <TeamDialog
             open={Boolean(props.path)}
-            title={props.path ?? ''}
+            title={props.path?.split('/').pop() ?? ''}
             onClose={props.onClose}
             footer={null}
         >
             <div className="max-h-[60vh] min-h-[120px] overflow-auto">
                 {query.isLoading ? (
                     <div className="py-6 text-center text-sm text-[var(--app-hint)]">{t('team.memory.loading')}</div>
-                ) : query.error ? (
+                ) : query.error || (query.data && !query.data.success) ? (
                     <div className="py-6 text-center text-sm text-red-600">
-                        {query.error instanceof Error ? query.error.message : t('team.memory.failed')}
+                        {query.data?.error ?? (query.error instanceof Error ? query.error.message : t('team.memory.failed'))}
                     </div>
-                ) : query.data ? (
+                ) : (
                     <>
-                        <div className="mb-2 flex items-center justify-between text-[11px] text-[var(--app-hint)]">
-                            <span>
-                                {new Date(query.data.updatedAt).toLocaleString()}
-                            </span>
-                            <span>{formatSize(new Blob([query.data.content]).size)}</span>
-                        </div>
+                        <div className="mb-2 truncate font-mono text-[11px] text-[var(--app-hint)]">{props.path}</div>
                         {isMarkdown ? (
-                            <MarkdownRenderer content={query.data.content} className="text-sm" preserveSingleLineBreaks standalone />
+                            <MarkdownRenderer content={content} className="text-sm" preserveSingleLineBreaks standalone />
                         ) : (
-                            <pre className="whitespace-pre-wrap break-words text-xs text-[var(--app-fg)]">{query.data.content}</pre>
+                            <pre className="whitespace-pre-wrap break-words text-xs text-[var(--app-fg)]">{content}</pre>
                         )}
                     </>
-                ) : null}
+                )}
             </div>
         </TeamDialog>
     )

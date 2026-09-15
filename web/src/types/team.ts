@@ -57,14 +57,3 @@ export interface TeamDetail {
     tasks: TeamTask[]
 }
 
-export interface TeamMemoryFile {
-    path: string
-    size: number
-    updatedAt: number
-}
-
-export interface TeamMemoryFileContent {
-    path: string
-    content: string
-    updatedAt: number
-}

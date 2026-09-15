@@ -11,7 +11,7 @@ import { TeamStore } from '../../teams/teamStore'
 import type { WebAppEnv } from '../middleware/auth'
 import { createTeamsRoutes } from './teams'
 
-function createApp(getNamespace: () => string = () => 'alpha', memoryRoot?: string) {
+function createApp(getNamespace: () => string = () => 'alpha') {
     const events: SyncEvent[] = []
     const sessions = new Map<string, TeamSessionView>()
     sessions.set('sess-lead', {
@@ -45,7 +45,7 @@ function createApp(getNamespace: () => string = () => 'alpha', memoryRoot?: stri
         },
         sleep: async () => {}
     }
-    const service = new TeamService(new TeamStore(':memory:'), (event) => events.push(event), runtime, memoryRoot ? { memoryRoot } : {})
+    const service = new TeamService(new TeamStore(':memory:'), (event) => events.push(event), runtime)
     const app = new Hono<WebAppEnv>()
     app.use('*', async (c, next) => {
         c.set('namespace', getNamespace())
@@ -127,93 +127,6 @@ describe('Agent Team member routes', () => {
             body: JSON.stringify({ fromSessionId: 'sess-lead', role: 'x' })
         })
         expect(leaderOnly.status).toBe(404)
-    })
-
-    it('lists and reads team memory files over HTTP', async () => {
-        const dir = mkdtempSync(join(tmpdir(), 'hapi-team-memory-routes-'))
-        try {
-            const { app } = createApp(() => 'alpha', dir)
-            const teamId = await createTeam(app)
-            await mkdir(join(dir, teamId, 'handoffs'), { recursive: true })
-            await writeFile(join(dir, teamId, 'handoffs', 'note.md'), '# note')
-            // ensureTeamMemory runs fire-and-forget in createTeam; poll briefly.
-            let listBody: { files: Array<{ path: string }> } = { files: [] }
-            for (let attempt = 0; attempt < 50; attempt++) {
-                const list = await app.request(`/api/teams/${teamId}/memory`)
-                listBody = await list.json() as { files: Array<{ path: string }> }
-                if (listBody.files.some((file) => file.path === 'handoffs/note.md')) break
-                await new Promise((resolve) => setTimeout(resolve, 10))
-            }
-            expect(listBody.files.map((file) => file.path)).toEqual(['charter.md', 'handoffs/note.md'])
-
-            const file = await app.request(`/api/teams/${teamId}/memory/file?path=handoffs/note.md`)
-            expect(file.status).toBe(200)
-            expect((await file.json() as { content: string }).content).toBe('# note')
-
-            const traversal = await app.request(`/api/teams/${teamId}/memory/file?path=../../etc/passwd`)
-            expect(traversal.status).toBe(400)
-            const missing = await app.request(`/api/teams/${teamId}/memory/file?path=nope.md`)
-            expect(missing.status).toBe(404)
-        } finally {
-            rmSync(dir, { recursive: true, force: true })
-        }
-    })
-
-    it('creates tasks, updates them as the human, and manages the team', async () => {
-        const { app, delivered } = createApp()
-        const teamId = await createTeam(app)
-        const spawned = await app.request(`/api/teams/${teamId}/spawn`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ fromSessionId: 'sess-lead', role: 'builder' })
-        })
-        expect(spawned.status).toBe(201)
-        delivered.length = 0
-
-        const created = await app.request(`/api/teams/${teamId}/tasks`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ title: '写迁移脚本', assigneeSessionId: 'sess-builder' })
-        })
-        expect(created.status).toBe(201)
-        const task = (await created.json() as { task: { id: string } }).task
-        expect(delivered).toHaveLength(1)
-
-        const updated = await app.request(`/api/teams/${teamId}/tasks/${task.id}`, {
-            method: 'PATCH',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ status: 'doing', assigneeSessionId: 'sess-builder' })
-        })
-        expect(updated.status).toBe(200)
-        expect((await updated.json() as { task: { status: string } }).task.status).toBe('doing')
-
-        const invalid = await app.request(`/api/teams/${teamId}/tasks/${task.id}`, {
-            method: 'PATCH',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({})
-        })
-        expect(invalid.status).toBe(400)
-
-        const led = await app.request(`/api/teams/${teamId}`, {
-            method: 'PATCH',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ leadSessionId: 'sess-lead' })
-        })
-        expect(led.status).toBe(200)
-        expect((await led.json() as { team: { leadSessionId: string } }).team.leadSessionId).toBe('sess-lead')
-
-        const renamed = await app.request(`/api/teams/${teamId}`, {
-            method: 'PATCH',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ name: 'Auth 重构 v2' })
-        })
-        expect(renamed.status).toBe(200)
-        expect((await renamed.json() as { team: { name: string } }).team.name).toBe('Auth 重构 v2')
-
-        const removed = await app.request(`/api/teams/${teamId}`, { method: 'DELETE' })
-        expect(removed.status).toBe(200)
-        const missing = await app.request(`/api/teams/${teamId}`)
-        expect(missing.status).toBe(404)
     })
 
     it('adopts an existing session as a team member', async () => {

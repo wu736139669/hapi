@@ -1,5 +1,3 @@
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
-import { join, resolve, sep } from 'node:path'
 import type { AgentFlavor, SyncEvent } from '@hapi/protocol/types'
 
 import {
@@ -68,18 +66,6 @@ export class TeamServiceError extends Error {
     }
 }
 
-export interface TeamMemoryFile {
-    path: string
-    size: number
-    updatedAt: number
-}
-
-export interface TeamMemoryFileContent {
-    path: string
-    content: string
-    updatedAt: number
-}
-
 export interface TeamStatus {
     team: TeamRecord
     me: TeamMemberRecord
@@ -114,7 +100,6 @@ export class TeamService {
     private readonly store: TeamStore
     private readonly publish: (event: SyncEvent) => void
     private readonly runtime: TeamRuntime | null
-    private readonly memoryRoot: string | null
     private readonly messageLog = new Map<string, number[]>()
     /** Sessions already announced as down, keyed `${teamId}:${sessionId}`. */
     private readonly downNotified = new Set<string>()
@@ -128,13 +113,11 @@ export class TeamService {
     constructor(
         store: TeamStore,
         publish: (event: SyncEvent) => void = () => {},
-        runtime: TeamRuntime | null = null,
-        options: { memoryRoot?: string } = {}
+        runtime: TeamRuntime | null = null
     ) {
         this.store = store
         this.publish = publish
         this.runtime = runtime
-        this.memoryRoot = options.memoryRoot ?? null
     }
 
     // ------------------------------------------------------------ team basics
@@ -173,8 +156,6 @@ export class TeamService {
             this.store.addMember(team.id, input.leadSessionId, 'lead')
         }
         this.publishUpdate(team)
-        // Fire-and-forget: materialize the team memory dir (charter.md + handoffs/).
-        void this.ensureTeamMemory(team).catch(() => {})
         // Tell the lead what it is - a lead session spawned through the normal
         // spawn path has no HAPI_TEAM_* env, so the brief is its team context.
         if (input.leadSessionId) {
@@ -737,7 +718,7 @@ export class TeamService {
                 fromKind: 'hub',
                 fromSessionId: null,
                 fromRole: 'hub',
-                text: buildLeadBrief(team, this.teamMemoryDir(team.id))
+                text: buildLeadBrief(team)
             })
             await runtime.deliverPeerMessage({ sessionId: leadSessionId, text })
         } catch {
@@ -777,103 +758,12 @@ export class TeamService {
                 fromKind: team.leadSessionId ? 'session' : 'hub',
                 fromSessionId: team.leadSessionId,
                 fromRole: 'lead',
-                text: buildAssignmentBrief(team, role, taskBrief, taskId, this.teamMemoryDir(team.id))
+                text: buildAssignmentBrief(team, role, taskBrief, taskId)
             })
             await runtime.deliverPeerMessage({ sessionId: targetSessionId, text })
         } catch {
             // Best-effort; the task stays visible via team_status.
         }
-    }
-
-    // ----------------------------------------------------------------- memory
-
-    /** Absolute path of a team's memory dir, or null when memory is disabled. */
-    teamMemoryDir(teamId: string): string | null {
-        return this.memoryRoot ? join(this.memoryRoot, teamId) : null
-    }
-
-    private async ensureTeamMemory(team: TeamRecord): Promise<void> {
-        const dir = this.teamMemoryDir(team.id)
-        if (!dir) return
-        await mkdir(join(dir, 'handoffs'), { recursive: true })
-        const charter = join(dir, 'charter.md')
-        try {
-            await stat(charter)
-        } catch {
-            await writeFile(charter, charterTemplate(team), 'utf8')
-        }
-    }
-
-    async listMemoryFiles(namespace: string, teamId: string): Promise<TeamMemoryFile[]> {
-        const team = this.store.getTeam(teamId, namespace)
-        if (!team) {
-            throw new TeamServiceError('not_found', 'Team not found')
-        }
-        const dir = this.teamMemoryDir(team.id)
-        if (!dir) return []
-
-        const files: TeamMemoryFile[] = []
-        const walk = async (current: string, prefix: string, depth: number): Promise<void> => {
-            if (depth > 3) return
-            let entries
-            try {
-                entries = await readdir(current, { withFileTypes: true })
-            } catch {
-                return
-            }
-            for (const entry of entries) {
-                if (entry.name.startsWith('.')) continue
-                const relative = prefix ? `${prefix}/${entry.name}` : entry.name
-                if (entry.isDirectory()) {
-                    await walk(join(current, entry.name), relative, depth + 1)
-                    continue
-                }
-                if (!entry.isFile()) continue
-                try {
-                    const info = await stat(join(current, entry.name))
-                    files.push({ path: relative, size: info.size, updatedAt: info.mtimeMs })
-                } catch {
-                }
-            }
-        }
-        await walk(dir, '', 1)
-        return files.sort((a, b) => a.path.localeCompare(b.path))
-    }
-
-    async readMemoryFile(namespace: string, teamId: string, relativePath: string): Promise<TeamMemoryFileContent> {
-        const team = this.store.getTeam(teamId, namespace)
-        if (!team) {
-            throw new TeamServiceError('not_found', 'Team not found')
-        }
-        const dir = this.teamMemoryDir(team.id)
-        if (!dir) {
-            throw new TeamServiceError('not_found', 'File not found')
-        }
-        const normalized = sanitizeRelativePath(relativePath)
-        const root = resolve(dir)
-        const absolute = resolve(root, normalized)
-        if (absolute !== root && !absolute.startsWith(root + sep)) {
-            throw new TeamServiceError('invalid', 'Invalid path')
-        }
-        let info
-        try {
-            info = await stat(absolute)
-        } catch {
-            throw new TeamServiceError('not_found', 'File not found')
-        }
-        if (!info.isFile()) {
-            throw new TeamServiceError('not_found', 'File not found')
-        }
-        if (info.size > MAX_MEMORY_FILE_BYTES) {
-            throw new TeamServiceError('invalid', 'File is too large to preview')
-        }
-        let content: string
-        try {
-            content = await readFile(absolute, 'utf8')
-        } catch {
-            throw new TeamServiceError('invalid', 'File is not readable as text')
-        }
-        return { path: normalized, content, updatedAt: info.mtimeMs }
     }
 
     /**
@@ -1080,15 +970,14 @@ function taskTitle(brief: string): string {
     return title.length > 120 ? `${title.slice(0, 117)}...` : title
 }
 
-function buildLeadBrief(team: TeamRecord, memoryDir: string | null): string {
+function buildLeadBrief(team: TeamRecord): string {
     return [
         `你是 HAPI 团队「${team.name}」的 Lead。`,
         '',
         '职责：拆解任务、派生成员、汇总进展，必要时把决策升级给人类。',
         '可用工具：team_status（成员/任务/预算）、team_read（拉取团队消息，广播不会主动推送）、team_send（汇报/分派/通知人类）、spawn_peer（派生成员，需用户批准）。',
         '需要人类决策时用 team_send 的 to="human" 或 kind="decision"；人类也会在群聊里发言、加成员或调整任务。',
-        '你在自己会话里的正常回复会自动同步到团队群聊（人类可见），不需要用 team_send 转述。',
-        ...(memoryDir ? ['', `团队记忆目录（hub 主机）：${memoryDir}/（charter.md 是团队规约，交接产物写到 handoffs/）`] : [])
+        '你在自己会话里的正常回复会自动同步到团队群聊（人类可见），不需要用 team_send 转述。'
     ].join('\n')
 }
 
@@ -1100,15 +989,13 @@ function buildAssignmentBrief(
     team: TeamRecord,
     role: string,
     taskBrief: string,
-    taskId: string | null,
-    memoryDir: string | null
+    taskId: string | null
 ): string {
     return [
         `你已被加入 HAPI 团队「${team.name}」，角色：${role}。`,
         '',
         `你的任务：${taskBrief}`,
         ...(taskId ? [`任务 id：${taskId}`] : []),
-        ...(memoryDir ? ['', `团队记忆目录（hub 主机）：${memoryDir}/（charter.md 是团队规约，交接产物写到 handoffs/）`] : []),
         '',
         '团队规范：',
         '- 开工前可调用 team_read 拉取团队消息（广播不会主动推送）。',
@@ -1123,40 +1010,6 @@ function defaultWorktreeName(team: TeamRecord, role: string): string {
     const teamSlug = slug(team.name)
     const roleSlug = slug(role)
     return teamSlug ? `${teamSlug}-${roleSlug}` : roleSlug
-}
-
-const MAX_MEMORY_FILE_BYTES = 256 * 1024
-
-function sanitizeRelativePath(value: string): string {
-    const normalized = value.replace(/\\/g, '/').trim()
-    if (!normalized || normalized.includes('\0')) {
-        throw new TeamServiceError('invalid', 'Invalid path')
-    }
-    const segments = normalized.split('/')
-    if (normalized.startsWith('/') || segments.some((segment) => segment === '' || segment === '..')) {
-        throw new TeamServiceError('invalid', 'Invalid path')
-    }
-    return normalized
-}
-
-function charterTemplate(team: TeamRecord): string {
-    return [
-        `# ${team.name} — 团队规约`,
-        '',
-        '> 本文件由 Hub 自动生成，团队成员与人类都可编辑。',
-        '',
-        '## 目标',
-        '（lead 或人类补充这个团队要达成什么）',
-        '',
-        '## 协作规则',
-        '- 广播消息不会主动推送：开工前用 team_read 拉取，完成后用 team_send 汇报。',
-        '- 需要人类决策时用 team_send 的 to="human" 或 kind="decision"。',
-        '- 交接产物写到 handoffs/ 目录，文件名用任务 id 或简短主题。',
-        '',
-        '## 决策记录',
-        '（重要取舍追加到这里，说明日期、背景、结论）',
-        ''
-    ].join('\n')
 }
 
 function slug(value: string): string {

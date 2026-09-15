@@ -7,7 +7,8 @@ import { useToast } from '@/lib/toast-context'
 import { queryKeys } from '@/lib/query-keys'
 import { useTeam } from '@/hooks/queries/useTeam'
 import { useTeamMessages } from '@/hooks/queries/useTeamMessages'
-import { useTeamMemory } from '@/hooks/queries/useTeamMemory'
+import { useSession } from '@/hooks/queries/useSession'
+import { useSessionDirectory } from '@/hooks/queries/useSessionDirectory'
 import type { TeamMessage } from '@/types/team'
 import { TeamTimeline } from './TeamTimeline'
 import { TeamSidePanel } from './TeamSidePanel'
@@ -38,7 +39,6 @@ export function TeamChatPage() {
 
     const { detail, isLoading, error } = useTeam(api, teamId)
     const { messages, error: messagesError } = useTeamMessages(api, teamId)
-    const { files: memoryFiles } = useTeamMemory(api, teamId)
 
     const [filter, setFilter] = useState<Filter>('all')
     const [taskId, setTaskId] = useState<string>('')
@@ -46,13 +46,26 @@ export function TeamChatPage() {
     const [to, setTo] = useState('all')
     const [sending, setSending] = useState(false)
     const [panelOpen, setPanelOpen] = useState(() => isWideViewport())
-    const [memoryPath, setMemoryPath] = useState<string | null>(null)
+    const [memoryFilePath, setMemoryFilePath] = useState<string | null>(null)
     const [taskDialogId, setTaskDialogId] = useState<string | null>(null)
     const [settingsOpen, setSettingsOpen] = useState(false)
 
     const members = detail?.members ?? []
     const tasks = detail?.tasks ?? []
     const leadSessionId = detail?.team.leadSessionId ?? null
+
+    // Team memory lives in the repo (lead's machine): read it through the
+    // session file API so remote runners work too.
+    const { session: leadSession } = useSession(api, leadSessionId)
+    const memoryRoot = leadSession?.metadata?.teamMemoryPath ?? null
+    const [memoryDir, setMemoryDir] = useState('')
+    const memoryAbsoluteDir = memoryRoot ? (memoryDir ? `${memoryRoot}/${memoryDir}` : memoryRoot) : ''
+    const { entries: memoryEntries, isLoading: memoryLoading } = useSessionDirectory(
+        api,
+        leadSessionId,
+        memoryAbsoluteDir,
+        { enabled: Boolean(leadSessionId && memoryRoot) }
+    )
 
     const visibleMessages = useMemo(() => {
         if (filter === 'key') {
@@ -132,13 +145,24 @@ export function TeamChatPage() {
     const panel = (
         <TeamSidePanel
             detail={detail}
-            memoryFiles={memoryFiles}
+            memory={{
+                root: memoryRoot,
+                relativeDir: memoryDir,
+                entries: memoryEntries,
+                isLoading: memoryLoading,
+                onEnterDir: (name) => setMemoryDir((current) => (current ? `${current}/${name}` : name)),
+                onGoBack: () => setMemoryDir((current) => current.split('/').slice(0, -1).join('/')),
+                onOpenFile: (name) => {
+                    if (memoryRoot) {
+                        setMemoryFilePath(`${memoryAbsoluteDir}/${name}`)
+                    }
+                }
+            }}
             activeTaskId={filter === 'task' ? taskId : null}
             onOpenSession={(sessionId) => navigate({ to: '/sessions/$sessionId', params: { sessionId } })}
             onSelectTask={(selectedTaskId) => setTaskDialogId(selectedTaskId)}
             onCreateTask={(input) => createTask.mutate(input)}
             creatingTask={createTask.isPending}
-            onOpenMemoryFile={(path) => setMemoryPath(path)}
             onClose={() => setPanelOpen(false)}
         />
     )
@@ -334,11 +358,13 @@ export function TeamChatPage() {
                 </div>
             ) : null}
 
-            <TeamMemoryDialog
-                teamId={teamId}
-                path={memoryPath}
-                onClose={() => setMemoryPath(null)}
-            />
+            {leadSessionId ? (
+                <TeamMemoryDialog
+                    leadSessionId={leadSessionId}
+                    path={memoryFilePath}
+                    onClose={() => setMemoryFilePath(null)}
+                />
+            ) : null}
 
             <TeamTaskDialog
                 open={Boolean(taskDialogTask)}

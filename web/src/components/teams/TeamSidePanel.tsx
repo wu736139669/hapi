@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import type { TeamDetail, TeamMemoryFile, TeamTask } from '@/types/team'
+import type { DirectoryEntry } from '@/types/api'
+import type { TeamDetail, TeamTask } from '@/types/team'
 import { useTranslation } from '@/lib/use-translation'
 import { memberStatusLabel, statusDotClass } from './teamStatus'
 
@@ -58,14 +59,22 @@ function TaskColumn(props: {
  */
 export function TeamSidePanel(props: {
     detail: TeamDetail | null
-    memoryFiles: TeamMemoryFile[]
+    /** Team memory (repo-local, read through the lead session's file API). */
+    memory: {
+        root: string | null
+        relativeDir: string
+        entries: DirectoryEntry[]
+        isLoading: boolean
+        onEnterDir: (name: string) => void
+        onGoBack: () => void
+        onOpenFile: (name: string) => void
+    }
     activeTaskId: string | null
     onOpenSession: (sessionId: string) => void
     /** Opens the task editor dialog (status/assignee + timeline). */
     onSelectTask: (taskId: string) => void
     onCreateTask: (input: { title: string; assigneeSessionId: string | null }) => void
     creatingTask: boolean
-    onOpenMemoryFile: (path: string) => void
     onClose?: () => void
 }) {
     const { t } = useTranslation()
@@ -183,24 +192,59 @@ export function TeamSidePanel(props: {
                     {t('team.memory.title')}
                 </div>
                 <div className="mb-3 flex flex-col gap-0.5">
-                    {props.memoryFiles.length === 0 ? (
-                        <span className="px-2 text-[11px] text-[var(--app-hint)]">{t('team.memory.empty')}</span>
-                    ) : null}
-                    {props.memoryFiles.map((file) => (
-                        <button
-                            key={file.path}
-                            type="button"
-                            onClick={() => props.onOpenMemoryFile(file.path)}
-                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-[var(--app-subtle-bg)]"
-                        >
-                            <svg className="h-3.5 w-3.5 shrink-0 text-[var(--app-hint)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                <path d="M14 2v6h6" />
-                            </svg>
-                            <span className="min-w-0 truncate text-[var(--app-fg)]">{file.path}</span>
-                            <span className="ml-auto shrink-0 text-[10px] text-[var(--app-hint)]">{file.size} B</span>
-                        </button>
-                    ))}
+                    {!props.memory.root ? (
+                        <span className="px-2 text-[11px] leading-relaxed text-[var(--app-hint)]">
+                            {t('team.memory.repoHint')}
+                        </span>
+                    ) : (
+                        <>
+                            <div className="flex items-center gap-1 px-2 pb-1 font-mono text-[10px] text-[var(--app-hint)]">
+                                {props.memory.relativeDir ? (
+                                    <button
+                                        type="button"
+                                        onClick={props.memory.onGoBack}
+                                        className="shrink-0 text-[var(--app-link)]"
+                                    >
+                                        ‹
+                                    </button>
+                                ) : null}
+                                <span className="min-w-0 truncate">
+                                    .hapi/team{props.memory.relativeDir ? `/${props.memory.relativeDir}` : ''}
+                                </span>
+                            </div>
+                            {props.memory.isLoading ? (
+                                <span className="px-2 text-[11px] text-[var(--app-hint)]">{t('team.memory.loading')}</span>
+                            ) : props.memory.entries.length === 0 ? (
+                                <span className="px-2 text-[11px] text-[var(--app-hint)]">{t('team.memory.empty')}</span>
+                            ) : null}
+                            {props.memory.entries.map((entry) => (
+                                <button
+                                    key={entry.name}
+                                    type="button"
+                                    onClick={() => {
+                                        if (entry.type === 'directory') {
+                                            props.memory.onEnterDir(entry.name)
+                                        } else {
+                                            props.memory.onOpenFile(entry.name)
+                                        }
+                                    }}
+                                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-[var(--app-subtle-bg)]"
+                                >
+                                    {entry.type === 'directory' ? (
+                                        <svg className="h-3.5 w-3.5 shrink-0 text-[var(--app-hint)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+                                        </svg>
+                                    ) : (
+                                        <svg className="h-3.5 w-3.5 shrink-0 text-[var(--app-hint)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                            <path d="M14 2v6h6" />
+                                        </svg>
+                                    )}
+                                    <span className="min-w-0 truncate text-[var(--app-fg)]">{entry.name}{entry.type === 'directory' ? '/' : ''}</span>
+                                </button>
+                            ))}
+                        </>
+                    )}
                 </div>
 
                 <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--app-hint)]">

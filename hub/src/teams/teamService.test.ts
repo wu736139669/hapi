@@ -1,8 +1,4 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import type { SyncEvent } from '@hapi/protocol/types'
 
 import { TeamService, TeamServiceError, type TeamRuntime, type TeamSessionView, type TeamSpawnMemberInput } from './teamService'
@@ -408,49 +404,6 @@ describe('TeamService spawning', () => {
     })
 })
 
-describe('TeamService memory', () => {
-    it('materializes charter.md + handoffs and lists/reads files', async () => {
-        const dir = mkdtempSync(join(tmpdir(), 'hapi-team-memory-'))
-        const service = new TeamService(new TeamStore(':memory:'), () => {}, null, { memoryRoot: dir })
-        try {
-            const team = service.createTeam('alpha', { name: 'Refactor auth' })
-            // createTeam materializes the dir fire-and-forget.
-            let files = await service.listMemoryFiles('alpha', team.id)
-            for (let attempt = 0; attempt < 50 && !files.some((file) => file.path === 'charter.md'); attempt++) {
-                await new Promise((resolve) => setTimeout(resolve, 10))
-                files = await service.listMemoryFiles('alpha', team.id)
-            }
-            expect(files.map((file) => file.path)).toContain('charter.md')
-
-            const charter = await service.readMemoryFile('alpha', team.id, 'charter.md')
-            expect(charter.content).toContain('Refactor auth')
-            expect(charter.content).toContain('团队规约')
-
-            await writeFile(join(dir, team.id, 'handoffs', 'T1.md'), 'done')
-            const after = await service.listMemoryFiles('alpha', team.id)
-            expect(after.some((file) => file.path === 'handoffs/T1.md')).toBe(true)
-        } finally {
-            service.close()
-            rmSync(dir, { recursive: true, force: true })
-        }
-    })
-
-    it('rejects traversal paths and unknown files', async () => {
-        const dir = mkdtempSync(join(tmpdir(), 'hapi-team-memory-'))
-        const service = new TeamService(new TeamStore(':memory:'), () => {}, null, { memoryRoot: dir })
-        try {
-            const team = service.createTeam('alpha', { name: 'Refactor auth' })
-            await expect(service.readMemoryFile('alpha', team.id, '../../etc/passwd')).rejects.toThrow('Invalid path')
-            await expect(service.readMemoryFile('alpha', team.id, '/etc/passwd')).rejects.toThrow('Invalid path')
-            await expect(service.readMemoryFile('alpha', team.id, 'missing.md')).rejects.toThrow('File not found')
-            await expect(service.listMemoryFiles('alpha', 'unknown-team')).rejects.toThrow('Team not found')
-        } finally {
-            service.close()
-            rmSync(dir, { recursive: true, force: true })
-        }
-    })
-})
-
 describe('TeamService web task management', () => {
     function setup() {
         const { runtime, sessions, delivered } = createRuntime()
@@ -662,9 +615,8 @@ describe('TeamService human ping bridging', () => {
 
 describe('TeamService lead brief', () => {
     it('delivers a lead brief when the team is created with a lead session', async () => {
-        const dir = mkdtempSync(join(tmpdir(), 'hapi-team-lead-brief-'))
         const { runtime, sessions, delivered } = createRuntime()
-        const service = new TeamService(new TeamStore(':memory:'), () => {}, runtime, { memoryRoot: dir })
+        const service = new TeamService(new TeamStore(':memory:'), () => {}, runtime)
         addCallerSession(sessions)
         try {
             service.createTeam('alpha', { name: 'Refactor auth', leadSessionId: 'sess-lead' })
@@ -672,10 +624,8 @@ describe('TeamService lead brief', () => {
             expect(delivered).toHaveLength(1)
             expect(delivered[0]?.sessionId).toBe('sess-lead')
             expect(delivered[0]?.text).toContain('Lead')
-            expect(delivered[0]?.text).toContain('团队记忆目录')
         } finally {
             service.close()
-            rmSync(dir, { recursive: true, force: true })
         }
     })
 })

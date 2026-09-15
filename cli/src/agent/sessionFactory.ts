@@ -80,6 +80,8 @@ export function buildMachineMetadata(options?: {
     }
 }
 
+import { resolveTeamMemoryDir } from '@/modules/team/teamMemory'
+
 export function buildSessionMetadata(options: {
     flavor: string
     startedBy: SessionStartedBy
@@ -108,6 +110,9 @@ export function buildSessionMetadata(options: {
         lifecycleState: 'running',
         lifecycleStateSince: now,
         flavor: options.flavor,
+        ...(process.env.HAPI_TEAM_ID?.trim()
+            ? { teamMemoryPath: resolveTeamMemoryDir() }
+            : {}),
         capabilities: {
             terminal: true
         },
