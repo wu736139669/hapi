@@ -239,3 +239,72 @@ describe('Agent Team routes', () => {
         })
     })
 })
+
+describe('Agent Team decision inbox routes', () => {
+    async function createTeam(app: Hono<WebAppEnv>): Promise<string> {
+        const created = await app.request('/api/teams', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name: 'Growth', leadSessionId: 'sess-lead' })
+        })
+        const body = await created.json() as { team: { id: string } }
+        return body.team.id
+    }
+
+    async function sendDecision(app: Hono<WebAppEnv>, teamId: string, text: string): Promise<number> {
+        const response = await app.request(`/api/teams/${teamId}/messages`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ fromSessionId: 'sess-lead', text, kind: 'decision' })
+        })
+        expect(response.status).toBe(201)
+        const body = await response.json() as { message: { seq: number; meta: Record<string, unknown> | null } }
+        expect(body.message.meta?.awaitingHuman).toBe(true)
+        return body.message.seq
+    }
+
+    it('marks a decision replied when the human answers it with inReplyTo', async () => {
+        const { app } = createApp()
+        const teamId = await createTeam(app)
+        const seq = await sendDecision(app, teamId, '需要确认 A')
+
+        const reply = await app.request(`/api/teams/${teamId}/human-messages`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text: '按建议走', to: 'sess-lead', inReplyTo: seq })
+        })
+        expect(reply.status).toBe(201)
+        const replyBody = await reply.json() as { message: { seq: number } }
+
+        const log = await app.request(`/api/teams/${teamId}/messages?sessionId=sess-lead`)
+        const body = await log.json() as { messages: Array<{ seq: number; meta: Record<string, unknown> | null }> }
+        const decision = body.messages.find((message) => message.seq === seq)
+        expect(typeof decision?.meta?.humanRepliedAt).toBe('number')
+        expect(decision?.meta?.humanReplySeq).toBe(replyBody.message.seq)
+    })
+
+    it('dismisses a pending decision and rejects non-decisions', async () => {
+        const { app } = createApp()
+        const teamId = await createTeam(app)
+        const seq = await sendDecision(app, teamId, '需要确认 B')
+
+        const dismissed = await app.request(`/api/teams/${teamId}/messages/${seq}/dismiss`, { method: 'POST' })
+        expect(dismissed.status).toBe(200)
+
+        const log = await app.request(`/api/teams/${teamId}/messages?sessionId=sess-lead`)
+        const body = await log.json() as { messages: Array<{ seq: number; meta: Record<string, unknown> | null }> }
+        expect(typeof body.messages.find((message) => message.seq === seq)?.meta?.humanDismissedAt).toBe('number')
+
+        const chat = await app.request(`/api/teams/${teamId}/messages`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ fromSessionId: 'sess-lead', text: '普通消息' })
+        })
+        const chatBody = await chat.json() as { message: { seq: number } }
+        const rejected = await app.request(`/api/teams/${teamId}/messages/${chatBody.message.seq}/dismiss`, { method: 'POST' })
+        expect(rejected.status).toBe(400)
+
+        const unknown = await app.request(`/api/teams/${teamId}/messages/9999/dismiss`, { method: 'POST' })
+        expect(unknown.status).toBe(404)
+    })
+})

@@ -523,7 +523,9 @@ export const TeamHumanMessageRequestSchema = z.object({
     text: z.string().min(1).max(20000),
     /** 'all' (default) | 'lead' | member session id or unique prefix. */
     to: z.string().min(1).max(200).optional(),
-    kind: z.enum(['chat', 'status', 'question', 'task-update', 'decision']).optional()
+    kind: z.enum(['chat', 'status', 'question', 'task-update', 'decision']).optional(),
+    /** Team message seq this human message answers (clears the decision inbox item). */
+    inReplyTo: z.number().int().positive().optional()
 })
 
 export type TeamHumanMessageRequest = z.infer<typeof TeamHumanMessageRequestSchema>

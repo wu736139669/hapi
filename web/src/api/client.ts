@@ -429,11 +429,22 @@ export class ApiClient {
 
     async sendHumanTeamMessage(
         teamId: string,
-        body: { text: string; to?: string; kind?: string }
+        body: { text: string; to?: string; kind?: string; inReplyTo?: number }
     ): Promise<{ message: TeamMessage }> {
         return await this.request<{ message: TeamMessage }>(
             `/api/teams/${encodeURIComponent(teamId)}/human-messages`,
             { method: 'POST', body: JSON.stringify(body) }
+        )
+    }
+
+    /** Human waved off a member's decision without replying ("待你确认" inbox). */
+    async dismissTeamMessage(
+        teamId: string,
+        seq: number
+    ): Promise<{ message: TeamMessage }> {
+        return await this.request<{ message: TeamMessage }>(
+            `/api/teams/${encodeURIComponent(teamId)}/messages/${seq}/dismiss`,
+            { method: 'POST' }
         )
     }
 

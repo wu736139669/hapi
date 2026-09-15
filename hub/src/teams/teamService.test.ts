@@ -613,6 +613,95 @@ describe('TeamService human ping bridging', () => {
     })
 })
 
+describe('TeamService decision inbox', () => {
+    function setup() {
+        const { runtime, sessions } = createRuntime()
+        const store = new TeamStore(':memory:')
+        const service = new TeamService(store, () => {}, runtime)
+        addCallerSession(sessions)
+        const team = service.createTeam('alpha', { name: 'Growth' })
+        store.addMember(team.id, 'sess-builder', 'builder')
+        sessions.set('sess-builder', {
+            id: 'sess-builder',
+            active: true,
+            thinking: false,
+            machineId: 'machine-1',
+            directory: '/repo',
+            flavor: 'codex',
+            inWorktree: false
+        })
+        return { service, store, team }
+    }
+
+    it('flags member decisions as awaiting the human', async () => {
+        const { service, store, team } = setup()
+        try {
+            await service.sendMessage('sess-builder', 'alpha', { text: '需要确认 A', kind: 'decision' })
+            const decision = store.listMessages(team.id).find((message) => message.kind === 'decision')
+            expect(decision?.meta?.awaitingHuman).toBe(true)
+        } finally {
+            service.close()
+        }
+    })
+
+    it('marks the decision replied when the human answers it', async () => {
+        const { service, store, team } = setup()
+        try {
+            await service.sendMessage('sess-builder', 'alpha', { text: '需要确认 B', kind: 'decision' })
+            const decision = store.listMessages(team.id).find((message) => message.kind === 'decision')
+            expect(decision).toBeTruthy()
+
+            await service.sendHumanMessage('alpha', team.id, {
+                text: '按建议走',
+                to: 'sess-builder',
+                inReplyTo: decision!.seq
+            })
+
+            const updated = store.getMessage(team.id, decision!.seq)
+            expect(typeof updated?.meta?.humanRepliedAt).toBe('number')
+            expect(updated?.meta?.humanReplySeq).toBeTypeOf('number')
+        } finally {
+            service.close()
+        }
+    })
+
+    it('dismisses a decision without replying', () => {
+        const { service, store, team } = setup()
+        try {
+            const decision = store.appendMessage({
+                teamId: team.id,
+                fromKind: 'session',
+                fromSessionId: 'sess-builder',
+                toKind: 'broadcast',
+                kind: 'decision',
+                text: '需要确认 C',
+                meta: { fromRole: 'builder', awaitingHuman: true }
+            })
+            const dismissed = service.dismissHumanMessage('alpha', team.id, decision.seq)
+            expect(typeof dismissed.meta?.humanDismissedAt).toBe('number')
+        } finally {
+            service.close()
+        }
+    })
+
+    it('refuses to dismiss a regular chat message', () => {
+        const { service, store, team } = setup()
+        try {
+            const chat = store.appendMessage({
+                teamId: team.id,
+                fromKind: 'session',
+                fromSessionId: 'sess-builder',
+                toKind: 'broadcast',
+                kind: 'chat',
+                text: '普通消息'
+            })
+            expect(() => service.dismissHumanMessage('alpha', team.id, chat.seq)).toThrow(TeamServiceError)
+        } finally {
+            service.close()
+        }
+    })
+})
+
 describe('TeamService lead brief', () => {
     it('delivers a lead brief when the team is created with a lead session', async () => {
         const { runtime, sessions, delivered } = createRuntime()

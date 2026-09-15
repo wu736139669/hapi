@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { TeamMember, TeamMessage } from '@/types/team'
 import { useTranslation } from '@/lib/use-translation'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
+import { humanReplyState } from '@/lib/teamMessageState'
 import { statusDotClass } from './teamStatus'
 
 const THREAD_MIN_MESSAGES = 3
@@ -70,9 +71,10 @@ function ThreadRow(props: {
     members: TeamMember[]
     expanded: boolean
     onToggle: () => void
+    onReply?: (message: TeamMessage) => void
 }) {
     const { t } = useTranslation()
-    const { messages, members, expanded, onToggle } = props
+    const { messages, members, expanded, onToggle, onReply } = props
     const first = messages[0]!
     const last = messages[messages.length - 1]!
     const fromRole = roleOf(members, first.fromSessionId) ?? '?'
@@ -103,7 +105,7 @@ function ThreadRow(props: {
             {expanded ? (
                 <div className="mt-1 ml-3 border-l-2 border-[var(--app-border)] pl-3">
                     {messages.map((message) => (
-                        <MessageRow key={message.seq} message={message} members={members} compact />
+                        <MessageRow key={message.seq} message={message} members={members} compact onReply={onReply} />
                     ))}
                 </div>
             ) : (
@@ -116,9 +118,14 @@ function ThreadRow(props: {
     )
 }
 
-function MessageRow(props: { message: TeamMessage; members: TeamMember[]; compact?: boolean }) {
+function MessageRow(props: {
+    message: TeamMessage
+    members: TeamMember[]
+    compact?: boolean
+    onReply?: (message: TeamMessage) => void
+}) {
     const { t } = useTranslation()
-    const { message, members, compact } = props
+    const { message, members, compact, onReply } = props
 
     if (message.fromKind === 'hub') {
         if (message.kind === 'task-assign') {
@@ -154,24 +161,48 @@ function MessageRow(props: { message: TeamMessage; members: TeamMember[]; compac
 
     const fromRole = roleOf(members, message.fromSessionId) ?? '?'
     const isDecision = message.kind === 'decision'
+    const replyState = humanReplyState(message)
     return (
         <div className={`my-1.5 ${compact ? '' : 'max-w-[92%]'}`}>
-            <div className="mb-0.5 flex items-center gap-1.5 text-[11px] text-[var(--app-hint)]">
+            <div className="mb-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--app-hint)]">
                 {!compact ? <MemberAvatar role={fromRole} /> : null}
                 <span className="font-semibold text-[var(--app-fg)]">{fromRole}</span>
                 <span>{message.toSessionId ? `→ ${roleOf(members, message.toSessionId)}` : `→ ${t('team.message.all')}`}</span>
                 <span>· {formatTime(message.createdAt)}</span>
                 {message.kind !== 'chat' ? <span className="rounded bg-[var(--app-subtle-bg)] px-1">{message.kind}</span> : null}
+                {replyState === 'pending' ? (
+                    <span className="rounded bg-amber-500/15 px-1 font-semibold text-amber-600">{t('team.reply.pending')}</span>
+                ) : replyState === 'replied' ? (
+                    <span className="rounded bg-[var(--app-subtle-bg)] px-1">{t('team.reply.replied')}</span>
+                ) : replyState === 'dismissed' ? (
+                    <span className="rounded bg-[var(--app-subtle-bg)] px-1">{t('team.reply.dismissed')}</span>
+                ) : null}
             </div>
             <div className={`rounded-xl border px-3 py-2 ${isDecision ? 'border-[var(--app-fg)] bg-[var(--app-subtle-bg)]/40' : 'border-[var(--app-border)] bg-[var(--app-bg)]'}`}>
                 {isDecision ? <div className="mb-1 text-[11px] font-semibold text-[var(--app-fg)]">{t('team.message.decision')}</div> : null}
                 <MarkdownRenderer content={message.text} className="text-sm" preserveSingleLineBreaks standalone />
+                {replyState === 'pending' && onReply ? (
+                    <div className="mt-2 flex justify-end">
+                        <button
+                            type="button"
+                            onClick={() => onReply(message)}
+                            className="rounded-md bg-[var(--app-fg)] px-2.5 py-1 text-[11px] font-medium text-[var(--app-bg)]"
+                        >
+                            {t('team.reply.button')}
+                        </button>
+                    </div>
+                ) : null}
             </div>
         </div>
     )
 }
 
-export function TeamTimeline(props: { messages: TeamMessage[]; members: TeamMember[]; foldThreads: boolean }) {
+export function TeamTimeline(props: {
+    messages: TeamMessage[]
+    members: TeamMember[]
+    foldThreads: boolean
+    onReply?: (message: TeamMessage) => void
+}) {
     const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set())
     const items = useMemo(
         () => buildTimelineItems(props.messages, props.foldThreads),
@@ -188,6 +219,7 @@ export function TeamTimeline(props: { messages: TeamMessage[]; members: TeamMemb
                             messages={item.messages}
                             members={props.members}
                             expanded={expandedThreads.has(item.key)}
+                            onReply={props.onReply}
                             onToggle={() => {
                                 setExpandedThreads((current) => {
                                     const next = new Set(current)
@@ -202,7 +234,7 @@ export function TeamTimeline(props: { messages: TeamMessage[]; members: TeamMemb
                         />
                     )
                 }
-                return <MessageRow key={item.message.seq} message={item.message} members={props.members} />
+                return <MessageRow key={item.message.seq} message={item.message} members={props.members} onReply={props.onReply} />
             })}
         </div>
     )

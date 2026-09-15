@@ -441,6 +441,17 @@ export class TeamStore {
         return row ? mapMessageRow(row) : null
     }
 
+    /** Merge `patch` into a message's meta (used to track human replies/dismissals). */
+    updateMessageMeta(teamId: string, seq: number, patch: Record<string, unknown>): TeamMessageRecord | null {
+        const current = this.getMessage(teamId, seq)
+        if (!current) return null
+        const meta = { ...(current.meta ?? {}), ...patch }
+        this.db.prepare(
+            'UPDATE team_messages SET meta = ? WHERE team_id = ? AND seq = ?'
+        ).run(toJson(meta), teamId, seq)
+        return { ...current, meta }
+    }
+
     // -------------------------------------------------------------- schema
 
     private initSchema(): void {

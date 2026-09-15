@@ -237,7 +237,7 @@ export class TeamService {
     async sendHumanMessage(
         namespace: string,
         teamId: string,
-        input: { text: string; to?: string; kind?: string }
+        input: { text: string; to?: string; kind?: string; inReplyTo?: number }
     ): Promise<TeamMessageRecord> {
         const team = this.store.getTeam(teamId, namespace)
         if (!team) {
@@ -253,8 +253,30 @@ export class TeamService {
             fromSessionId: null,
             fromRole: '人类',
             text: input.text,
-            kind: input.kind
+            kind: input.kind,
+            inReplyTo: input.inReplyTo
         })
+    }
+
+    /**
+     * Human answered / waved off a member's decision from the group chat: mark
+     * the original message so the "待你确认" inbox stops showing it.
+     */
+    dismissHumanMessage(namespace: string, teamId: string, seq: number): TeamMessageRecord {
+        const team = this.store.getTeam(teamId, namespace)
+        if (!team) {
+            throw new TeamServiceError('not_found', 'Team not found')
+        }
+        const message = this.store.getMessage(teamId, seq)
+        if (!message) {
+            throw new TeamServiceError('not_found', 'Message not found')
+        }
+        if (message.fromKind !== 'session' || (message.kind !== 'decision' && message.meta?.awaitingHuman !== true)) {
+            throw new TeamServiceError('invalid', 'Only human-facing decisions can be dismissed')
+        }
+        const updated = this.store.updateMessageMeta(teamId, seq, { humanDismissedAt: Date.now() })
+        this.publishUpdate(team)
+        return updated ?? message
     }
 
     private async appendAndRoute(
@@ -276,6 +298,11 @@ export class TeamService {
         const budget = readBudget(team.config)
         this.enforceMessageRate(team.id, budget)
         const replyDepth = this.resolveReplyDepth(team.id, input.inReplyTo, budget)
+        const kind = input.kind ?? 'chat'
+        // Decisions / explicit `to: human` asks are the messages that need a
+        // human answer; flag them so the web can show a "待你确认" inbox.
+        const awaitingHuman = input.fromKind === 'session'
+            && (target.toHuman === true || kind === 'decision')
 
         const message = this.store.appendMessage({
             teamId: team.id,
@@ -283,16 +310,33 @@ export class TeamService {
             fromSessionId: input.fromSessionId,
             toKind: target.toKind,
             toSessionId: target.toSessionId,
-            kind: input.kind ?? 'chat',
+            kind,
             text: input.text,
             meta: {
                 fromRole: input.fromRole,
                 ...(target.toHuman ? { toHuman: true } : {}),
+                ...(awaitingHuman ? { awaitingHuman: true } : {}),
                 ...(replyDepth > 0 ? { replyDepth } : {}),
                 ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {})
             }
         })
         this.publishUpdate(team)
+
+        // A human message that answers a decision clears that decision's inbox
+        // entry (the member still receives it like any other directed message).
+        if (input.fromKind === 'human' && input.inReplyTo) {
+            const original = this.store.getMessage(team.id, input.inReplyTo)
+            if (
+                original
+                && original.fromKind === 'session'
+                && (original.kind === 'decision' || original.meta?.awaitingHuman === true)
+            ) {
+                this.store.updateMessageMeta(team.id, original.seq, {
+                    humanRepliedAt: Date.now(),
+                    humanReplySeq: message.seq
+                })
+            }
+        }
 
         // Human-facing escalation: an explicit `to: human` or a decision from a
         // member notifies the human out-of-band (push / in-app toast).

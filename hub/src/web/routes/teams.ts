@@ -234,10 +234,25 @@ export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
             const message = await teams.sendHumanMessage(c.get('namespace'), c.req.param('id'), {
                 text: parsed.data.text,
                 to: parsed.data.to,
-                kind: parsed.data.kind
+                kind: parsed.data.kind,
+                inReplyTo: parsed.data.inReplyTo
             })
             c.header('Cache-Control', 'no-store')
             return c.json({ message }, 201)
+        } catch (error) {
+            return teamErrorResponse(c, error)
+        }
+    })
+
+    app.post('/teams/:id/messages/:seq/dismiss', (c) => {
+        const seq = Number.parseInt(c.req.param('seq'), 10)
+        if (!Number.isFinite(seq) || seq <= 0) {
+            return c.json({ error: 'Invalid message seq' }, 400)
+        }
+        try {
+            const message = teams.dismissHumanMessage(c.get('namespace'), c.req.param('id'), seq)
+            c.header('Cache-Control', 'no-store')
+            return c.json({ message })
         } catch (error) {
             return teamErrorResponse(c, error)
         }

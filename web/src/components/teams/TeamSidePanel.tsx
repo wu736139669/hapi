@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { DirectoryEntry } from '@/types/api'
-import type { TeamDetail, TeamTask } from '@/types/team'
+import type { TeamDetail, TeamMessage, TeamTask } from '@/types/team'
 import { useTranslation } from '@/lib/use-translation'
 import { memberStatusLabel, statusDotClass } from './teamStatus'
 
@@ -69,6 +69,11 @@ export function TeamSidePanel(props: {
         onGoBack: () => void
         onOpenFile: (name: string) => void
     }
+    /** Decisions from members still waiting for a human answer. */
+    pendingDecisions: TeamMessage[]
+    dismissingDecision: boolean
+    onReplyDecision: (message: TeamMessage) => void
+    onDismissDecision: (message: TeamMessage) => void
     activeTaskId: string | null
     onOpenSession: (sessionId: string) => void
     /** Opens the task editor dialog (status/assignee + timeline). */
@@ -106,6 +111,50 @@ export function TeamSidePanel(props: {
             </div>
 
             <div className="app-scroll-y min-h-0 flex-1 px-3 py-2">
+                {props.pendingDecisions.length > 0 ? (
+                    <>
+                        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-600">
+                            {t('team.pending.title')} · {props.pendingDecisions.length}
+                        </div>
+                        <div className="mb-3 flex flex-col gap-1">
+                            {props.pendingDecisions.map((message) => {
+                                const role = members.find((member) => member.sessionId === message.fromSessionId)?.role ?? '?'
+                                return (
+                                    <div
+                                        key={message.seq}
+                                        className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-2 py-1.5"
+                                    >
+                                        <div className="flex items-center gap-1.5 text-[10px] text-[var(--app-hint)]">
+                                            <span className="font-semibold text-[var(--app-fg)]">{role}</span>
+                                            <span>· {formatClock(message.createdAt)}</span>
+                                        </div>
+                                        <div className="mt-0.5 line-clamp-3 text-[11px] leading-snug text-[var(--app-fg)]">
+                                            {message.text.replace(/\s+/g, ' ').trim().slice(0, 140)}
+                                        </div>
+                                        <div className="mt-1 flex items-center gap-1.5">
+                                            <button
+                                                type="button"
+                                                onClick={() => props.onReplyDecision(message)}
+                                                className="rounded-md bg-[var(--app-fg)] px-2 py-0.5 text-[10px] font-medium text-[var(--app-bg)]"
+                                            >
+                                                {t('team.reply.button')}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={props.dismissingDecision}
+                                                onClick={() => props.onDismissDecision(message)}
+                                                className="rounded-md border border-[var(--app-border)] px-2 py-0.5 text-[10px] text-[var(--app-hint)] hover:text-[var(--app-fg)] disabled:opacity-40"
+                                            >
+                                                {t('team.pending.dismiss')}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </>
+                ) : null}
+
                 <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--app-hint)]">
                     {t('team.panel.members')} · {members.length}
                 </div>
@@ -258,6 +307,13 @@ export function TeamSidePanel(props: {
             </div>
         </div>
     )
+}
+
+function formatClock(value: number): string {
+    const date = new Date(value)
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    return `${hours}:${minutes}`
 }
 
 function readBudgetNumber(detail: TeamDetail | null, key: string, fallback: number): number {

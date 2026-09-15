@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQueryClient, useMutation } from '@tanstack/react-query'
 import { useAppContext } from '@/lib/app-context'
@@ -10,6 +10,7 @@ import { useTeamMessages } from '@/hooks/queries/useTeamMessages'
 import { useSession } from '@/hooks/queries/useSession'
 import { useSessionDirectory } from '@/hooks/queries/useSessionDirectory'
 import type { TeamMessage } from '@/types/team'
+import { pendingHumanDecisions } from '@/lib/teamMessageState'
 import { TeamTimeline } from './TeamTimeline'
 import { TeamSidePanel } from './TeamSidePanel'
 import { TeamMemoryDialog } from './TeamMemoryDialog'
@@ -43,7 +44,8 @@ export function TeamChatPage() {
     const [filter, setFilter] = useState<Filter>('all')
     const [taskId, setTaskId] = useState<string>('')
     const [draft, setDraft] = useState('')
-    const [to, setTo] = useState('all')
+    const [to, setTo] = useState<string>('')
+    const [replyTo, setReplyTo] = useState<TeamMessage | null>(null)
     const [sending, setSending] = useState(false)
     const [panelOpen, setPanelOpen] = useState(() => isWideViewport())
     const [memoryFilePath, setMemoryFilePath] = useState<string | null>(null)
@@ -53,6 +55,20 @@ export function TeamChatPage() {
     const members = detail?.members ?? []
     const tasks = detail?.tasks ?? []
     const leadSessionId = detail?.team.leadSessionId ?? null
+
+    // Humans talk to the lead by default; the lead routes the work.
+    useEffect(() => {
+        if (to) return
+        if (leadSessionId) {
+            setTo('lead')
+            return
+        }
+        const first = members[0]
+        if (first) setTo(first.sessionId)
+    }, [to, leadSessionId, members])
+
+    // Decisions waiting for the human ("待你确认" inbox).
+    const pendingDecisions = useMemo(() => pendingHumanDecisions(messages), [messages])
 
     // Team memory lives in the repo (lead's machine): read it through the
     // session file API so remote runners work too.
@@ -118,10 +134,12 @@ export function TeamChatPage() {
         try {
             await api.sendHumanTeamMessage(teamId, {
                 text,
-                to: to === 'all' ? undefined : to,
+                to: to || undefined,
                 kind: 'chat',
+                ...(replyTo ? { inReplyTo: replyTo.seq } : {}),
             })
             setDraft('')
+            setReplyTo(null)
         } catch (sendError) {
             addToast({
                 title: t('team.send.failed'),
@@ -133,6 +151,31 @@ export function TeamChatPage() {
             setSending(false)
         }
     }
+
+    const handleReply = (message: TeamMessage) => {
+        setReplyTo(message)
+        if (message.fromSessionId) {
+            setTo(message.fromSessionId)
+        }
+    }
+
+    const dismissDecision = useMutation({
+        mutationFn: async (message: TeamMessage) => {
+            if (!api) throw new Error('API unavailable')
+            return await api.dismissTeamMessage(teamId, message.seq)
+        },
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.teamMessages(teamId) })
+        },
+        onError: (mutationError) => {
+            addToast({
+                title: t('team.pending.dismissFailed'),
+                body: mutationError instanceof Error ? mutationError.message : t('dialog.error.default'),
+                sessionId: '',
+                url: '',
+            })
+        },
+    })
 
     const handleSelectTask = (selectedTaskId: string) => {
         setFilter('task')
@@ -158,6 +201,10 @@ export function TeamChatPage() {
                     }
                 }
             }}
+            pendingDecisions={pendingDecisions}
+            dismissingDecision={dismissDecision.isPending}
+            onReplyDecision={handleReply}
+            onDismissDecision={(message) => dismissDecision.mutate(message)}
             activeTaskId={filter === 'task' ? taskId : null}
             onOpenSession={(sessionId) => navigate({ to: '/sessions/$sessionId', params: { sessionId } })}
             onSelectTask={(selectedTaskId) => setTaskDialogId(selectedTaskId)}
@@ -241,7 +288,7 @@ export function TeamChatPage() {
                     <button
                         type="button"
                         onClick={() => setPanelOpen((open) => !open)}
-                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] split:ml-2"
+                        className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] split:ml-2"
                         title={t('team.panel.toggle')}
                         aria-label={t('team.panel.toggle')}
                     >
@@ -249,6 +296,11 @@ export function TeamChatPage() {
                             <rect x="3" y="4" width="18" height="16" rx="2" />
                             <path d="M15 4v16" />
                         </svg>
+                        {pendingDecisions.length > 0 ? (
+                            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold text-white">
+                                {pendingDecisions.length}
+                            </span>
+                        ) : null}
                     </button>
                 </div>
 
@@ -289,7 +341,12 @@ export function TeamChatPage() {
                     ) : visibleMessages.length === 0 ? (
                         <div className="py-6 text-center text-sm text-[var(--app-hint)]">{t('team.empty')}</div>
                     ) : (
-                        <TeamTimeline messages={visibleMessages} members={members} foldThreads={filter !== 'key'} />
+                        <TeamTimeline
+                            messages={visibleMessages}
+                            members={members}
+                            foldThreads={filter !== 'key'}
+                            onReply={handleReply}
+                        />
                     )}
                 </div>
 
@@ -299,13 +356,33 @@ export function TeamChatPage() {
                     </div>
                 ) : (
                 <div className="border-t border-[var(--app-divider)] px-3 py-2">
+                    {replyTo ? (
+                        <div className="mb-1 flex items-center gap-2 rounded-md bg-amber-500/10 px-2 py-1 text-[11px] text-amber-700">
+                            <span className="min-w-0 truncate">
+                                {t('team.reply.replyingTo', {
+                                    role: members.find((member) => member.sessionId === replyTo.fromSessionId)?.role ?? '?',
+                                })}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => setReplyTo(null)}
+                                className="ml-auto shrink-0 font-medium underline"
+                            >
+                                {t('team.reply.cancel')}
+                            </button>
+                        </div>
+                    ) : null}
                     <div className="mb-1 flex items-center gap-2">
                         <select
                             value={to}
-                            onChange={(event) => setTo(event.target.value)}
+                            onChange={(event) => {
+                                setTo(event.target.value)
+                                if (replyTo && event.target.value !== replyTo.fromSessionId) {
+                                    setReplyTo(null)
+                                }
+                            }}
                             className="rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-0.5 text-[11px] text-[var(--app-fg)]"
                         >
-                            <option value="all">{t('team.send.toAll')}</option>
                             {leadSessionId ? <option value="lead">{t('team.send.toLead')}</option> : null}
                             {members
                                 .filter((member) => member.sessionId !== leadSessionId)
