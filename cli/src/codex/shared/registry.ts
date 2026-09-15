@@ -87,7 +87,7 @@ export async function withThreadOwnership<T>(home: string, threadId: string, own
             if (!match) continue;
             const orphanAlive = owner.serverPid && generationMayBeAlive(owner.serverPid, owner.serverMarker);
             if (generationMayBeAlive(owner.pid, owner.marker) || orphanAlive) {
-                throw new Error(`Thread belongs to another Codex runtime. Use hapi resume ${match[0]}.${orphanAlive && !runtimeAlive(owner) ? ' Its wrapper exited; stop the orphaned runtime before recovery.' : ''}`);
+                throw new Error(`该 Codex 会话已在另一处打开（同一 thread 不能被两个运行时同时接管）。请在本机终端执行 hapi resume ${match[0]} 直接连过去；想新建的话，先把那边关掉再试。${orphanAlive && !runtimeAlive(owner) ? '（那边的外壳已退出但服务还活着，恢复前请先停掉那个孤儿运行时。）' : ''}`);
             }
         }
         return work();

@@ -23,7 +23,7 @@ describe('shared runtime ownership', () => {
         state.processes.set(1111, undefined); expect(runtimeMayBeAlive(owner)).toBe(true);
         state.processes.delete(1111); state.processes.set(2222, 'server-start'); expect(runtimeMayBeAlive(owner)).toBe(true);
         await saveRuntime(owner);
-        await expect(withThreadOwnership(owner.codexHome, 'thread', 'new', async () => {})).rejects.toThrow('orphaned');
+        await expect(withThreadOwnership(owner.codexHome, 'thread', 'new', async () => {})).rejects.toThrow('孤儿运行时');
     });
     it('protects one native store even across HAPI homes and scopes attach by authentication', async () => {
         const owner = await fixture(); state.processes.set(1111, owner.marker); await saveRuntime(owner);
