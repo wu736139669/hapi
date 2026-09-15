@@ -4,13 +4,33 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import * as codexExecutable from '@/codex/utils/codexExecutable'
 import { executableCandidates, getAgentLaunchCommand, resolveExecutable } from './agentLaunchCommand'
-import { getAgentAvailability } from './agentAvailability'
+import { getAgentAvailability, getAgentAvailabilityResponse } from './agentAvailability'
 
 async function makeExecutable(directory: string, name: string): Promise<string> {
     const path = join(directory, name)
     await writeFile(path, '#!/bin/sh\nexit 0\n')
     await chmod(path, 0o755)
     return path
+}
+
+function dshDescribeFetch(): typeof fetch {
+    return (async (_input: string | URL | Request, init?: RequestInit) => {
+        const request = JSON.parse(String(init?.body)) as { rpcId: string }
+        return new Response(JSON.stringify({
+            type: 'server-response',
+            rpcId: request.rpcId,
+            result: {
+                ok: true,
+                value: {
+                    version: '0.0.1',
+                    cwd: '/tmp/project',
+                    provider: 'deepseek-official',
+                    model: 'deepseek-flash',
+                    attachedSessions: 0,
+                },
+            },
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }) as typeof fetch
 }
 
 describe('agent executable resolution', () => {
@@ -89,24 +109,42 @@ describe('agent executable resolution', () => {
         }
     })
 
-    it('rejects malformed or missing DSH static configuration', async () => {
-        const directory = await mkdtemp(join(tmpdir(), 'hapi-agent-path-'))
-        await makeExecutable(directory, 'dsh-acp-demo')
+    it('validates the DSH Web URL for terminal selection', () => {
         expect(getAgentAvailability('dsh', {
-            PATH: directory,
-            HAPI_DSH_ACP_ARGS_JSON: 'not json',
-        }).reason).toBe('invalid_configuration')
-        expect(getAgentAvailability('dsh', {
-            PATH: directory,
-            HAPI_DSH_ACP_CONFIG: join(directory, 'missing.yml'),
-        }).reason).toBe('invalid_configuration')
-
-        const config = join(directory, 'cordis.yml')
-        await writeFile(config, 'agents: []\n')
-        expect(getAgentAvailability('dsh', {
-            PATH: directory,
-            HAPI_DSH_ACP_CONFIG: config,
+            HAPI_DSH_URL: 'http://127.0.0.1:3080',
         })).toEqual({ agent: 'dsh', available: true })
+        expect(getAgentAvailability('dsh', {
+            HAPI_DSH_URL: 'ws://127.0.0.1:3080',
+        })).toEqual({ agent: 'dsh', available: false, reason: 'invalid_configuration' })
+    })
+
+    it('reports DSH availability from the live Web runtime', async () => {
+        const response = await getAgentAvailabilityResponse({
+            PATH: '',
+            HAPI_DSH_URL: 'http://127.0.0.1:3080',
+        }, dshDescribeFetch())
+
+        expect(response.agents.find((entry) => entry.agent === 'dsh'))
+            .toEqual({ agent: 'dsh', available: true })
+    })
+
+    it('reports invalid or unreachable DSH Web runtimes', async () => {
+        const unreachableFetch = (async () => {
+            throw new Error('connection refused')
+        }) as unknown as typeof fetch
+        const unreachable = await getAgentAvailabilityResponse({
+            PATH: '',
+            HAPI_DSH_URL: 'http://127.0.0.1:3080',
+        }, unreachableFetch)
+        expect(unreachable.agents.find((entry) => entry.agent === 'dsh'))
+            .toEqual({ agent: 'dsh', available: false, reason: 'not_found' })
+
+        const invalid = await getAgentAvailabilityResponse({
+            PATH: '',
+            HAPI_DSH_URL: 'ws://127.0.0.1:3080',
+        }, dshDescribeFetch())
+        expect(invalid.agents.find((entry) => entry.agent === 'dsh'))
+            .toEqual({ agent: 'dsh', available: false, reason: 'invalid_configuration' })
     })
 
     it('accepts a macOS Codex app executable when the CLI is absent', async () => {

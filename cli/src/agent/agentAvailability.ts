@@ -8,8 +8,10 @@ import {
 } from '@hapi/protocol'
 import { getDefaultClaudeCodePath } from '@/claude/sdk/utils'
 import { resolveCodexCommand } from '@/codex/utils/codexExecutable'
-import { resolveDshAcpCommand } from '@/dsh/utils/dshBackend'
+import { DshWebClient, resolveDshWebUrl } from '@/dsh/dshWebClient'
 import { getAgentLaunchCommand, resolveExecutable } from './agentLaunchCommand'
+
+const DSH_AVAILABILITY_TIMEOUT_MS = 1_500
 
 type LaunchEnvironment = Record<string, string | undefined>
 type LaunchContext = 'runner' | 'terminal'
@@ -32,21 +34,7 @@ function resolveLaunchSpec(agent: AgentFlavor, env: LaunchEnvironment, context: 
         }
         return resolveCodexCommand(env)
     }
-    if (agent === 'dsh') {
-        return resolveDshAcpCommand(env)
-    }
     return { command: getAgentLaunchCommand(agent, env), args: [] }
-}
-
-function hasValidDshConfiguration(env: LaunchEnvironment): boolean {
-    const config = env.HAPI_DSH_ACP_CONFIG?.trim()
-    if (!config) return true
-    if (!isAbsolute(config)) return false
-    try {
-        return existsSync(config) && statSync(config).isFile()
-    } catch {
-        return false
-    }
 }
 
 function hasResolvableCommand(spec: AgentLaunchSpec, env: LaunchEnvironment): boolean {
@@ -77,12 +65,21 @@ export function getAgentAvailability(
         return { agent, available: false, reason: 'not_found' }
     }
 
+    // DSH sessions connect to an already-running `dsh web` host instead of
+    // spawning an ACP executable. The synchronous terminal picker can only
+    // validate the URL; runner availability performs the live probe below.
+    if (agent === 'dsh') {
+        try {
+            resolveDshWebUrl(env.HAPI_DSH_URL)
+            return { agent, available: true }
+        } catch {
+            return { agent, available: false, reason: 'invalid_configuration' }
+        }
+    }
+
     let spec: AgentLaunchSpec
     try {
         spec = resolveLaunchSpec(agent, env, context)
-        if (agent === 'dsh' && !hasValidDshConfiguration(env)) {
-            return { agent, available: false, reason: 'invalid_configuration' }
-        }
     } catch {
         // Claude's resolver throws when the default command is simply absent;
         // that is an installation miss, not malformed static configuration.
@@ -105,11 +102,35 @@ export function getAgentAvailability(
     }
 }
 
-export function getAgentAvailabilityResponse(
+async function getDshWebAvailability(
+    env: LaunchEnvironment,
+    fetchImpl: typeof fetch,
+): Promise<AgentAvailabilityEntry> {
+    let client: DshWebClient
+    try {
+        client = new DshWebClient(env.HAPI_DSH_URL, fetchImpl)
+    } catch {
+        return { agent: 'dsh', available: false, reason: 'invalid_configuration' }
+    }
+
+    try {
+        await client.describe(AbortSignal.timeout(DSH_AVAILABILITY_TIMEOUT_MS))
+        return { agent: 'dsh', available: true }
+    } catch {
+        return { agent: 'dsh', available: false, reason: 'not_found' }
+    }
+}
+
+export async function getAgentAvailabilityResponse(
     env: LaunchEnvironment = process.env,
-): AgentAvailabilityResponse {
+    fetchImpl: typeof fetch = fetch,
+): Promise<AgentAvailabilityResponse> {
     return {
-        agents: CREATABLE_AGENT_FLAVORS.map((agent) => getAgentAvailability(agent, env)),
+        agents: await Promise.all(CREATABLE_AGENT_FLAVORS.map((agent) => (
+            agent === 'dsh'
+                ? getDshWebAvailability(env, fetchImpl)
+                : getAgentAvailability(agent, env)
+        ))),
     }
 }
 
