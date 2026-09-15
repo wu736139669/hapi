@@ -6,6 +6,8 @@ export function SessionTypeSelector(props: {
     sessionType: SessionType
     worktreeName: string
     teamName: string
+    /** Hide the Team type (used when the session is being added to a team). */
+    hideTeam?: boolean
     worktreeInputRef: RefObject<HTMLInputElement | null>
     isDisabled: boolean
     onSessionTypeChange: (value: SessionType) => void
@@ -20,7 +22,9 @@ export function SessionTypeSelector(props: {
                 {t('newSession.type')}
             </label>
             <div className="flex flex-col gap-1.5">
-                {(['simple', 'worktree', 'team'] as const).map((type) => (
+                {(['simple', 'worktree', 'team'] as const)
+                    .filter((type) => type !== 'team' || !props.hideTeam)
+                    .map((type) => (
                     <div key={type} className="flex flex-col gap-2">
                         {type === 'team' ? (
                             <div className="flex items-center gap-2">

@@ -481,6 +481,14 @@ export const TeamSpawnMemberRequestSchema = z.object({
 
 export type TeamSpawnMemberRequest = z.infer<typeof TeamSpawnMemberRequestSchema>
 
+export const AddTeamMemberRequestSchema = z.object({
+    sessionId: z.string().min(1),
+    role: z.string().min(1).max(80),
+    task: z.string().min(1).max(20000).optional()
+})
+
+export type AddTeamMemberRequest = z.infer<typeof AddTeamMemberRequestSchema>
+
 export const TeamTaskUpdateRequestSchema = z.object({
     /** Session caller (CLI/MCP). Absent = human web caller. */
     fromSessionId: z.string().min(1).optional(),

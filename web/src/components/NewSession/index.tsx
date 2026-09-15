@@ -91,6 +91,10 @@ export function NewSession(props: {
     isLoading?: boolean
     onSuccess: (sessionId: string) => void
     onTeamSuccess: (teamId: string) => void
+    onTeamMemberAdded?: (teamId: string) => void
+    /** When set, the session being created joins this team as a member. */
+    teamId?: string
+    teamName?: string
     onCancel: () => void
     onChooseFolder?: (args: { machineId: string | null; directory: string }) => void
     initialDirectory?: string
@@ -125,6 +129,8 @@ export function NewSession(props: {
     const [grokPermissionMode, setGrokPermissionMode] = useState<GrokPermissionMode>('default')
     const [sessionType, setSessionType] = useState<SessionType>('simple')
     const [teamName, setTeamName] = useState('')
+    const [memberRole, setMemberRole] = useState('')
+    const [memberTask, setMemberTask] = useState('')
     const [worktreeName, setWorktreeName] = useState('')
     const [directoryCreationConfirmed, setDirectoryCreationConfirmed] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -1734,6 +1740,12 @@ export function NewSession(props: {
             const existsResult = await checkPathsExists([trimmedDirectory])
             const directoryExists = existsResult.exists?.[trimmedDirectory]
 
+            if (props.teamId && !memberRole.trim()) {
+                haptic.notification('error')
+                setError(t('newSession.member.roleRequired'))
+                return
+            }
+
             if (sessionType === 'team' && !teamName.trim()) {
                 haptic.notification('error')
                 setError(t('newSession.teamName.required'))
@@ -1946,6 +1958,15 @@ export function NewSession(props: {
                     props.onTeamSuccess(created.team.id)
                     return
                 }
+                if (props.teamId) {
+                    const joined = await props.api.addTeamMember(props.teamId, {
+                        sessionId: result.sessionId,
+                        role: memberRole.trim(),
+                        task: memberTask.trim() || undefined,
+                    })
+                    props.onTeamMemberAdded?.(joined.teamId)
+                    return
+                }
                 props.onSuccess(result.sessionId)
                 return
             }
@@ -2013,6 +2034,35 @@ export function NewSession(props: {
 
     return (
         <div className="flex flex-col divide-y divide-[var(--app-divider)] [&>div]:pr-[10px] lg:[&>div]:pr-3">
+            {props.teamId ? (
+                <div className="flex flex-col gap-2 px-3 py-3">
+                    <div className="rounded-lg bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-[var(--app-fg)]">
+                        {t('newSession.member.banner', { name: props.teamName ?? '' })}
+                    </div>
+                    <label className="flex flex-col gap-1">
+                        <span className="text-xs text-[var(--app-hint)]">{t('newSession.member.role')}</span>
+                        <input
+                            type="text"
+                            value={memberRole}
+                            onChange={(event) => setMemberRole(event.target.value)}
+                            placeholder={t('newSession.member.rolePlaceholder')}
+                            disabled={isFormDisabled}
+                            className="rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-60"
+                        />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                        <span className="text-xs text-[var(--app-hint)]">{t('newSession.member.task')}</span>
+                        <textarea
+                            value={memberTask}
+                            onChange={(event) => setMemberTask(event.target.value)}
+                            placeholder={t('newSession.member.taskPlaceholder')}
+                            rows={2}
+                            disabled={isFormDisabled}
+                            className="resize-none rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-60"
+                        />
+                    </label>
+                </div>
+            ) : null}
             <MachineSelector
                 machines={props.machines}
                 machineId={machineId}
@@ -2045,6 +2095,7 @@ export function NewSession(props: {
                 sessionType={sessionType}
                 worktreeName={worktreeName}
                 teamName={teamName}
+                hideTeam={Boolean(props.teamId)}
                 worktreeInputRef={worktreeInputRef}
                 isDisabled={isFormDisabled}
                 onSessionTypeChange={setSessionType}

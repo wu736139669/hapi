@@ -216,6 +216,26 @@ describe('Agent Team member routes', () => {
         expect(missing.status).toBe(404)
     })
 
+    it('adopts an existing session as a team member', async () => {
+        const { app, delivered } = createApp()
+        const teamId = await createTeam(app)
+        delivered.length = 0
+
+        const joined = await app.request(`/api/teams/${teamId}/members`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ sessionId: 'sess-lead', role: 'Builder A', task: 'do it' })
+        })
+        expect(joined.status).toBe(201)
+        const body = await joined.json() as { sessionId: string; taskId: string | null }
+        expect(body.sessionId).toBe('sess-lead')
+        expect(body.taskId).toBeTruthy()
+
+        const detail = await app.request(`/api/teams/${teamId}`)
+        const members = (await detail.json() as { members: Array<{ role: string; sessionId: string }> }).members
+        expect(members.some((member) => member.role === 'Builder A')).toBe(true)
+    })
+
     it('updates task status', async () => {
         const { app } = createApp()
         const teamId = await createTeam(app)

@@ -1039,7 +1039,13 @@ function NewSessionPage() {
     const queryClient = useQueryClient()
     const { machines, isLoading: machinesLoading, error: machinesError } = useMachines(api, true)
     const { t } = useTranslation()
-    const { directory: initialDirectory, machineId: initialMachineId, shareTransferId } = newSessionRoute.useSearch()
+    const {
+        directory: initialDirectory,
+        machineId: initialMachineId,
+        shareTransferId,
+        teamId,
+        teamName
+    } = newSessionRoute.useSearch()
 
     const handleCancel = useCallback(() => {
         if (shareTransferId) {
@@ -1116,6 +1122,9 @@ function NewSessionPage() {
                     onCancel={handleCancel}
                     onSuccess={handleSuccess}
                     onTeamSuccess={(teamId) => navigate({ to: '/sessions/teams/$teamId', params: { teamId } })}
+                    onTeamMemberAdded={(teamId) => navigate({ to: '/sessions/teams/$teamId', params: { teamId } })}
+                    teamId={teamId}
+                    teamName={teamName}
                     onChooseFolder={handleChooseFolder}
                     initialDirectory={initialDirectory}
                     initialMachineId={initialMachineId}
@@ -1285,6 +1294,9 @@ type NewSessionSearch = {
     directory?: string
     machineId?: string
     shareTransferId?: string
+    /** When set, the created session joins this team as a member. */
+    teamId?: string
+    teamName?: string
 }
 
 const teamChatRoute = createRoute({
@@ -1306,6 +1318,12 @@ const newSessionRoute = createRoute({
         }
         if (typeof search.shareTransferId === 'string' && search.shareTransferId) {
             result.shareTransferId = search.shareTransferId
+        }
+        if (typeof search.teamId === 'string' && search.teamId) {
+            result.teamId = search.teamId
+            if (typeof search.teamName === 'string' && search.teamName) {
+                result.teamName = search.teamName
+            }
         }
         return result
     },

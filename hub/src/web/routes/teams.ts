@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import {
+    AddTeamMemberRequestSchema,
     CreateTeamRequestSchema,
     CreateTeamTaskRequestSchema,
     TeamHumanMessageRequestSchema,
@@ -118,6 +119,25 @@ export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
                 sessionType: parsed.data.sessionType,
                 worktreeName: parsed.data.worktreeName,
                 yolo: parsed.data.yolo
+            })
+            c.header('Cache-Control', 'no-store')
+            return c.json(result, 201)
+        } catch (error) {
+            return teamErrorResponse(c, error)
+        }
+    })
+
+    app.post('/teams/:id/members', async (c) => {
+        const json = await c.req.json().catch(() => null)
+        const parsed = AddTeamMemberRequestSchema.safeParse(json)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+        try {
+            const result = await teams.addMemberFromSession(c.get('namespace'), c.req.param('id'), {
+                sessionId: parsed.data.sessionId,
+                role: parsed.data.role,
+                task: parsed.data.task
             })
             c.header('Cache-Control', 'no-store')
             return c.json(result, 201)

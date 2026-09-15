@@ -559,6 +559,48 @@ describe('TeamService web task management', () => {
     })
 })
 
+describe('TeamService adopt member from session', () => {
+    it('adds an existing session as a member, records the task and delivers the brief', async () => {
+        const { runtime, sessions, delivered } = createRuntime()
+        const store = new TeamStore(':memory:')
+        const service = new TeamService(store, () => {}, runtime)
+        addCallerSession(sessions)
+        sessions.set('sess-worker', {
+            id: 'sess-worker',
+            active: true,
+            thinking: false,
+            machineId: 'machine-1',
+            directory: '/repo',
+            flavor: 'claude',
+            inWorktree: false
+        })
+        try {
+            const team = service.createTeam('alpha', { name: 'Refactor auth', leadSessionId: 'sess-lead' })
+            delivered.length = 0
+            const result = await service.addMemberFromSession('alpha', team.id, {
+                sessionId: 'sess-worker',
+                role: 'Builder A',
+                task: '实现 token 层'
+            })
+            expect(result.taskId).toBeTruthy()
+            expect(service.getTeamDetail(team.id, 'alpha')?.members.some((m) => m.sessionId === 'sess-worker')).toBe(true)
+            await flushAsync()
+            expect(delivered.some((message) => message.sessionId === 'sess-worker' && message.text.includes('实现 token 层'))).toBe(true)
+
+            await expect(service.addMemberFromSession('alpha', team.id, {
+                sessionId: 'sess-worker',
+                role: 'Builder A'
+            })).rejects.toThrow('already exists')
+            await expect(service.addMemberFromSession('alpha', team.id, {
+                sessionId: 'sess-missing',
+                role: 'Builder B'
+            })).rejects.toThrow('Session not found')
+        } finally {
+            service.close()
+        }
+    })
+})
+
 describe('TeamService human ping bridging', () => {
     function setup() {
         const { runtime, sessions, delivered, assistantTexts } = createRuntime()

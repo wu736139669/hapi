@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
     spawnSession: vi.fn(),
     onSuccess: vi.fn(),
     onTeamSuccess: vi.fn(),
+    onTeamMemberAdded: vi.fn(),
+    addTeamMember: vi.fn(),
     notification: vi.fn(),
     checkPathsExists: vi.fn(),
     codexModelsLoading: false,
@@ -196,12 +198,15 @@ vi.mock('./SessionTypeSelector', () => ({
     SessionTypeSelector: (props: {
         sessionType: string
         teamName: string
+        hideTeam?: boolean
         isDisabled: boolean
         onSessionTypeChange: (value: 'simple' | 'worktree' | 'team') => void
         onTeamNameChange: (value: string) => void
     }) => (
         <>
-            {(['simple', 'worktree', 'team'] as const).map((type) => (
+            {(['simple', 'worktree', 'team'] as const)
+                .filter((type) => type !== 'team' || !props.hideTeam)
+                .map((type) => (
                 <label key={type}>
                     <input
                         type="radio"
@@ -1139,6 +1144,43 @@ describe('NewSession launch preferences', () => {
         await waitFor(() => expect(mocks.spawnSession).toHaveBeenCalledWith(
             expect.objectContaining({ model: 'deepseek-v4-flash[1m]' })
         ))
+    })
+
+    it('adds the created session to a team when opened for member creation', async () => {
+        ;(api as unknown as { addTeamMember: typeof mocks.addTeamMember }).addTeamMember = mocks.addTeamMember
+        mocks.addTeamMember.mockResolvedValue({ teamId: 'team-1', sessionId: 'session-member', role: 'Builder A', taskId: null })
+        mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-member' })
+
+        render(
+            <NewSession
+                api={api}
+                machines={[machine]}
+                initialMachineId="machine-1"
+                initialDirectory="C:\\repo"
+                teamId="team-1"
+                teamName="Auth 重构"
+                onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+                onTeamMemberAdded={mocks.onTeamMemberAdded}
+                onCancel={() => {}}
+            />
+        )
+
+        fireEvent.change(screen.getByPlaceholderText('newSession.member.rolePlaceholder'), {
+            target: { value: 'Builder A' }
+        })
+        await waitFor(() => expect(screen.getByTestId('create')).toBeEnabled())
+        fireEvent.click(screen.getByTestId('create'))
+
+        await waitFor(() => expect(mocks.addTeamMember).toHaveBeenCalledWith('team-1', {
+            sessionId: 'session-member',
+            role: 'Builder A',
+            task: undefined
+        }))
+        expect(mocks.onTeamMemberAdded).toHaveBeenCalledWith('team-1')
+        expect(mocks.onSuccess).not.toHaveBeenCalled()
+        // Team type is hidden while adding a member.
+        expect(screen.queryByLabelText('team')).toBeNull()
     })
 
     it('creates a team from the team session type', async () => {

@@ -450,6 +450,16 @@ export class ApiClient {
         )
     }
 
+    async addTeamMember(
+        teamId: string,
+        body: { sessionId: string; role: string; task?: string }
+    ): Promise<{ teamId: string; sessionId: string; role: string; taskId: string | null }> {
+        return await this.request(
+            `/api/teams/${encodeURIComponent(teamId)}/members`,
+            { method: 'POST', body: JSON.stringify(body) }
+        )
+    }
+
     async createTeamTask(
         teamId: string,
         body: { title: string; assigneeSessionId?: string | null }

@@ -416,6 +416,65 @@ export class TeamService {
     }
 
     /**
+     * Adopt an existing session as a team member (web flow: the full New
+     * Session form spawns the session, then joins it here). Mirrors
+     * spawnMember's bookkeeping: budget/role checks, task + assignment.
+     */
+    async addMemberFromSession(
+        namespace: string,
+        teamId: string,
+        input: { sessionId: string; role: string; task?: string }
+    ): Promise<{ teamId: string; sessionId: string; role: string; taskId: string | null }> {
+        const team = this.store.getTeam(teamId, namespace)
+        if (!team) {
+            throw new TeamServiceError('not_found', 'Team not found')
+        }
+        if (team.status !== 'active') {
+            throw new TeamServiceError('forbidden', 'Team is archived')
+        }
+        const members = this.store.listMembers(team.id)
+        const budget = readBudget(team.config)
+        if (members.length >= budget.maxMembers) {
+            throw new TeamServiceError('budget', `Member limit reached (${budget.maxMembers})`)
+        }
+        if (members.some((member) => member.role === input.role)) {
+            throw new TeamServiceError('invalid', `Role "${input.role}" already exists in this team`)
+        }
+        if (this.runtime && !this.runtime.resolveSession(input.sessionId)) {
+            throw new TeamServiceError('invalid', 'Session not found on this hub')
+        }
+
+        this.store.addMember(team.id, input.sessionId, input.role, 'working')
+
+        let taskId: string | null = null
+        if (input.task) {
+            const task = this.store.createTask({
+                teamId: team.id,
+                title: taskTitle(input.task),
+                assigneeSessionId: input.sessionId,
+                status: 'todo',
+                meta: { brief: input.task }
+            })
+            taskId = task.id
+        }
+        this.store.appendMessage({
+            teamId: team.id,
+            fromKind: 'hub',
+            toKind: 'task',
+            toSessionId: input.sessionId,
+            kind: 'task-assign',
+            text: input.task ?? `新成员加入：${input.role}`,
+            meta: { role: input.role, sessionId: input.sessionId, ...(taskId ? { taskId } : {}) }
+        })
+        this.publishUpdate(team)
+
+        if (input.task) {
+            void this.deliverAssignment(team, input.sessionId, input.role, input.task, taskId)
+        }
+        return { teamId: team.id, sessionId: input.sessionId, role: input.role, taskId }
+    }
+
+    /**
      * Update a task. `sessionId` present = member/CLI caller (membership
      * checked); absent = human web caller (namespace checked).
      */

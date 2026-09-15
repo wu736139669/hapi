@@ -11,7 +11,6 @@ import { useTeamMemory } from '@/hooks/queries/useTeamMemory'
 import type { TeamMessage } from '@/types/team'
 import { TeamTimeline } from './TeamTimeline'
 import { TeamSidePanel } from './TeamSidePanel'
-import { TeamAddMemberDialog } from './TeamAddMemberDialog'
 import { TeamMemoryDialog } from './TeamMemoryDialog'
 import { TeamSettingsDialog } from './TeamSettingsDialog'
 import { TeamTaskDialog } from './TeamTaskDialog'
@@ -47,7 +46,6 @@ export function TeamChatPage() {
     const [to, setTo] = useState('all')
     const [sending, setSending] = useState(false)
     const [panelOpen, setPanelOpen] = useState(() => isWideViewport())
-    const [addMemberOpen, setAddMemberOpen] = useState(false)
     const [memoryPath, setMemoryPath] = useState<string | null>(null)
     const [taskDialogId, setTaskDialogId] = useState<string | null>(null)
     const [settingsOpen, setSettingsOpen] = useState(false)
@@ -190,7 +188,10 @@ export function TeamChatPage() {
                     ) : null}
                     <button
                         type="button"
-                        onClick={() => setAddMemberOpen(true)}
+                        onClick={() => navigate({
+                            to: '/sessions/new',
+                            search: { teamId, teamName: detail?.team.name }
+                        })}
                         className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
                         title={t('team.add.title')}
                         aria-label={t('team.add.title')}
@@ -360,22 +361,6 @@ export function TeamChatPage() {
                     setSettingsOpen(false)
                     void queryClient.invalidateQueries({ queryKey: queryKeys.teams })
                     navigate({ to: '/sessions' })
-                }}
-            />
-
-            <TeamAddMemberDialog
-                open={addMemberOpen}
-                teamId={teamId}
-                leadSessionId={leadSessionId}
-                onClose={() => setAddMemberOpen(false)}
-                onSpawned={(role) => {
-                    setAddMemberOpen(false)
-                    addToast({
-                        title: t('team.add.success', { role }),
-                        body: '',
-                        sessionId: '',
-                        url: '',
-                    })
                 }}
             />
         </div>
