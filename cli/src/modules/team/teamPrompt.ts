@@ -9,15 +9,15 @@ import { ensureTeamMemory } from './teamMemory'
  * system-prompt injection (ACP) get the same rules via the hub's assignment
  * brief instead.
  */
-export function getTeamPromptBlock(toolPrefix: string, env: NodeJS.ProcessEnv = process.env): string | null {
+export function getTeamPromptBlock(toolPrefix: string, env: NodeJS.ProcessEnv = process.env, cwd: string = process.cwd()): string | null {
     const teamId = env.HAPI_TEAM_ID?.trim()
     if (!teamId) {
         return null
     }
     const name = env.HAPI_TEAM_NAME?.trim() || teamId.slice(0, 8)
     const role = env.HAPI_TEAM_ROLE?.trim() || 'member'
-    // Memory lives with the code: <repo>/.hapi/team/ (worktrees share the main repo).
-    const memoryDir = ensureTeamMemory(env)
+    // Memory lives with the code: <repo>/.hapi/teams/<team>/ (worktrees share the main repo).
+    const memoryDir = ensureTeamMemory(env, cwd)
     const memoryLine = memoryDir
         ? `- Team memory lives with the code: ${memoryDir}/ (charter.md = team charter, handoffs/ = handoff notes). Read/write it with your normal file tools.`
         : null
@@ -31,7 +31,7 @@ export function getTeamPromptBlock(toolPrefix: string, env: NodeJS.ProcessEnv = 
     `)
 }
 
-export function withTeamInstruction(prompt: string, toolPrefix: string, env: NodeJS.ProcessEnv = process.env): string {
-    const block = getTeamPromptBlock(toolPrefix, env)
+export function withTeamInstruction(prompt: string, toolPrefix: string, env: NodeJS.ProcessEnv = process.env, cwd: string = process.cwd()): string {
+    const block = getTeamPromptBlock(toolPrefix, env, cwd)
     return block ? `${prompt}\n\n${block}` : prompt
 }

@@ -18,7 +18,7 @@ import { dirname } from 'node:path'
 
 export const TEAM_SCHEMA_VERSION: number = 1
 
-const REQUIRED_TABLES = ['teams', 'team_members', 'team_tasks', 'team_messages'] as const
+const REQUIRED_TABLES = ['teams', 'team_members', 'team_tasks', 'team_messages', 'team_pending_pings'] as const
 
 export type TeamStatus = 'active' | 'archived'
 export type TeamMemberStatus = 'idle' | 'working' | 'blocked' | 'offline'
@@ -67,6 +67,17 @@ export interface TeamMessageRecord {
     text: string
     meta: Record<string, unknown> | null
     createdAt: number
+}
+
+/**
+ * A human ping that a member has not answered yet. Persisted so a hub restart
+ * does not lose the "mirror the member's reply into the group chat" bridge.
+ */
+export interface TeamPendingPingRecord {
+    sessionId: string
+    teamId: string
+    at: number
+    sawThinking: boolean
 }
 
 export interface CreateTeamInput {
@@ -452,6 +463,41 @@ export class TeamStore {
         return { ...current, meta }
     }
 
+    // --------------------------------------------------------- pending pings
+
+    setPendingPing(record: TeamPendingPingRecord): void {
+        this.db.prepare(
+            `INSERT INTO team_pending_pings (session_id, team_id, at, saw_thinking)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(session_id) DO UPDATE SET
+                 team_id = excluded.team_id,
+                 at = excluded.at,
+                 saw_thinking = excluded.saw_thinking`
+        ).run(record.sessionId, record.teamId, record.at, record.sawThinking ? 1 : 0)
+    }
+
+    markPendingPingThinking(sessionId: string): void {
+        this.db.prepare(
+            'UPDATE team_pending_pings SET saw_thinking = 1 WHERE session_id = ?'
+        ).run(sessionId)
+    }
+
+    deletePendingPing(sessionId: string): void {
+        this.db.prepare('DELETE FROM team_pending_pings WHERE session_id = ?').run(sessionId)
+    }
+
+    listPendingPings(): TeamPendingPingRecord[] {
+        const rows = this.db.prepare(
+            'SELECT session_id, team_id, at, saw_thinking FROM team_pending_pings'
+        ).all() as Array<{ session_id: string; team_id: string; at: number; saw_thinking: number }>
+        return rows.map((row) => ({
+            sessionId: row.session_id,
+            teamId: row.team_id,
+            at: row.at,
+            sawThinking: row.saw_thinking === 1
+        }))
+    }
+
     // -------------------------------------------------------------- schema
 
     private initSchema(): void {
@@ -460,19 +506,31 @@ export class TeamStore {
         if (currentVersion === 0) {
             this.createSchemaV1()
             this.setUserVersion(1)
-            return
-        }
-
-        if (currentVersion > TEAM_SCHEMA_VERSION) {
+        } else if (currentVersion > TEAM_SCHEMA_VERSION) {
             throw new Error(
                 `teams.db schema version ${currentVersion} is newer than supported ${TEAM_SCHEMA_VERSION}. ` +
                 'Upgrade the hub or restore an older teams.db.'
             )
         }
 
+        // Additive tables are ensured without a version bump so the previous
+        // hub binary can still open the file (rollback safety).
+        this.ensureAdditiveTables()
+
         // Future step migrations (V1 -> V2 -> ...) run here, following the main
         // store's ladder pattern. None exist yet.
         this.assertRequiredTablesPresent()
+    }
+
+    private ensureAdditiveTables(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS team_pending_pings (
+                session_id TEXT PRIMARY KEY,
+                team_id TEXT NOT NULL,
+                at INTEGER NOT NULL,
+                saw_thinking INTEGER NOT NULL DEFAULT 0
+            );
+        `)
     }
 
     private createSchemaV1(): void {
@@ -527,6 +585,13 @@ export class TeamStore {
                 FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_team_messages_team_seq ON team_messages(team_id, seq);
+
+            CREATE TABLE IF NOT EXISTS team_pending_pings (
+                session_id TEXT PRIMARY KEY,
+                team_id TEXT NOT NULL,
+                at INTEGER NOT NULL,
+                saw_thinking INTEGER NOT NULL DEFAULT 0
+            );
         `)
     }
 

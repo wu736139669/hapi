@@ -18,6 +18,38 @@ function withStore<T>(fn: (store: TeamStore, dbPath: string) => T): T {
     }
 }
 
+describe('TeamStore pending pings', () => {
+    it('persists unanswered human pings across reopen', () => {
+        const directory = mkdtempSync(join(tmpdir(), 'hapi-team-store-'))
+        const dbPath = join(directory, 'teams.db')
+        try {
+            const first = new TeamStore(dbPath)
+            first.setPendingPing({ sessionId: 'sess-a', teamId: 'team-1', at: 123, sawThinking: false })
+            first.setPendingPing({ sessionId: 'sess-b', teamId: 'team-1', at: 456, sawThinking: true })
+            first.close()
+
+            const second = new TeamStore(dbPath)
+            const pings = second.listPendingPings().sort((a, b) => a.sessionId.localeCompare(b.sessionId))
+            expect(pings).toEqual([
+                { sessionId: 'sess-a', teamId: 'team-1', at: 123, sawThinking: false },
+                { sessionId: 'sess-b', teamId: 'team-1', at: 456, sawThinking: true }
+            ])
+
+            second.markPendingPingThinking('sess-a')
+            second.deletePendingPing('sess-b')
+            second.close()
+
+            const third = new TeamStore(dbPath)
+            expect(third.listPendingPings()).toEqual([
+                { sessionId: 'sess-a', teamId: 'team-1', at: 123, sawThinking: true }
+            ])
+            third.close()
+        } finally {
+            rmSync(directory, { recursive: true, force: true })
+        }
+    })
+})
+
 describe('TeamStore schema', () => {
     it('creates the v1 schema in a dedicated file', () => {
         withStore((store, dbPath) => {
@@ -35,6 +67,7 @@ describe('TeamStore schema', () => {
             expect(names).toContain('team_members')
             expect(names).toContain('team_tasks')
             expect(names).toContain('team_messages')
+            expect(names).toContain('team_pending_pings')
         })
     })
 

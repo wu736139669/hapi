@@ -111,7 +111,7 @@ export function buildSessionMetadata(options: {
         lifecycleStateSince: now,
         flavor: options.flavor,
         ...(process.env.HAPI_TEAM_ID?.trim()
-            ? { teamMemoryPath: resolveTeamMemoryDir() }
+            ? { teamMemoryPath: resolveTeamMemoryDir(process.cwd(), process.env) }
             : {}),
         capabilities: {
             terminal: true

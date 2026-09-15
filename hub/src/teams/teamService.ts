@@ -118,6 +118,26 @@ export class TeamService {
         this.store = store
         this.publish = publish
         this.runtime = runtime
+        // Restore unanswered human pings so a hub restart does not lose the
+        // reply bridge for members that were pinged before the restart.
+        for (const ping of this.store.listPendingPings()) {
+            this.pendingHumanPings.set(ping.sessionId, {
+                teamId: ping.teamId,
+                at: ping.at,
+                sawThinking: ping.sawThinking
+            })
+        }
+    }
+
+    private armHumanPing(sessionId: string, teamId: string): void {
+        const ping = { teamId, at: Date.now(), sawThinking: false }
+        this.pendingHumanPings.set(sessionId, ping)
+        this.store.setPendingPing({ sessionId, ...ping })
+    }
+
+    private clearHumanPing(sessionId: string): void {
+        this.pendingHumanPings.delete(sessionId)
+        this.store.deletePendingPing(sessionId)
     }
 
     // ------------------------------------------------------------ team basics
@@ -293,7 +313,7 @@ export class TeamService {
     ): Promise<TeamMessageRecord> {
         if (input.fromKind === 'session' && input.fromSessionId) {
             // The member answered through the team channel itself; no bridge needed.
-            this.pendingHumanPings.delete(input.fromSessionId)
+            this.clearHumanPing(input.fromSessionId)
         }
         const budget = readBudget(team.config)
         this.enforceMessageRate(team.id, budget)
@@ -359,11 +379,7 @@ export class TeamService {
         // never fan out into every member's context.
         if (target.toSessionId && this.runtime) {
             if (input.fromKind === 'human') {
-                this.pendingHumanPings.set(target.toSessionId, {
-                    teamId: team.id,
-                    at: Date.now(),
-                    sawThinking: false
-                })
+                this.armHumanPing(target.toSessionId, team.id)
             }
             const members = this.store.listMembers(team.id)
             const text = this.formatPeerText(team, members, {
@@ -710,6 +726,7 @@ export class TeamService {
         if (!pending) return
         if (thinking) {
             pending.sawThinking = true
+            this.store.markPendingPingThinking(sessionId)
             return
         }
         // Give the member a moment to actually start the turn before treating a
@@ -718,7 +735,7 @@ export class TeamService {
             return
         }
         const membership = this.store.findTeamBySession(sessionId, namespace)
-        this.pendingHumanPings.delete(sessionId)
+        this.clearHumanPing(sessionId)
         if (!membership || membership.team.id !== pending.teamId || membership.team.status !== 'active') {
             return
         }

@@ -1432,5 +1432,5 @@ export default {
   'newSession.member.task': '任务说明（可选）',
   'newSession.member.taskPlaceholder': '这个成员一开始要做什么？',
   'newSession.member.roleRequired': '请填写成员角色名称',
-  'team.memory.repoHint': '团队记忆跟着代码走：<repo>/.hapi/team/（Lead 会话启动时生成），也可在 Lead 会话的文件页查看。',
+  'team.memory.repoHint': '团队记忆跟着代码走：<repo>/.hapi/teams/<团队>/（Lead 会话启动时生成），也可在 Lead 会话的文件页查看。',
 } as const
