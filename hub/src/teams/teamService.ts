@@ -158,6 +158,11 @@ export class TeamService {
         this.publishUpdate(team)
         // Fire-and-forget: materialize the team memory dir (charter.md + handoffs/).
         void this.ensureTeamMemory(team).catch(() => {})
+        // Tell the lead what it is - a lead session spawned through the normal
+        // spawn path has no HAPI_TEAM_* env, so the brief is its team context.
+        if (input.leadSessionId) {
+            void this.deliverLeadBrief(team, input.leadSessionId).catch(() => {})
+        }
         return team
     }
 
@@ -566,6 +571,39 @@ export class TeamService {
         return { teamId: team.id, sessionId: newSessionId, role: input.role, taskId }
     }
 
+    private async deliverLeadBrief(team: TeamRecord, leadSessionId: string): Promise<void> {
+        const runtime = this.runtime
+        if (!runtime) return
+        try {
+            let view = runtime.resolveSession(leadSessionId)
+            for (let attempt = 0; attempt < ACTIVATION_POLL_ATTEMPTS && !view?.active; attempt++) {
+                await runtime.sleep(ACTIVATION_POLL_MS)
+                view = runtime.resolveSession(leadSessionId)
+            }
+            if (!view?.active) {
+                this.store.appendMessage({
+                    teamId: team.id,
+                    fromKind: 'hub',
+                    toKind: 'broadcast',
+                    kind: 'system',
+                    text: 'Lead 会话尚未就绪，团队工具会在其启动后可用'
+                })
+                this.publishUpdate(team)
+                return
+            }
+            const members = this.store.listMembers(team.id)
+            const text = this.formatPeerText(team, members, {
+                fromKind: 'hub',
+                fromSessionId: null,
+                fromRole: 'hub',
+                text: buildLeadBrief(team, this.teamMemoryDir(team.id))
+            })
+            await runtime.deliverPeerMessage({ sessionId: leadSessionId, text })
+        } catch {
+            // Best-effort; the human can still brief the lead in the group chat.
+        }
+    }
+
     private async deliverAssignment(
         team: TeamRecord,
         targetSessionId: string,
@@ -899,6 +937,17 @@ function taskTitle(brief: string): string {
     const firstLine = brief.split('\n')[0]?.trim() ?? ''
     const title = firstLine.length > 0 ? firstLine : brief.trim()
     return title.length > 120 ? `${title.slice(0, 117)}...` : title
+}
+
+function buildLeadBrief(team: TeamRecord, memoryDir: string | null): string {
+    return [
+        `你是 HAPI 团队「${team.name}」的 Lead。`,
+        '',
+        '职责：拆解任务、派生成员、汇总进展，必要时把决策升级给人类。',
+        '可用工具：team_status（成员/任务/预算）、team_read（拉取团队消息，广播不会主动推送）、team_send（汇报/分派/通知人类）、spawn_peer（派生成员，需用户批准）。',
+        '需要人类决策时用 team_send 的 to="human" 或 kind="decision"；人类也会在群聊里发言、加成员或调整任务。',
+        ...(memoryDir ? ['', `团队记忆目录（hub 主机）：${memoryDir}/（charter.md 是团队规约，交接产物写到 handoffs/）`] : [])
+    ].join('\n')
 }
 
 /**

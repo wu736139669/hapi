@@ -82,6 +82,8 @@ describe('Agent Team member routes', () => {
     it('sends team messages with push for directed targets', async () => {
         const { app, delivered } = createApp()
         const teamId = await createTeam(app)
+        // The createTeam lead brief is delivered fire-and-forget.
+        delivered.length = 0
 
         const broadcast = await app.request(`/api/teams/${teamId}/messages`, {
             method: 'POST',

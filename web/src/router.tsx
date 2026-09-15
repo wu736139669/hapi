@@ -374,7 +374,6 @@ function SessionsPage() {
             </div>
             <TeamCreateDialog
                 open={createTeamOpen}
-                sessions={sessions}
                 onClose={() => setCreateTeamOpen(false)}
                 onCreated={(teamId) => {
                     setCreateTeamOpen(false)

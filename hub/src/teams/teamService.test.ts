@@ -165,6 +165,9 @@ describe('TeamService messaging', () => {
             flavor: 'codex',
             inWorktree: false
         })
+        // The createTeam lead brief is delivered fire-and-forget; tests assert
+        // on messages sent after setup.
+        delivered.length = 0
         return { service, store, team, events, delivered, sessions }
     }
 
@@ -298,6 +301,7 @@ describe('TeamService spawning', () => {
         addCallerSession(sessions)
         try {
             const team = service.createTeam('alpha', { name: 'Refactor auth', leadSessionId: 'sess-lead' })
+            delivered.length = 0
             const result = await service.spawnMember('sess-lead', 'alpha', {
                 role: 'builder',
                 task: 'Refactor the session layer',
@@ -342,6 +346,7 @@ describe('TeamService spawning', () => {
         addCallerSession(sessions)
         try {
             service.createTeam('alpha', { name: 'Refactor auth', leadSessionId: 'sess-lead' })
+            delivered.length = 0
             await service.spawnMember('sess-lead', 'alpha', { role: 'builder', task: 'do it' })
             await flushAsync()
             expect(delivered).toHaveLength(0)
@@ -461,6 +466,7 @@ describe('TeamService web task management', () => {
             flavor: 'codex',
             inWorktree: false
         })
+        delivered.length = 0
         return { service, store, team, delivered }
     }
 
@@ -531,6 +537,26 @@ describe('TeamService web task management', () => {
     })
 })
 
+describe('TeamService lead brief', () => {
+    it('delivers a lead brief when the team is created with a lead session', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-team-lead-brief-'))
+        const { runtime, sessions, delivered } = createRuntime()
+        const service = new TeamService(new TeamStore(':memory:'), () => {}, runtime, { memoryRoot: dir })
+        addCallerSession(sessions)
+        try {
+            service.createTeam('alpha', { name: 'Refactor auth', leadSessionId: 'sess-lead' })
+            await flushAsync()
+            expect(delivered).toHaveLength(1)
+            expect(delivered[0]?.sessionId).toBe('sess-lead')
+            expect(delivered[0]?.text).toContain('Lead')
+            expect(delivered[0]?.text).toContain('团队记忆目录')
+        } finally {
+            service.close()
+            rmSync(dir, { recursive: true, force: true })
+        }
+    })
+})
+
 describe('TeamService member down handling', () => {
     function setup() {
         const { runtime, sessions, delivered } = createRuntime()
@@ -549,6 +575,7 @@ describe('TeamService member down handling', () => {
             flavor: 'codex',
             inWorktree: false
         })
+        delivered.length = 0
         return { service, store, team, sessions, delivered, events }
     }
 

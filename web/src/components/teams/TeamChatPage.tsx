@@ -148,7 +148,7 @@ export function TeamChatPage() {
     return (
         <div className="flex h-full min-h-0">
             <div className="flex min-w-0 flex-1 flex-col">
-                <div className="flex items-center gap-2 border-b border-[var(--app-divider)] px-3 py-2">
+                <div className="flex items-center gap-2 border-b border-[var(--app-divider)] px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))]">
                     <button
                         type="button"
                         onClick={() => navigate({ to: '/sessions' })}
@@ -326,7 +326,7 @@ export function TeamChatPage() {
             ) : null}
 
             {panelOpen ? (
-                <div className="split:hidden fixed inset-0 z-50 flex justify-end bg-black/30" onClick={() => setPanelOpen(false)}>
+                <div className="split:hidden fixed inset-0 z-50 flex justify-end bg-black/30 pt-[env(safe-area-inset-top)]" onClick={() => setPanelOpen(false)}>
                     <div className="h-full w-[85%] max-w-[360px] bg-[var(--app-bg)]" onClick={(event) => event.stopPropagation()}>
                         {panel}
                     </div>
