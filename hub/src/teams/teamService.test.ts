@@ -611,6 +611,41 @@ describe('TeamService human ping bridging', () => {
             service.close()
         }
     })
+
+    it('keeps the pending ping across a hub restart', async () => {
+        const { runtime, sessions, assistantTexts } = createRuntime()
+        const store = new TeamStore(':memory:')
+        const beforeRestart = new TeamService(store, () => {}, runtime)
+        try {
+            addCallerSession(sessions)
+            const team = beforeRestart.createTeam('alpha', { name: 'Refactor auth' })
+            store.addMember(team.id, 'sess-builder', 'builder')
+            sessions.set('sess-builder', {
+                id: 'sess-builder',
+                active: true,
+                thinking: false,
+                machineId: 'machine-1',
+                directory: '/repo',
+                flavor: 'codex',
+                inWorktree: false
+            })
+
+            await beforeRestart.sendHumanMessage('alpha', team.id, { text: '你好', to: 'sess-builder' })
+            assistantTexts.set('sess-builder', '收到，这就开始')
+
+            // A fresh TeamService (hub restart) must still bridge the reply.
+            const afterRestart = new TeamService(store, () => {}, runtime)
+            await afterRestart.handleMemberActivity('sess-builder', 'alpha', true)
+            await afterRestart.handleMemberActivity('sess-builder', 'alpha', false)
+
+            const bridged = store.listMessages(team.id)
+                .filter((message) => (message.meta as { bridged?: boolean } | null)?.bridged === true)
+            expect(bridged).toHaveLength(1)
+            expect(bridged[0]?.text).toContain('收到，这就开始')
+        } finally {
+            beforeRestart.close()
+        }
+    })
 })
 
 describe('TeamService decision inbox', () => {
