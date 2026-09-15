@@ -21,7 +21,6 @@ import { App } from '@/App'
 import { SessionChat } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
 import { TeamChatPage } from '@/components/teams/TeamChatPage'
-import { TeamCreateDialog } from '@/components/teams/TeamCreateDialog'
 import { TeamSidebarSection } from '@/components/teams/TeamSidebarSection'
 import { SessionShareManagerDialog } from '@/components/SessionShareManagerDialog'
 import { NewSession } from '@/components/NewSession'
@@ -209,7 +208,6 @@ function SessionsPage() {
     const { preferences: toolbarPreferences } = useSessionListToolbar()
     const { sessions, isLoading, error, refetch } = useSessions(isSessionGuest ? null : api)
     const { teams, supported: teamsSupported } = useTeams(isSessionGuest ? null : api)
-    const [createTeamOpen, setCreateTeamOpen] = useState(false)
     const {
         shares: sessionShares,
         isLoading: sessionSharesLoading,
@@ -311,7 +309,6 @@ function SessionsPage() {
                                     to: '/sessions/teams/$teamId',
                                     params: { teamId },
                                 })}
-                                onCreateTeam={() => setCreateTeamOpen(true)}
                             />
                         ) : undefined}
                         onSelect={(sessionId) => navigate(getSessionListSelectionNavigation(sessionId))}
@@ -372,14 +369,6 @@ function SessionsPage() {
                 </div>
             </div>
             </div>
-            <TeamCreateDialog
-                open={createTeamOpen}
-                onClose={() => setCreateTeamOpen(false)}
-                onCreated={(teamId) => {
-                    setCreateTeamOpen(false)
-                    navigate({ to: '/sessions/teams/$teamId', params: { teamId } })
-                }}
-            />
             <SessionShareManagerDialog
                 isOpen={sessionSharesOpen}
                 shares={sessionShares}

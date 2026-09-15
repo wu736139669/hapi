@@ -9,9 +9,13 @@ export function TeamSidebarSection(props: {
     teams: TeamSummary[]
     selectedTeamId?: string | null
     onSelectTeam: (teamId: string) => void
-    onCreateTeam?: () => void
 }) {
     const { t } = useTranslation()
+    // Teams are created from the New Session form (session type: Team); an
+    // empty section would just be noise.
+    if (props.teams.length === 0) {
+        return null
+    }
 
     return (
         <div className="mb-1">
@@ -19,19 +23,6 @@ export function TeamSidebarSection(props: {
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--app-hint)]">
                     {t('team.section.title')}
                 </span>
-                {props.onCreateTeam ? (
-                    <button
-                        type="button"
-                        onClick={props.onCreateTeam}
-                        className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
-                        title={t('team.create.title')}
-                        aria-label={t('team.create.title')}
-                    >
-                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M12 5v14M5 12h14" />
-                        </svg>
-                    </button>
-                ) : null}
             </div>
             <div className="flex flex-col gap-0.5">
                 {props.teams.map((team) => (
