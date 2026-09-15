@@ -519,6 +519,26 @@ describe('TeamService web task management', () => {
         }
     })
 
+    it('sets a lead on a leaderless team and delivers the brief', async () => {
+        const { runtime, sessions, delivered } = createRuntime()
+        const service = new TeamService(new TeamStore(':memory:'), () => {}, runtime)
+        addCallerSession(sessions)
+        try {
+            const team = service.createTeam('alpha', { name: 'Refactor auth' })
+            delivered.length = 0
+            const updated = service.updateTeamMeta('alpha', team.id, { leadSessionId: 'sess-lead' })
+            expect(updated.leadSessionId).toBe('sess-lead')
+            expect(service.getTeamDetail(team.id, 'alpha')?.members.some((m) => m.role === 'lead')).toBe(true)
+            await flushAsync()
+            expect(delivered.some((message) => message.sessionId === 'sess-lead')).toBe(true)
+
+            expect(() => service.updateTeamMeta('alpha', team.id, { leadSessionId: 'sess-missing' }))
+                .toThrow('Lead session not found')
+        } finally {
+            service.close()
+        }
+    })
+
     it('renames, archives and deletes teams from the web', async () => {
         const { service, team } = setup()
         try {

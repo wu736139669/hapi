@@ -183,7 +183,8 @@ export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
         try {
             const team = teams.updateTeamMeta(c.get('namespace'), c.req.param('id'), {
                 ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
-                ...(parsed.data.status !== undefined ? { status: parsed.data.status } : {})
+                ...(parsed.data.status !== undefined ? { status: parsed.data.status } : {}),
+                ...(parsed.data.leadSessionId !== undefined ? { leadSessionId: parsed.data.leadSessionId } : {})
             })
             c.header('Cache-Control', 'no-store')
             return c.json({ team })

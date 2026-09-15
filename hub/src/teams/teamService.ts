@@ -454,11 +454,25 @@ export class TeamService {
         return updated
     }
 
-    /** Rename / archive a team from the web app. */
-    updateTeamMeta(namespace: string, teamId: string, patch: { name?: string; status?: 'active' | 'archived' }): TeamRecord {
+    /** Rename / archive / set-lead from the web app. */
+    updateTeamMeta(
+        namespace: string,
+        teamId: string,
+        patch: { name?: string; status?: 'active' | 'archived'; leadSessionId?: string | null }
+    ): TeamRecord {
+        if (patch.leadSessionId) {
+            const view = this.runtime?.resolveSession(patch.leadSessionId)
+            if (this.runtime && !view) {
+                throw new TeamServiceError('invalid', 'Lead session not found on this hub')
+            }
+        }
         const updated = this.store.updateTeam(teamId, namespace, patch)
         if (!updated) {
             throw new TeamServiceError('not_found', 'Team not found')
+        }
+        if (patch.leadSessionId) {
+            this.store.addMember(teamId, patch.leadSessionId, 'lead')
+            void this.deliverLeadBrief(updated, patch.leadSessionId).catch(() => {})
         }
         this.publishUpdate(updated)
         return updated

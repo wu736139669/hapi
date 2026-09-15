@@ -1433,4 +1433,8 @@ export default {
   'team.create.needMachine': 'Pick a machine first',
   'team.create.needDirectory': 'Enter a directory first',
   'team.add.locationHint': 'Members run on the lead session\'s machine and directory; enable the worktree option to isolate file changes.',
+  'team.settings.save': 'Save',
+  'team.settings.lead': 'Lead session',
+  'team.settings.leadNone': 'No lead',
+  'team.settings.leadHint': 'The lead spawns members and reports progress. Members can only be added once a lead is set.',
 } as const

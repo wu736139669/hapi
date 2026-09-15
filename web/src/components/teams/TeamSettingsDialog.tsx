@@ -1,10 +1,20 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { TeamSummary } from '@/types/team'
+import type { SessionSummary } from '@/types/api'
 import { useAppContext } from '@/lib/app-context'
 import { useTranslation } from '@/lib/use-translation'
 import { queryKeys } from '@/lib/query-keys'
+import { useSessions } from '@/hooks/queries/useSessions'
 import { TeamDialog } from './TeamDialog'
+
+function sessionLabel(session: SessionSummary): string {
+    const name = session.metadata?.name?.trim()
+    if (name) return name
+    const path = session.metadata?.path ?? ''
+    const base = path.split('/').filter(Boolean).pop()
+    return base ?? session.id.slice(0, 8)
+}
 
 export function TeamSettingsDialog(props: {
     open: boolean
@@ -16,22 +26,31 @@ export function TeamSettingsDialog(props: {
     const { api } = useAppContext()
     const { t } = useTranslation()
     const queryClient = useQueryClient()
+    const { sessions } = useSessions(api)
     const [name, setName] = useState('')
+    const [leadSessionId, setLeadSessionId] = useState('')
     const [confirmDelete, setConfirmDelete] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
     useEffect(() => {
         if (props.team) {
             setName(props.team.name)
+            setLeadSessionId(props.team.leadSessionId ?? '')
             setConfirmDelete(false)
             setError(null)
         }
     }, [props.team])
 
-    const rename = useMutation({
+    const leadChanged = Boolean(props.team) && (props.team?.leadSessionId ?? '') !== leadSessionId
+    const nameChanged = Boolean(props.team) && name.trim().length > 0 && name.trim() !== props.team?.name
+
+    const saveSettings = useMutation({
         mutationFn: async () => {
             if (!api || !props.team) throw new Error('API unavailable')
-            return await api.updateTeam(props.team.id, { name: name.trim() })
+            return await api.updateTeam(props.team.id, {
+                ...(nameChanged ? { name: name.trim() } : {}),
+                ...(leadChanged ? { leadSessionId: leadSessionId || null } : {}),
+            })
         },
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.teams })
@@ -71,7 +90,7 @@ export function TeamSettingsDialog(props: {
         onError: (mutationError) => setError(mutationError instanceof Error ? mutationError.message : String(mutationError)),
     })
 
-    const busy = rename.isPending || setStatus.isPending || remove.isPending
+    const busy = saveSettings.isPending || setStatus.isPending || remove.isPending
     const archived = props.team?.status === 'archived'
 
     return (
@@ -90,11 +109,11 @@ export function TeamSettingsDialog(props: {
                     </button>
                     <button
                         type="button"
-                        disabled={busy || name.trim().length === 0 || name.trim() === props.team?.name}
-                        onClick={() => rename.mutate()}
+                        disabled={busy || (!nameChanged && !leadChanged)}
+                        onClick={() => saveSettings.mutate()}
                         className="rounded-lg bg-[var(--app-fg)] px-3 py-1.5 text-sm font-medium text-[var(--app-bg)] disabled:opacity-40"
                     >
-                        {t('team.settings.rename')}
+                        {t('team.settings.save')}
                     </button>
                 </>
             }
@@ -107,6 +126,21 @@ export function TeamSettingsDialog(props: {
                         onChange={(event) => setName(event.target.value)}
                         className="rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
                     />
+                </label>
+
+                <label className="flex flex-col gap-1">
+                    <span className="text-xs text-[var(--app-hint)]">{t('team.settings.lead')}</span>
+                    <select
+                        value={leadSessionId}
+                        onChange={(event) => setLeadSessionId(event.target.value)}
+                        className="rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)]"
+                    >
+                        <option value="">{t('team.settings.leadNone')}</option>
+                        {sessions.map((session) => (
+                            <option key={session.id} value={session.id}>{sessionLabel(session)}</option>
+                        ))}
+                    </select>
+                    <span className="text-[11px] text-[var(--app-hint)]">{t('team.settings.leadHint')}</span>
                 </label>
 
                 <button

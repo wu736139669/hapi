@@ -193,6 +193,14 @@ describe('Agent Team member routes', () => {
         })
         expect(invalid.status).toBe(400)
 
+        const led = await app.request(`/api/teams/${teamId}`, {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ leadSessionId: 'sess-lead' })
+        })
+        expect(led.status).toBe(200)
+        expect((await led.json() as { team: { leadSessionId: string } }).team.leadSessionId).toBe('sess-lead')
+
         const renamed = await app.request(`/api/teams/${teamId}`, {
             method: 'PATCH',
             headers: { 'content-type': 'application/json' },

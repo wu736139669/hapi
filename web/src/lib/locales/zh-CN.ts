@@ -1432,4 +1432,8 @@ export default {
   'team.create.needMachine': '请先选择机器',
   'team.create.needDirectory': '请先填写目录',
   'team.add.locationHint': '成员运行在 Lead 会话的机器与目录下；勾选 worktree 可隔离文件改动。',
+  'team.settings.save': '保存',
+  'team.settings.lead': 'Lead 会话',
+  'team.settings.leadNone': '不设置',
+  'team.settings.leadHint': 'Lead 负责派生成员与汇总进展；没有 Lead 时无法加成员。',
 } as const

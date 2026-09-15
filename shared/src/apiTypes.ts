@@ -501,10 +501,13 @@ export type CreateTeamTaskRequest = z.infer<typeof CreateTeamTaskRequestSchema>
 
 export const UpdateTeamRequestSchema = z.object({
     name: z.string().min(1).max(200).optional(),
-    status: z.enum(['active', 'archived']).optional()
-}).refine((value) => value.name !== undefined || value.status !== undefined, {
-    message: 'name or status is required'
-})
+    status: z.enum(['active', 'archived']).optional(),
+    /** Set (or clear) the lead session. */
+    leadSessionId: z.string().min(1).nullable().optional()
+}).refine(
+    (value) => value.name !== undefined || value.status !== undefined || value.leadSessionId !== undefined,
+    { message: 'name, status or leadSessionId is required' }
+)
 
 export type UpdateTeamRequest = z.infer<typeof UpdateTeamRequestSchema>
 
