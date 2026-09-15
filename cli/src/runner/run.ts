@@ -1095,6 +1095,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
     // Write initial runner state (no lock needed for state file)
     const fileState: RunnerLocallyPersistedState = {
+      sharedCodexRuntime: true,
       pid: process.pid,
       httpPort: controlPort,
       startTime: new Date().toLocaleString(),
