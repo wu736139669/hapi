@@ -333,7 +333,7 @@ vi.mock('./ActionButtons', () => ({
 
 import { NewSession } from './index'
 
-const machine = { id: 'machine-1' } as Machine
+const machine = { id: 'machine-1', runnerState: { capabilities: { agentTeam: true } } } as Machine
 const api = {} as ApiClient
 
 describe('NewSession launch preferences', () => {
@@ -1226,5 +1226,34 @@ describe('NewSession launch preferences', () => {
         }))
         expect(mocks.onTeamSuccess).toHaveBeenCalledWith('team-1')
         expect(mocks.onSuccess).not.toHaveBeenCalled()
+    })
+
+    it('refuses to create a team on a runner without the agentTeam capability', async () => {
+        const createTeam = vi.fn().mockResolvedValue({ team: { id: 'team-1' } })
+        ;(api as unknown as { createTeam: typeof createTeam }).createTeam = createTeam
+
+        render(
+            <NewSession
+                api={api}
+                machines={[{ id: 'machine-old' } as Machine]}
+                initialMachineId="machine-old"
+                initialDirectory="C:\\repo"
+                onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+                onCancel={() => {}}
+            />
+        )
+
+        fireEvent.click(screen.getByLabelText('team'))
+        fireEvent.change(screen.getByLabelText('team-name'), {
+            target: { value: 'Auth 重构' }
+        })
+
+        await waitFor(() => expect(screen.getByTestId('create')).toBeEnabled())
+        fireEvent.click(screen.getByTestId('create'))
+
+        await waitFor(() => expect(screen.getByText('newSession.team.machineUnsupported')).toBeTruthy())
+        expect(createTeam).not.toHaveBeenCalled()
+        expect(mocks.spawnSession).not.toHaveBeenCalled()
     })
 })

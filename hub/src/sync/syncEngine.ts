@@ -11,6 +11,7 @@ import { isKnownFlavor, isSteeringSupportedForSession, type LocalResumeTarget, t
 import {
     cliBinaryUpdatedOnDisk,
     isMachineCapabilitySkewed,
+    runnerSupportsAgentTeam,
 } from '@hapi/protocol/runnerCapabilities'
 import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, RewindConversationErrorCode, SlashCommandsResponse, ImplementCodexPlanResult } from '@hapi/protocol/apiTypes'
 import type { SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
@@ -2091,6 +2092,16 @@ export class SyncEngine {
         team?: { id: string; name: string; role: string }
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
         if (team) {
+            // Team sessions only work when the runner injects HAPI_TEAM_* into
+            // the child. Old runners silently ignore the team payload, which
+            // produces a lead with no team tools/prompt, so fail loudly instead.
+            const machine = this.machineCache.getMachine(machineId)
+            if (!runnerSupportsAgentTeam(machine?.runnerState)) {
+                return {
+                    type: 'error',
+                    message: 'This runner does not support Agent Team yet. Upgrade the HAPI CLI on that machine and restart the runner.'
+                }
+            }
             return await this.rpcGateway.spawnSession(
                 machineId,
                 directory,

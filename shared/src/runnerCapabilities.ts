@@ -33,6 +33,13 @@ export type RunnerCapabilities = typeof RUNNER_CAPABILITIES
  * in {@link REQUIRED_MACHINE_CAPABILITIES} so skew surfaces as a banner
  * instead of a silent fail-closed product bug.
  */
+/** Runner-state capability check shared by hub gates and web pickers. */
+export function runnerSupportsAgentTeam(
+    runnerState: { capabilities?: { agentTeam?: true } } | null | undefined
+): boolean {
+    return runnerState?.capabilities?.agentTeam === true
+}
+
 export const MACHINE_CAPABILITIES = {
     AgentAvailability: RPC_METHODS.AgentAvailability,
     CursorChatStoreStatus: RPC_METHODS.CursorChatStoreStatus,

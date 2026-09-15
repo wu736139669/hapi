@@ -53,6 +53,7 @@ import { AgyModelSelector } from './AgyModelSelector'
 import { DirectorySection } from './DirectorySection'
 import { CopilotAgentModeSelector } from './CopilotAgentModeSelector'
 import { FastModeSelector } from './FastModeSelector'
+import { runnerSupportsAgentTeam } from '@hapi/protocol/runnerCapabilities'
 import { MachineSelector } from './MachineSelector'
 import { ModelSelector } from './ModelSelector'
 import { OpencodeModelSelector } from './OpencodeModelSelector'
@@ -1752,6 +1753,16 @@ export function NewSession(props: {
                 return
             }
 
+            if (
+                (sessionType === 'team' || props.teamId)
+                && selectedMachine
+                && !runnerSupportsAgentTeam(selectedMachine.runnerState)
+            ) {
+                haptic.notification('error')
+                setError(t('newSession.team.machineUnsupported'))
+                return
+            }
+
             if (sessionType === 'worktree' && directoryExists === false) {
                 haptic.notification('error')
                 setError(t('session.directoryMissingWorktree'))
@@ -2084,6 +2095,7 @@ export function NewSession(props: {
                 machineId={machineId}
                 isLoading={props.isLoading}
                 isDisabled={isFormDisabled}
+                requiresAgentTeam={sessionType === 'team' || Boolean(props.teamId)}
                 onChange={handleMachineChange}
             />
             {runnerSpawnError ? (

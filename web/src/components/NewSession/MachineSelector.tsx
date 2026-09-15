@@ -1,5 +1,5 @@
 import type { Machine } from '@/types/api'
-import { isMachineCapabilitySkewed } from '@hapi/protocol/runnerCapabilities'
+import { isMachineCapabilitySkewed, runnerSupportsAgentTeam } from '@hapi/protocol/runnerCapabilities'
 import { useTranslation } from '@/lib/use-translation'
 import { SelectControl } from '@/components/ui/select-control'
 
@@ -9,7 +9,12 @@ function getMachineTitle(machine: Machine): string {
     return machine.id.slice(0, 8)
 }
 
-function getMachineOptionLabel(machine: Machine, updateRequiredLabel: string): string {
+function getMachineOptionLabel(
+    machine: Machine,
+    updateRequiredLabel: string,
+    teamUnsupportedLabel: string,
+    requiresAgentTeam: boolean
+): string {
     const title = getMachineTitle(machine)
     const platform = machine.metadata?.platform ? ` (${machine.metadata.platform})` : ''
     const version = machine.metadata?.happyCliVersion
@@ -18,7 +23,10 @@ function getMachineOptionLabel(machine: Machine, updateRequiredLabel: string): s
     const skew = machine.active && isMachineCapabilitySkewed(machine.metadata?.capabilities)
         ? ` · ${updateRequiredLabel}`
         : ''
-    return `${title}${platform}${version}${skew}`
+    const team = requiresAgentTeam && !runnerSupportsAgentTeam(machine.runnerState)
+        ? ` · ${teamUnsupportedLabel}`
+        : ''
+    return `${title}${platform}${version}${skew}${team}`
 }
 
 export function MachineSelector(props: {
@@ -26,6 +34,8 @@ export function MachineSelector(props: {
     machineId: string | null
     isLoading?: boolean
     isDisabled: boolean
+    /** Team mode: machines without the agentTeam capability cannot host team sessions. */
+    requiresAgentTeam?: boolean
     onChange: (machineId: string) => void
 }) {
     const { t } = useTranslation()
@@ -47,11 +57,19 @@ export function MachineSelector(props: {
                 {!props.isLoading && props.machines.length === 0 && (
                     <option value="">{t('misc.noMachines')}</option>
                 )}
-                {props.machines.map((m) => (
-                    <option key={m.id} value={m.id}>
-                        {getMachineOptionLabel(m, t('runner.skew.updateRequired'))}
-                    </option>
-                ))}
+                {props.machines.map((m) => {
+                    const blocked = props.requiresAgentTeam === true && !runnerSupportsAgentTeam(m.runnerState)
+                    return (
+                        <option key={m.id} value={m.id} disabled={blocked}>
+                            {getMachineOptionLabel(
+                                m,
+                                t('runner.skew.updateRequired'),
+                                t('runner.skew.teamUnsupported'),
+                                props.requiresAgentTeam === true
+                            )}
+                        </option>
+                    )
+                })}
             </SelectControl>
         </div>
     )
