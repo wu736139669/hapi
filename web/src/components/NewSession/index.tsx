@@ -2108,7 +2108,7 @@ export function NewSession(props: {
                 isDisabled={isFormDisabled}
                 onAgentChange={handleAgentChange}
             />
-            {sessionType !== 'team' && agent === 'claude' ? (
+            {sessionType !== 'team' && !props.teamId && agent === 'claude' ? (
                 <ClaudeImportActions
                     selectedSession={selectedClaudeImportSession}
                     isLoading={isLoadingClaudeImportSessions}
@@ -2121,7 +2121,7 @@ export function NewSession(props: {
                     onClear={() => setSelectedClaudeImportSessionId(null)}
                 />
             ) : null}
-            {sessionType !== 'team' && agent === 'codex' ? (
+            {sessionType !== 'team' && !props.teamId && agent === 'codex' ? (
                 <CodexImportActions
                     selectedSession={selectedCodexImportSession}
                     isLoading={isLoadingCodexImportSessions}
@@ -2134,7 +2134,7 @@ export function NewSession(props: {
                     onClear={() => setSelectedCodexImportSessionId(null)}
                 />
             ) : null}
-            {sessionType !== 'team' && agent === 'pi' ? (
+            {sessionType !== 'team' && !props.teamId && agent === 'pi' ? (
                 <PiImportActions
                     selectedSession={selectedPiImportSession}
                     isLoading={isLoadingPiImportSessions}
@@ -2147,7 +2147,7 @@ export function NewSession(props: {
                     onClear={() => setSelectedPiImportSessionId(null)}
                 />
             ) : null}
-            {sessionType !== 'team' && agent === 'dsh' ? (
+            {sessionType !== 'team' && !props.teamId && agent === 'dsh' ? (
                 <DshImportActions
                     selectedSession={selectedDshImportSession}
                     isLoading={isLoadingDshImportSessions}
