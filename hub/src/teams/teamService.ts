@@ -49,6 +49,8 @@ export interface TeamSpawnMemberInput {
 
 export interface TeamRuntime {
     resolveSession(sessionId: string): TeamSessionView | null
+    /** Latest assistant plain text of a session (for bridging replies). */
+    lastAssistantText(sessionId: string): string | null
     spawnMember(input: TeamSpawnMemberInput): Promise<{ ok: true; sessionId: string } | { ok: false; message: string }>
     deliverPeerMessage(input: { sessionId: string; text: string }): Promise<void>
     sleep(ms: number): Promise<void>
@@ -100,6 +102,7 @@ const DEFAULT_BUDGET: TeamBudget = {
 }
 
 const ACTIVATION_POLL_MS = 1000
+const HUMAN_PING_TURN_GRACE_MS = 20_000
 const ACTIVATION_POLL_ATTEMPTS = 30
 
 /**
@@ -115,6 +118,12 @@ export class TeamService {
     private readonly messageLog = new Map<string, number[]>()
     /** Sessions already announced as down, keyed `${teamId}:${sessionId}`. */
     private readonly downNotified = new Set<string>()
+    /**
+     * Human->member pings awaiting a reply, keyed by member session id. When the
+     * member finishes its turn, its reply text is bridged into the team log so
+     * the group chat mirrors the human<->member conversation.
+     */
+    private readonly pendingHumanPings = new Map<string, { teamId: string; at: number; sawThinking: boolean }>()
 
     constructor(
         store: TeamStore,
@@ -271,6 +280,10 @@ export class TeamService {
             inReplyTo?: number
         }
     ): Promise<TeamMessageRecord> {
+        if (input.fromKind === 'session' && input.fromSessionId) {
+            // The member answered through the team channel itself; no bridge needed.
+            this.pendingHumanPings.delete(input.fromSessionId)
+        }
         const budget = readBudget(team.config)
         this.enforceMessageRate(team.id, budget)
         const replyDepth = this.resolveReplyDepth(team.id, input.inReplyTo, budget)
@@ -312,12 +325,21 @@ export class TeamService {
         // Push only for directed messages; broadcasts stay pull-only so they
         // never fan out into every member's context.
         if (target.toSessionId && this.runtime) {
+            if (input.fromKind === 'human') {
+                this.pendingHumanPings.set(target.toSessionId, {
+                    teamId: team.id,
+                    at: Date.now(),
+                    sawThinking: false
+                })
+            }
             const members = this.store.listMembers(team.id)
             const text = this.formatPeerText(team, members, {
                 fromKind: input.fromKind,
                 fromSessionId: input.fromSessionId,
                 fromRole: input.fromRole,
-                text: input.text
+                text: input.fromKind === 'human'
+                    ? `${input.text}\n\n（这是人类在团队群里的消息，直接回复即可，回复会自动同步到群聊。）`
+                    : input.text
             })
             try {
                 await this.runtime.deliverPeerMessage({ sessionId: target.toSessionId, text })
@@ -583,6 +605,44 @@ export class TeamService {
             void this.deliverAssignment(team, newSessionId, input.role, input.task, task?.id ?? null)
         }
         return { teamId: team.id, sessionId: newSessionId, role: input.role, taskId }
+    }
+
+    /**
+     * Called on member session activity changes. When a member that received a
+     * human ping finishes its turn, its last assistant text is mirrored into the
+     * team log (broadcast), so the group chat shows the reply without requiring
+     * the agent to call team_send.
+     */
+    async handleMemberActivity(sessionId: string, namespace: string, thinking: boolean): Promise<void> {
+        const pending = this.pendingHumanPings.get(sessionId)
+        if (!pending) return
+        if (thinking) {
+            pending.sawThinking = true
+            return
+        }
+        // Give the member a moment to actually start the turn before treating a
+        // quiet session as "finished replying".
+        if (!pending.sawThinking && Date.now() - pending.at < HUMAN_PING_TURN_GRACE_MS) {
+            return
+        }
+        const membership = this.store.findTeamBySession(sessionId, namespace)
+        this.pendingHumanPings.delete(sessionId)
+        if (!membership || membership.team.id !== pending.teamId || membership.team.status !== 'active') {
+            return
+        }
+        const raw = this.runtime?.lastAssistantText(sessionId) ?? null
+        const text = raw?.trim()
+        if (!text) return
+        this.store.appendMessage({
+            teamId: membership.team.id,
+            fromKind: 'session',
+            fromSessionId: sessionId,
+            toKind: 'broadcast',
+            kind: 'chat',
+            text: text.length > 4000 ? `${text.slice(0, 3997)}...` : text,
+            meta: { bridged: true, fromRole: membership.member.role }
+        })
+        this.publishUpdate(membership.team)
     }
 
     private async deliverLeadBrief(team: TeamRecord, leadSessionId: string): Promise<void> {
@@ -960,6 +1020,7 @@ function buildLeadBrief(team: TeamRecord, memoryDir: string | null): string {
         '职责：拆解任务、派生成员、汇总进展，必要时把决策升级给人类。',
         '可用工具：team_status（成员/任务/预算）、team_read（拉取团队消息，广播不会主动推送）、team_send（汇报/分派/通知人类）、spawn_peer（派生成员，需用户批准）。',
         '需要人类决策时用 team_send 的 to="human" 或 kind="decision"；人类也会在群聊里发言、加成员或调整任务。',
+        '你在自己会话里的正常回复会自动同步到团队群聊（人类可见），不需要用 team_send 转述。',
         ...(memoryDir ? ['', `团队记忆目录（hub 主机）：${memoryDir}/（charter.md 是团队规约，交接产物写到 handoffs/）`] : [])
     ].join('\n')
 }
@@ -987,7 +1048,7 @@ function buildAssignmentBrief(
         '- 进展/完成/阻塞用 team_send 汇报（kind=status 或 task-update）；完成后用 team_status 核对任务状态。',
         '- 不要用 team_send 闲聊或找人类对话；批量汇报，避免来回对话。',
         '- 需要人类决策时，用 team_send 的 to="human" 或 kind="decision"（会直接通知人类）。',
-        '- 你的普通回复会留在自己的会话里，人类和 lead 可随时查看。'
+        '- 你的普通回复会留在自己的会话里，并会自动同步到团队群聊（人类可见）。'
     ].join('\n')
 }
 

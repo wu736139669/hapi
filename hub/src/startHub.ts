@@ -32,7 +32,7 @@ import QRCode from 'qrcode'
 import { join } from 'node:path'
 import type { Server as BunServer } from 'bun'
 import type { WebSocketData } from '@socket.io/bun-engine'
-import { AgentFlavorSchema } from '@hapi/protocol'
+import { AgentFlavorSchema, extractAssistantPlainText } from '@hapi/protocol'
 import type { AgentFlavor } from '@hapi/protocol/types'
 
 /** Format config source for logging */
@@ -235,6 +235,20 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
                 inWorktree: session.metadata?.worktree != null
             }
         },
+        lastAssistantText: (sessionId) => {
+            const messages = store.messages.getMessagesByPosition(sessionId, 12)
+            for (let index = messages.length - 1; index >= 0; index -= 1) {
+                const envelope = messages[index]?.content
+                if (!envelope || typeof envelope !== 'object') continue
+                const record = envelope as { role?: unknown; content?: unknown }
+                if (record.role !== 'agent') continue
+                const text = extractAssistantPlainText(record.content)
+                if (text && text.trim().length > 0) {
+                    return text
+                }
+            }
+            return null
+        },
         spawnMember: async (input) => {
             if (!syncEngine) {
                 return { ok: false, message: 'Hub is not ready' }
@@ -284,14 +298,18 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         // Member session ended -> announce in the team log and wake the lead
         // (or notify the human when the lead itself went down).
         syncEngine.subscribe((event) => {
-            if (event.type !== 'session-ended' || !event.sessionId) {
+            if (event.type === 'session-ended' && event.sessionId) {
+                const namespace = store.sessions.getSession(event.sessionId)?.namespace
+                if (!namespace) return
+                void teamService.handleSessionDown(event.sessionId, namespace, event.reason)
                 return
             }
-            const namespace = store.sessions.getSession(event.sessionId)?.namespace
-            if (!namespace) {
-                return
+            if (event.type === 'session-updated' && event.sessionId) {
+                const session = syncEngine?.getSession(event.sessionId)
+                if (!session) return
+                // Cheap no-op unless the session has a human ping awaiting a reply.
+                void teamService.handleMemberActivity(event.sessionId, session.namespace, session.thinking)
             }
-            void teamService.handleSessionDown(event.sessionId, namespace, event.reason)
         })
     }
     const notificationChannels: NotificationChannel[] = []

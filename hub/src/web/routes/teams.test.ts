@@ -26,6 +26,7 @@ function createApp(getNamespace: () => string = () => 'alpha', memoryRoot?: stri
     const delivered: Array<{ sessionId: string; text: string }> = []
     const runtime: TeamRuntime = {
         resolveSession: (sessionId) => sessions.get(sessionId) ?? null,
+        lastAssistantText: () => null,
         spawnMember: async (input) => {
             const sessionId = `sess-${input.teamRole}`
             sessions.set(sessionId, {

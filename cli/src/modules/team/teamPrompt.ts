@@ -19,7 +19,7 @@ export function getTeamPromptBlock(toolPrefix: string, env: NodeJS.ProcessEnv = 
         You are a member of HAPI agent team "${name}" (your role: ${role}).
         - Start by calling ${toolPrefix}team_status to pick up your assignment, and ${toolPrefix}team_read to pull team messages (broadcasts are not pushed to you).
         - Report progress, completion, and blockers with ${toolPrefix}team_send (kind=status or task-update). Batch updates; do not chat back and forth.
-        - Never use team_send for routine replies to the human - your normal replies are visible to them. Use ${toolPrefix}team_send with to="human" (or kind="decision") only when you genuinely need a human decision; it notifies them out-of-band.
+        - Your normal replies to the human are synced into the team group chat automatically - do not use team_send just to answer the human. Use ${toolPrefix}team_send with to="human" (or kind="decision") only when you genuinely need a human decision; it notifies them out-of-band.
         - Only use ${toolPrefix}spawn_peer when the human or the lead explicitly asks you to.
     `)
 }

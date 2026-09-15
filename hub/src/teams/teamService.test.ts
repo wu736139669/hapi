@@ -11,9 +11,11 @@ import { TeamStore } from './teamStore'
 function createRuntime(overrides: Partial<TeamRuntime> = {}) {
     const delivered: Array<{ sessionId: string; text: string }> = []
     const spawnInputs: TeamSpawnMemberInput[] = []
+    const assistantTexts = new Map<string, string>()
     const sessions = new Map<string, TeamSessionView>()
     const runtime: TeamRuntime = {
         resolveSession: (sessionId) => sessions.get(sessionId) ?? null,
+        lastAssistantText: (sessionId) => assistantTexts.get(sessionId) ?? null,
         spawnMember: async (input) => {
             spawnInputs.push(input)
             const sessionId = `sess-${input.teamRole}`
@@ -34,7 +36,7 @@ function createRuntime(overrides: Partial<TeamRuntime> = {}) {
         sleep: async () => {},
         ...overrides
     }
-    return { runtime, sessions, delivered, spawnInputs }
+    return { runtime, sessions, delivered, spawnInputs, assistantTexts }
 }
 
 function addCallerSession(sessions: Map<string, TeamSessionView>, sessionId = 'sess-lead'): void {
@@ -551,6 +553,65 @@ describe('TeamService web task management', () => {
             service.deleteTeam('alpha', team.id)
             expect(service.getTeamDetail(team.id, 'alpha')).toBeNull()
             expect(() => service.deleteTeam('alpha', team.id)).toThrow('Team not found')
+        } finally {
+            service.close()
+        }
+    })
+})
+
+describe('TeamService human ping bridging', () => {
+    function setup() {
+        const { runtime, sessions, delivered, assistantTexts } = createRuntime()
+        const store = new TeamStore(':memory:')
+        const service = new TeamService(store, () => {}, runtime)
+        addCallerSession(sessions)
+        const team = service.createTeam('alpha', { name: 'Refactor auth' })
+        store.addMember(team.id, 'sess-builder', 'builder')
+        sessions.set('sess-builder', {
+            id: 'sess-builder',
+            active: true,
+            thinking: false,
+            machineId: 'machine-1',
+            directory: '/repo',
+            flavor: 'codex',
+            inWorktree: false
+        })
+        delivered.length = 0
+        return { service, store, team, assistantTexts }
+    }
+
+    it('bridges the member reply into the team log after a human ping', async () => {
+        const { service, store, team, assistantTexts } = setup()
+        try {
+            await service.sendHumanMessage('alpha', team.id, { text: '你好啊', to: 'sess-builder' })
+            assistantTexts.set('sess-builder', '你好！我是 Builder，需要我做什么？')
+
+            // Idle before the turn ever started: too early to conclude anything.
+            await service.handleMemberActivity('sess-builder', 'alpha', false)
+            expect(store.listMessages(team.id).some((message) => (message.meta as { bridged?: boolean } | null)?.bridged === true)).toBe(false)
+
+            await service.handleMemberActivity('sess-builder', 'alpha', true)
+            await service.handleMemberActivity('sess-builder', 'alpha', false)
+
+            const bridged = store.listMessages(team.id)
+                .filter((message) => (message.meta as { bridged?: boolean } | null)?.bridged === true)
+            expect(bridged).toHaveLength(1)
+            expect(bridged[0]?.fromSessionId).toBe('sess-builder')
+            expect(bridged[0]?.text).toContain('你好！我是 Builder')
+        } finally {
+            service.close()
+        }
+    })
+
+    it('does not bridge when the member already replied via team_send', async () => {
+        const { service, store, team, assistantTexts } = setup()
+        try {
+            await service.sendHumanMessage('alpha', team.id, { text: 'hi', to: 'sess-builder' })
+            await service.sendMessage('sess-builder', 'alpha', { text: '直接答复', to: 'human' })
+            assistantTexts.set('sess-builder', 'internal text')
+            await service.handleMemberActivity('sess-builder', 'alpha', true)
+            await service.handleMemberActivity('sess-builder', 'alpha', false)
+            expect(store.listMessages(team.id).some((message) => (message.meta as { bridged?: boolean } | null)?.bridged === true)).toBe(false)
         } finally {
             service.close()
         }
