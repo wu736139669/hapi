@@ -13,6 +13,7 @@ import {
 const mocks = vi.hoisted(() => ({
     spawnSession: vi.fn(),
     onSuccess: vi.fn(),
+    onTeamSuccess: vi.fn(),
     notification: vi.fn(),
     checkPathsExists: vi.fn(),
     codexModelsLoading: false,
@@ -191,7 +192,39 @@ vi.mock('./MachineSelector', () => ({
         </select>
     )
 }))
-vi.mock('./SessionTypeSelector', () => ({ SessionTypeSelector: () => null }))
+vi.mock('./SessionTypeSelector', () => ({
+    SessionTypeSelector: (props: {
+        sessionType: string
+        teamName: string
+        isDisabled: boolean
+        onSessionTypeChange: (value: 'simple' | 'worktree' | 'team') => void
+        onTeamNameChange: (value: string) => void
+    }) => (
+        <>
+            {(['simple', 'worktree', 'team'] as const).map((type) => (
+                <label key={type}>
+                    <input
+                        type="radio"
+                        name="sessionType-mock"
+                        value={type}
+                        checked={props.sessionType === type}
+                        disabled={props.isDisabled}
+                        onChange={() => props.onSessionTypeChange(type)}
+                    />
+                    {type}
+                </label>
+            ))}
+            {props.sessionType === 'team' ? (
+                <input
+                    aria-label="team-name"
+                    value={props.teamName}
+                    disabled={props.isDisabled}
+                    onChange={(event) => props.onTeamNameChange(event.target.value)}
+                />
+            ) : null}
+        </>
+    )
+}))
 vi.mock('./PermissionField', () => ({
     PermissionField: (props: {
         agent: string
@@ -303,6 +336,7 @@ describe('NewSession launch preferences', () => {
         sessionStorage.clear()
         mocks.spawnSession.mockReset()
         mocks.onSuccess.mockReset()
+        mocks.onTeamSuccess.mockReset()
         mocks.notification.mockReset()
         mocks.checkPathsExists.mockReset()
         mocks.checkPathsExists.mockImplementation(async () => ({ 'C:\\repo': mocks.directoryExists }))
@@ -341,6 +375,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -363,6 +399,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -385,6 +423,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -407,6 +447,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -435,6 +477,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -463,6 +507,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -495,6 +541,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -548,6 +596,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -583,6 +633,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -600,6 +652,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -630,7 +684,7 @@ describe('NewSession launch preferences', () => {
             copilotAgentMode: 'interactive', yoloMode: false, codexFamilyPermissionMode: 'default',
             grokPermissionMode: 'default', sessionType: 'simple', worktreeName: ''
         })
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onTeamSuccess={mocks.onTeamSuccess} onCancel={() => {}} />)
         await waitFor(() => expect(screen.getByTestId('agy-model')).toHaveTextContent('gemini-3.6-flash-low'))
     })
 
@@ -642,14 +696,14 @@ describe('NewSession launch preferences', () => {
             copilotAgentMode: 'interactive', yoloMode: false, codexFamilyPermissionMode: 'default',
             grokPermissionMode: 'default', sessionType: 'simple', worktreeName: ''
         })
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onTeamSuccess={mocks.onTeamSuccess} onCancel={() => {}} />)
         await waitFor(() => expect(screen.getByTestId('agy-model')).toHaveTextContent('auto'))
     })
 
     it('falls back to Default when a preferred AGY model is no longer advertised', async () => {
         savePreferredAgent('agy')
         savePreferredLaunchSettings('machine-1', 'agy', { model: 'removed-model', cursorSelectedBase: 'auto', effort: 'auto', modelReasoningEffort: 'default' })
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onTeamSuccess={mocks.onTeamSuccess} onCancel={() => {}} />)
         await waitFor(() => expect(screen.getByTestId('agy-model')).toHaveTextContent('auto'))
     })
 
@@ -657,14 +711,14 @@ describe('NewSession launch preferences', () => {
         savePreferredAgent('agy')
         savePreferredLaunchSettings('machine-1', 'agy', { model: 'gemini-3.6-flash-low', cursorSelectedBase: 'auto', effort: 'auto', modelReasoningEffort: 'default' })
         mocks.agyModelsLoading = true
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onTeamSuccess={mocks.onTeamSuccess} onCancel={() => {}} />)
         await waitFor(() => expect(screen.getByTestId('create')).toBeDisabled())
     })
 
     it('keeps an explicit OpenCode Default selection instead of restoring a concrete model', async () => {
         savePreferredAgent('opencode')
         mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'opencode-session' })
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onTeamSuccess={mocks.onTeamSuccess} onCancel={() => {}} />)
         // The catalog advertises a concrete default; the user picks Default.
         fireEvent.click(screen.getByTestId('opencode-model-default'))
         await waitFor(() => expect(screen.getByTestId('opencode-model')).toHaveTextContent('default'))
@@ -680,14 +734,14 @@ describe('NewSession launch preferences', () => {
         savePreferredAgent('opencode')
         savePreferredLaunchSettings('machine-1', 'opencode', { model: 'provider/model', cursorSelectedBase: 'auto', effort: 'auto', modelReasoningEffort: 'high' })
         mocks.opencodeModels = [{ modelId: 'provider/model', name: 'Model' }]
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onTeamSuccess={mocks.onTeamSuccess} onCancel={() => {}} />)
         await waitFor(() => expect(screen.getByTestId('opencode-model')).toHaveTextContent('provider/model'))
     })
 
     it('persists the selected AGY model only after a successful launch', async () => {
         savePreferredAgent('agy')
         mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'agy-session' })
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onTeamSuccess={mocks.onTeamSuccess} onCancel={() => {}} />)
         fireEvent.click(screen.getByTestId('agy-model'))
         fireEvent.click(screen.getByTestId('create'))
         await waitFor(() => expect(mocks.onSuccess).toHaveBeenCalledWith('agy-session'))
@@ -703,7 +757,7 @@ describe('NewSession launch preferences', () => {
             { modelId: 'gemini-3.6-flash-low', name: 'Gemini 3.6 Flash (Low)' }
         ]
         mocks.spawnSession.mockResolvedValue({ type: 'error', message: 'spawn failed' })
-        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onCancel={() => {}} />)
+        render(<NewSession api={api} machines={[machine]} initialMachineId="machine-1" initialDirectory="C:\repo" onSuccess={mocks.onSuccess} onTeamSuccess={mocks.onTeamSuccess} onCancel={() => {}} />)
         await waitFor(() => expect(screen.getByTestId('agy-model')).toHaveTextContent('gemini-3.5-flash-low'))
         fireEvent.click(screen.getByTestId('agy-model'))
         fireEvent.click(screen.getByTestId('create'))
@@ -725,6 +779,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -769,6 +825,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -818,6 +876,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -872,6 +932,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId={machineA.id}
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -944,6 +1006,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -971,6 +1035,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -1016,6 +1082,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -1056,6 +1124,8 @@ describe('NewSession launch preferences', () => {
                 initialMachineId="machine-1"
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+
                 onCancel={() => {}}
             />
         )
@@ -1069,5 +1139,40 @@ describe('NewSession launch preferences', () => {
         await waitFor(() => expect(mocks.spawnSession).toHaveBeenCalledWith(
             expect.objectContaining({ model: 'deepseek-v4-flash[1m]' })
         ))
+    })
+
+    it('creates a team from the team session type', async () => {
+        const createTeam = vi.fn().mockResolvedValue({ team: { id: 'team-1' } })
+        ;(api as unknown as { createTeam: typeof createTeam }).createTeam = createTeam
+        mocks.spawnSession.mockResolvedValue({ type: 'success', sessionId: 'session-team-lead' })
+
+        render(
+            <NewSession
+                api={api}
+                machines={[machine]}
+                initialMachineId="machine-1"
+                initialDirectory="C:\\repo"
+                onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+                onCancel={() => {}}
+            />
+        )
+
+        fireEvent.click(screen.getByLabelText('team'))
+        fireEvent.change(screen.getByLabelText('team-name'), {
+            target: { value: 'Auth 重构' }
+        })
+
+        await waitFor(() => expect(screen.getByTestId('create')).toBeEnabled())
+        fireEvent.click(screen.getByTestId('create'))
+
+        await waitFor(() => expect(createTeam).toHaveBeenCalledWith({
+            name: 'Auth 重构',
+            leadSessionId: 'session-team-lead'
+        }))
+        // The lead itself is a plain session.
+        expect(mocks.spawnSession).toHaveBeenCalledWith(expect.objectContaining({ sessionType: 'simple' }))
+        expect(mocks.onTeamSuccess).toHaveBeenCalledWith('team-1')
+        expect(mocks.onSuccess).not.toHaveBeenCalled()
     })
 })

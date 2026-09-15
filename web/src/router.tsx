@@ -1110,6 +1110,7 @@ function NewSessionPage() {
                     isLoading={machinesLoading}
                     onCancel={handleCancel}
                     onSuccess={handleSuccess}
+                    onTeamSuccess={(teamId) => navigate({ to: '/sessions/teams/$teamId', params: { teamId } })}
                     onChooseFolder={handleChooseFolder}
                     initialDirectory={initialDirectory}
                     initialMachineId={initialMachineId}

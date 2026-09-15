@@ -90,6 +90,7 @@ export function NewSession(props: {
     machines: Machine[]
     isLoading?: boolean
     onSuccess: (sessionId: string) => void
+    onTeamSuccess: (teamId: string) => void
     onCancel: () => void
     onChooseFolder?: (args: { machineId: string | null; directory: string }) => void
     initialDirectory?: string
@@ -123,6 +124,7 @@ export function NewSession(props: {
     const [codexFamilyPermissionMode, setCodexFamilyPermissionMode] = useState<PermissionMode>('default')
     const [grokPermissionMode, setGrokPermissionMode] = useState<GrokPermissionMode>('default')
     const [sessionType, setSessionType] = useState<SessionType>('simple')
+    const [teamName, setTeamName] = useState('')
     const [worktreeName, setWorktreeName] = useState('')
     const [directoryCreationConfirmed, setDirectoryCreationConfirmed] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -1732,6 +1734,12 @@ export function NewSession(props: {
             const existsResult = await checkPathsExists([trimmedDirectory])
             const directoryExists = existsResult.exists?.[trimmedDirectory]
 
+            if (sessionType === 'team' && !teamName.trim()) {
+                haptic.notification('error')
+                setError(t('newSession.teamName.required'))
+                return
+            }
+
             if (sessionType === 'worktree' && directoryExists === false) {
                 haptic.notification('error')
                 setError(t('session.directoryMissingWorktree'))
@@ -1916,7 +1924,7 @@ export function NewSession(props: {
                     : usesCodexFamilyPermissions
                         ? codexFamilyPermissionMode
                         : undefined,
-                sessionType,
+                sessionType: sessionType === 'team' ? 'simple' : sessionType,
                 worktreeName: sessionType === 'worktree' ? (worktreeName.trim() || undefined) : undefined,
                 serviceTier: resolvedServiceTier,
                 collaborationMode: resolvedCollaborationMode,
@@ -1930,6 +1938,14 @@ export function NewSession(props: {
                 clearNewSessionFormDraft()
                 setLastUsedMachineId(machineId)
                 addRecentPath(machineId, trimmedDirectory)
+                if (sessionType === 'team') {
+                    const created = await props.api.createTeam({
+                        name: teamName.trim(),
+                        leadSessionId: result.sessionId,
+                    })
+                    props.onTeamSuccess(created.team.id)
+                    return
+                }
                 props.onSuccess(result.sessionId)
                 return
             }
@@ -2028,10 +2044,12 @@ export function NewSession(props: {
             <SessionTypeSelector
                 sessionType={sessionType}
                 worktreeName={worktreeName}
+                teamName={teamName}
                 worktreeInputRef={worktreeInputRef}
                 isDisabled={isFormDisabled}
                 onSessionTypeChange={setSessionType}
                 onWorktreeNameChange={setWorktreeName}
+                onTeamNameChange={setTeamName}
             />
             <AgentSelector
                 agent={agent}
@@ -2039,7 +2057,7 @@ export function NewSession(props: {
                 isDisabled={isFormDisabled}
                 onAgentChange={handleAgentChange}
             />
-            {agent === 'claude' ? (
+            {sessionType !== 'team' && agent === 'claude' ? (
                 <ClaudeImportActions
                     selectedSession={selectedClaudeImportSession}
                     isLoading={isLoadingClaudeImportSessions}
@@ -2052,7 +2070,7 @@ export function NewSession(props: {
                     onClear={() => setSelectedClaudeImportSessionId(null)}
                 />
             ) : null}
-            {agent === 'codex' ? (
+            {sessionType !== 'team' && agent === 'codex' ? (
                 <CodexImportActions
                     selectedSession={selectedCodexImportSession}
                     isLoading={isLoadingCodexImportSessions}
@@ -2065,7 +2083,7 @@ export function NewSession(props: {
                     onClear={() => setSelectedCodexImportSessionId(null)}
                 />
             ) : null}
-            {agent === 'pi' ? (
+            {sessionType !== 'team' && agent === 'pi' ? (
                 <PiImportActions
                     selectedSession={selectedPiImportSession}
                     isLoading={isLoadingPiImportSessions}
@@ -2078,7 +2096,7 @@ export function NewSession(props: {
                     onClear={() => setSelectedPiImportSessionId(null)}
                 />
             ) : null}
-            {agent === 'dsh' ? (
+            {sessionType !== 'team' && agent === 'dsh' ? (
                 <DshImportActions
                     selectedSession={selectedDshImportSession}
                     isLoading={isLoadingDshImportSessions}

@@ -1436,4 +1436,8 @@ export default {
   'team.settings.lead': 'Lead 会话',
   'team.settings.leadNone': '不设置',
   'team.settings.leadHint': 'Lead 负责派生成员与汇总进展；没有 Lead 时无法加成员。',
+  'newSession.type.team': '团队',
+  'newSession.type.team.desc': '多 Agent 协作：成员各自独立会话，在团队页分派与查看',
+  'newSession.type.team.placeholder': '团队名称，例如：重构认证模块',
+  'newSession.teamName.required': '请填写团队名称',
 } as const

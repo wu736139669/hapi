@@ -5,10 +5,12 @@ import { useTranslation } from '@/lib/use-translation'
 export function SessionTypeSelector(props: {
     sessionType: SessionType
     worktreeName: string
+    teamName: string
     worktreeInputRef: RefObject<HTMLInputElement | null>
     isDisabled: boolean
     onSessionTypeChange: (value: SessionType) => void
     onWorktreeNameChange: (value: string) => void
+    onTeamNameChange: (value: string) => void
 }) {
     const { t } = useTranslation()
 
@@ -18,9 +20,46 @@ export function SessionTypeSelector(props: {
                 {t('newSession.type')}
             </label>
             <div className="flex flex-col gap-1.5">
-                {(['simple', 'worktree'] as const).map((type) => (
+                {(['simple', 'worktree', 'team'] as const).map((type) => (
                     <div key={type} className="flex flex-col gap-2">
-                        {type === 'worktree' ? (
+                        {type === 'team' ? (
+                            <div className="flex items-center gap-2">
+                                <input
+                                    id="session-type-team"
+                                    type="radio"
+                                    name="sessionType"
+                                    value="team"
+                                    checked={props.sessionType === 'team'}
+                                    onChange={() => props.onSessionTypeChange('team')}
+                                    disabled={props.isDisabled}
+                                    className="accent-[var(--app-link)]"
+                                />
+                                <div className="flex-1">
+                                    <div className="min-h-[34px] flex items-center gap-2">
+                                        <label
+                                            htmlFor="session-type-team"
+                                            className="shrink-0 text-sm cursor-pointer"
+                                        >
+                                            {t('newSession.type.team')}
+                                        </label>
+                                        {props.sessionType === 'team' ? (
+                                            <input
+                                                type="text"
+                                                placeholder={t('newSession.type.team.placeholder')}
+                                                value={props.teamName}
+                                                onChange={(e) => props.onTeamNameChange(e.target.value)}
+                                                disabled={props.isDisabled}
+                                                className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-60"
+                                            />
+                                        ) : (
+                                            <span className="text-xs text-[var(--app-hint)]">
+                                                {t('newSession.type.team.desc')}
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        ) : type === 'worktree' ? (
                             <div className="flex items-center gap-2">
                                 <input
                                     id="session-type-worktree"

@@ -1437,4 +1437,8 @@ export default {
   'team.settings.lead': 'Lead session',
   'team.settings.leadNone': 'No lead',
   'team.settings.leadHint': 'The lead spawns members and reports progress. Members can only be added once a lead is set.',
+  'newSession.type.team': 'Team',
+  'newSession.type.team.desc': 'multi-agent collaboration: members get their own sessions, assign and watch from the team page',
+  'newSession.type.team.placeholder': 'Team name, e.g. Refactor auth',
+  'newSession.teamName.required': 'Enter a team name',
 } as const
