@@ -1507,7 +1507,9 @@ export function buildCliArgs(
     args.push('--fork-session');
   }
   const startingMode = options.startingMode || 'remote';
-  args.push('--hapi-starting-mode', startingMode, '--started-by', 'runner');
+  // Codex shares one engine; Runner owns the wrapper, not a remote mode.
+  if (agent !== 'codex') args.push('--hapi-starting-mode', startingMode);
+  args.push('--started-by', 'runner');
   // Codex, Cursor ACP, DSH, OpenCode, Pi native resume, and Claude message-level
   // forks reuse the original HAPI row via --existing-session-id.
   if (agent === 'codex' || agent === 'cursor' || agent === 'dsh' || agent === 'pi'
