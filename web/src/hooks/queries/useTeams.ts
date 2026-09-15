@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
-import type { TeamSummary } from '@/types/team'
+import type { TeamWithMembers } from '@/types/team'
 import { queryKeys } from '@/lib/query-keys'
 
 export function useTeams(api: ApiClient | null): {
-    teams: TeamSummary[]
+    teams: TeamWithMembers[]
     isLoading: boolean
     /** True when the hub has the teams feature enabled (query succeeded). */
     supported: boolean

@@ -1423,4 +1423,6 @@ export default {
   'newSession.type.team.desc': '多 Agent 协作：成员各自独立会话，在团队页分派与查看',
   'newSession.type.team.placeholder': '团队名称，例如：重构认证模块',
   'newSession.teamName.required': '请填写团队名称',
+  'team.section.members': '{n} 名成员',
+  'team.section.noMembers': '还没有成员',
 } as const

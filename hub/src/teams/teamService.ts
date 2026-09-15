@@ -143,6 +143,14 @@ export class TeamService {
         return this.store.listTeams(namespace)
     }
 
+    /** Teams with their members, for the sidebar grouping. */
+    listTeamsWithMembers(namespace: string): Array<TeamRecord & { members: TeamMemberRecord[] }> {
+        return this.store.listTeams(namespace).map((team) => ({
+            ...team,
+            members: this.store.listMembers(team.id)
+        }))
+    }
+
     getTeamDetail(teamId: string, namespace: string): TeamDetail | null {
         const team = this.store.getTeam(teamId, namespace)
         if (!team) return null

@@ -1424,4 +1424,6 @@ export default {
   'newSession.type.team.desc': 'multi-agent collaboration: members get their own sessions, assign and watch from the team page',
   'newSession.type.team.placeholder': 'Team name, e.g. Refactor auth',
   'newSession.teamName.required': 'Enter a team name',
+  'team.section.members': '{n} members',
+  'team.section.noMembers': 'No members yet',
 } as const

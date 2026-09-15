@@ -254,6 +254,16 @@ function SessionsPage() {
     const selectedSessionId = sessionMatch && sessionMatch.sessionId !== 'new' ? sessionMatch.sessionId : null
     const teamMatch = matchRoute({ to: '/sessions/teams/$teamId', fuzzy: true })
     const selectedTeamId = teamMatch ? teamMatch.teamId : null
+    // Team member sessions live inside their team in the sidebar, not as
+    // standalone rows.
+    const teamSessionIds = useMemo(
+        () => new Set(teams.flatMap((team) => team.members.map((member) => member.sessionId))),
+        [teams]
+    )
+    const sidebarSessions = useMemo(
+        () => sessions.filter((session) => !teamSessionIds.has(session.id)),
+        [sessions, teamSessionIds]
+    )
     const selectedSession = useMemo(
         () => selectedSessionId ? sessions.find((session) => session.id === selectedSessionId) ?? null : null,
         [selectedSessionId, sessions]
@@ -299,15 +309,21 @@ function SessionsPage() {
                     <SessionList
                         compact={sidebarIsCollapsed}
                         key={initializedHub === baseUrl ? 'last-seen-ready' : 'last-seen-pending'}
-                        sessions={sessions}
+                        sessions={sidebarSessions}
                         selectedSessionId={selectedSessionId}
                         topSection={teamsSupported ? (
                             <TeamSidebarSection
                                 teams={teams}
+                                sessions={sessions}
                                 selectedTeamId={selectedTeamId}
+                                selectedSessionId={selectedSessionId}
                                 onSelectTeam={(teamId) => navigate({
                                     to: '/sessions/teams/$teamId',
                                     params: { teamId },
+                                })}
+                                onSelectSession={(sessionId) => navigate({
+                                    to: '/sessions/$sessionId',
+                                    params: { sessionId },
                                 })}
                             />
                         ) : undefined}

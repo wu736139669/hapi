@@ -47,6 +47,10 @@ export interface TeamMessage {
     createdAt: number
 }
 
+export interface TeamWithMembers extends TeamSummary {
+    members: TeamMember[]
+}
+
 export interface TeamDetail {
     team: TeamSummary
     members: TeamMember[]

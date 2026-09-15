@@ -43,7 +43,7 @@ import type {
     SessionShareCreateResponse,
     SessionShareExchangeResponse
 } from '@/types/api'
-import type { TeamDetail, TeamMemoryFile, TeamMemoryFileContent, TeamMessage, TeamSummary, TeamTask } from '@/types/team'
+import type { TeamDetail, TeamMemoryFile, TeamMemoryFileContent, TeamMessage, TeamSummary, TeamTask, TeamWithMembers } from '@/types/team'
 import type {
     AgentAvailabilityResponse,
     AgyModelsResponse,
@@ -406,8 +406,8 @@ export class ApiClient {
 
     // ------------------------------------------------------------- Agent Team
 
-    async getTeams(): Promise<{ teams: TeamSummary[] }> {
-        return await this.request<{ teams: TeamSummary[] }>('/api/teams')
+    async getTeams(): Promise<{ teams: TeamWithMembers[] }> {
+        return await this.request<{ teams: TeamWithMembers[] }>('/api/teams')
     }
 
     async getTeam(teamId: string): Promise<TeamDetail> {

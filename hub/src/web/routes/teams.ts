@@ -22,7 +22,8 @@ export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
 
     app.get('/teams', (c) => {
         c.header('Cache-Control', 'no-store')
-        return c.json({ teams: teams.listTeams(c.get('namespace')) })
+        // Members included so the sidebar can nest member sessions under a team.
+        return c.json({ teams: teams.listTeamsWithMembers(c.get('namespace')) })
     })
 
     // Feature probe for CLI startup: this route only exists when teams are
