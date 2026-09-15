@@ -646,7 +646,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             ...extraEnv,
             HAPI_TEAM_ID: options.team.id,
             HAPI_TEAM_NAME: options.team.name,
-            HAPI_TEAM_ROLE: options.team.role
+            HAPI_TEAM_ROLE: options.team.role,
+            ...(options.team.token ? { HAPI_TEAM_TOKEN: options.team.token } : {})
           };
         }
 

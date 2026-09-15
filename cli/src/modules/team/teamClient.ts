@@ -43,6 +43,7 @@ export interface TeamTaskView {
     title: string
     status: string
     assigneeSessionId: string | null
+    meta?: Record<string, unknown> | null
 }
 
 export interface TeamStatusView {
@@ -224,6 +225,8 @@ export async function spawnTeamMember(
         task?: string
         agent?: string
         model?: string
+        modelReasoningEffort?: string
+        permissionMode?: string
         sessionType?: 'simple' | 'worktree'
         worktreeName?: string
     }
@@ -239,6 +242,8 @@ export async function spawnTeamMember(
             task: options.task,
             agent: options.agent,
             model: options.model,
+            modelReasoningEffort: options.modelReasoningEffort,
+            permissionMode: options.permissionMode,
             sessionType: options.sessionType,
             worktreeName: options.worktreeName
         }
@@ -246,15 +251,27 @@ export async function spawnTeamMember(
 }
 
 export async function updateTeamTask(
-    options: TeamClientOptions & { teamId: string; taskId: string; status: 'todo' | 'doing' | 'done' | 'blocked' }
-): Promise<void> {
+    options: TeamClientOptions & {
+        teamId: string
+        taskId: string
+        status?: 'todo' | 'doing' | 'done' | 'blocked'
+        deliverable?: string
+        dependsOn?: string[]
+    }
+): Promise<TeamTaskView | null> {
     const context = await openSession(options)
-    await request(
+    const response = await request<{ task: TeamTaskView }>(
         context,
         'patch',
         `/api/teams/${encodeURIComponent(options.teamId)}/tasks/${encodeURIComponent(options.taskId)}`,
-        { fromSessionId: options.sessionId, status: options.status }
+        {
+            fromSessionId: options.sessionId,
+            ...(options.status !== undefined ? { status: options.status } : {}),
+            ...(options.deliverable !== undefined ? { deliverable: options.deliverable } : {}),
+            ...(options.dependsOn !== undefined ? { dependsOn: options.dependsOn } : {})
+        }
     )
+    return response.task ?? null
 }
 
 // -------------------------------------------------------------- formatting
@@ -273,7 +290,7 @@ export function formatTeamStatus(status: TeamStatusView): string {
         lines.push('')
         lines.push('你的待办任务：')
         for (const task of status.pendingTasks) {
-            lines.push(`- ${task.title} [${task.status}] id=${task.id}`)
+            lines.push(`- ${task.title} [${task.status}] id=${task.id}${taskMetaSummary(task)}`)
         }
     } else {
         lines.push('')
@@ -282,6 +299,27 @@ export function formatTeamStatus(status: TeamStatusView): string {
     lines.push('')
     lines.push(`限额：消息 ${status.budget.maxMessagesPerMinute}/分钟 · 链深 ${status.budget.maxChainDepth}`)
     return lines.join('\n')
+}
+
+/** One-line task summary: dependencies + completion evidence. */
+export function taskMetaSummary(task: TeamTaskView): string {
+    const meta = task.meta ?? {}
+    const deps = Array.isArray(meta.dependsOn) ? (meta.dependsOn as string[]) : []
+    const deliverable = typeof meta.deliverable === 'string' ? meta.deliverable.trim() : ''
+    const parts: string[] = []
+    if (deps.length > 0) parts.push(`依赖 ${deps.map((dep) => dep.slice(0, 8)).join(',')}`)
+    if (deliverable) parts.push(`交付物 ${deliverable.slice(0, 80)}`)
+    return parts.length > 0 ? ` · ${parts.join(' · ')}` : ''
+}
+
+export function formatTeamTasks(tasks: TeamTaskView[], selfSessionId: string): string {
+    if (tasks.length === 0) {
+        return '（团队暂无任务）'
+    }
+    return tasks.map((task) => {
+        const mine = task.assigneeSessionId === selfSessionId ? ' ← 你' : ''
+        return `- [${task.status}] ${task.title} id=${task.id}${mine}${taskMetaSummary(task)}`
+    }).join('\n')
 }
 
 export function formatTeamMessages(messages: TeamMessageView[], selfSessionId: string): string {

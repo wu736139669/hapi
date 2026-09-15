@@ -473,6 +473,10 @@ export const TeamSpawnMemberRequestSchema = z.object({
     task: z.string().min(1).max(20000).optional(),
     agent: AgentFlavorSchema.optional(),
     model: z.string().min(1).max(200).optional(),
+    /** Inherited from the calling session when omitted. */
+    modelReasoningEffort: z.string().min(1).max(50).optional(),
+    /** Inherited from the calling session when omitted. */
+    permissionMode: PermissionModeSchema.optional(),
     sessionType: z.enum(['simple', 'worktree']).optional(),
     worktreeName: z.string().min(1).max(80).optional(),
     /** Run the member with bypassed permission prompts (autonomous work). */
@@ -489,20 +493,34 @@ export const AddTeamMemberRequestSchema = z.object({
 
 export type AddTeamMemberRequest = z.infer<typeof AddTeamMemberRequestSchema>
 
+/** Issue a team-scoped token for agents that call the hub API directly. */
+export const IssueTeamAgentTokenRequestSchema = z.object({
+    label: z.string().min(1).max(80).optional(),
+    ttlMs: z.number().int().positive().max(90 * 24 * 60 * 60 * 1000).optional()
+})
+
+export type IssueTeamAgentTokenRequest = z.infer<typeof IssueTeamAgentTokenRequestSchema>
+
 export const TeamTaskUpdateRequestSchema = z.object({
     /** Session caller (CLI/MCP). Absent = human web caller. */
     fromSessionId: z.string().min(1).optional(),
     status: z.enum(['todo', 'doing', 'done', 'blocked']).optional(),
-    assigneeSessionId: z.string().min(1).nullable().optional()
-}).refine((value) => value.status !== undefined || value.assigneeSessionId !== undefined, {
-    message: 'status or assigneeSessionId is required'
+    assigneeSessionId: z.string().min(1).nullable().optional(),
+    /** Completion evidence (branch/files/test result/url). Required for members marking done. */
+    deliverable: z.string().min(1).max(2000).optional(),
+    /** Task ids that must be done before this task can start/finish. */
+    dependsOn: z.array(z.string().min(1)).max(20).optional()
+}).refine((value) => value.status !== undefined || value.assigneeSessionId !== undefined
+    || value.deliverable !== undefined || value.dependsOn !== undefined, {
+    message: 'status, assigneeSessionId, deliverable or dependsOn is required'
 })
 
 export type TeamTaskUpdateRequest = z.infer<typeof TeamTaskUpdateRequestSchema>
 
 export const CreateTeamTaskRequestSchema = z.object({
     title: z.string().min(1).max(200),
-    assigneeSessionId: z.string().min(1).nullable().optional()
+    assigneeSessionId: z.string().min(1).nullable().optional(),
+    dependsOn: z.array(z.string().min(1)).max(20).optional()
 })
 
 export type CreateTeamTaskRequest = z.infer<typeof CreateTeamTaskRequestSchema>

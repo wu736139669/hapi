@@ -1382,6 +1382,8 @@ export default {
   'team.panel.done': 'Done',
   'team.panel.empty': 'Empty',
   'team.panel.unassigned': 'unassigned',
+  'team.task.meta.deps': 'deps {n}',
+  'team.task.meta.deliverable': 'deliverable {text}',
   'team.panel.openSession': 'Open member session',
   'team.panel.budget': 'Budget',
   'team.panel.budget.members': 'Members {n}/{max}',

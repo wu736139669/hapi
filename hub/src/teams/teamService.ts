@@ -1,4 +1,5 @@
-import type { AgentFlavor, SyncEvent } from '@hapi/protocol/types'
+import { randomBytes } from 'node:crypto'
+import type { AgentFlavor, PermissionMode, SyncEvent } from '@hapi/protocol/types'
 
 import {
     TeamStore,
@@ -30,6 +31,11 @@ export interface TeamSessionView {
     directory: string | null
     flavor: AgentFlavor | null
     inWorktree: boolean
+    /** Runtime config of the session, used as the inheritance source for spawned members. */
+    model?: string | null
+    modelReasoningEffort?: string | null
+    effort?: string | null
+    permissionMode?: PermissionMode | null
 }
 
 export interface TeamSpawnMemberInput {
@@ -37,12 +43,16 @@ export interface TeamSpawnMemberInput {
     directory: string
     agent: AgentFlavor
     model?: string
+    modelReasoningEffort?: string
+    effort?: string
+    permissionMode?: PermissionMode
     sessionType: 'simple' | 'worktree'
     worktreeName?: string
     yolo?: boolean
     teamId: string
     teamName: string
     teamRole: string
+    teamNamespace: string
 }
 
 export interface TeamRuntime {
@@ -90,6 +100,7 @@ const DEFAULT_BUDGET: TeamBudget = {
 const ACTIVATION_POLL_MS = 1000
 const HUMAN_PING_TURN_GRACE_MS = 20_000
 const ACTIVATION_POLL_ATTEMPTS = 30
+const DEFAULT_AGENT_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 /**
  * P1 service: team membership, peer messaging with budget guards, and member
@@ -404,10 +415,25 @@ export class TeamService {
      * Create a task from the web app. Assigning pushes the brief to the
      * assignee so it can start working without waiting for a poll.
      */
+    private assertDependenciesInTeam(teamId: string, taskId: string | null, dependsOn: string[] | undefined): void {
+        if (!dependsOn || dependsOn.length === 0) {
+            return
+        }
+        for (const id of dependsOn) {
+            if (taskId && id === taskId) {
+                throw new TeamServiceError('invalid', '任务不能依赖自己')
+            }
+            const task = this.store.getTask(id)
+            if (!task || task.teamId !== teamId) {
+                throw new TeamServiceError('invalid', `依赖任务不存在：${id}`)
+            }
+        }
+    }
+
     async createTaskForHuman(
         namespace: string,
         teamId: string,
-        input: { title: string; assigneeSessionId?: string | null }
+        input: { title: string; assigneeSessionId?: string | null; dependsOn?: string[] }
     ): Promise<TeamTaskRecord> {
         const team = this.store.getTeam(teamId, namespace)
         if (!team) {
@@ -418,12 +444,14 @@ export class TeamService {
         if (assigneeSessionId && !members.some((member) => member.sessionId === assigneeSessionId)) {
             throw new TeamServiceError('invalid', 'Assignee is not a team member')
         }
+        this.assertDependenciesInTeam(team.id, null, input.dependsOn)
 
         const task = this.store.createTask({
             teamId: team.id,
             title: input.title,
             assigneeSessionId,
-            status: 'todo'
+            status: 'todo',
+            ...(input.dependsOn && input.dependsOn.length > 0 ? { meta: { dependsOn: input.dependsOn } } : {})
         })
         const assigneeRole = members.find((member) => member.sessionId === assigneeSessionId)?.role
         this.store.appendMessage({
@@ -523,7 +551,7 @@ export class TeamService {
         sessionId: string | null,
         namespace: string,
         taskId: string,
-        patch: { status?: TeamTaskStatus; assigneeSessionId?: string | null }
+        patch: { status?: TeamTaskStatus; assigneeSessionId?: string | null; deliverable?: string; dependsOn?: string[] }
     ): Promise<TeamTaskRecord> {
         const membership = sessionId
             ? this.requireMembership(sessionId, namespace)
@@ -540,9 +568,33 @@ export class TeamService {
             throw new TeamServiceError('invalid', 'Assignee is not a team member')
         }
 
+        const meta: Record<string, unknown> = { ...(task.meta ?? {}) }
+        if (patch.deliverable !== undefined) meta.deliverable = patch.deliverable
+        if (patch.dependsOn !== undefined) meta.dependsOn = patch.dependsOn
+        this.assertDependenciesInTeam(team.id, taskId, patch.dependsOn)
+        const deliverable = typeof meta.deliverable === 'string' ? meta.deliverable.trim() : ''
+
+        // Members must attach evidence before marking a task done; humans may
+        // close tasks freely (they own the outcome).
+        if (sessionId && patch.status === 'done' && !deliverable) {
+            throw new TeamServiceError('invalid', '完成任务需要提供交付物（deliverable）：分支/文件/测试结果等')
+        }
+        // Dependencies gate member progress (todo -> doing -> done).
+        if (sessionId && (patch.status === 'doing' || patch.status === 'done')) {
+            const dependsOn = Array.isArray(meta.dependsOn) ? meta.dependsOn as string[] : []
+            const blockers = dependsOn
+                .map((id) => this.store.getTask(id))
+                .filter((candidate): candidate is TeamTaskRecord =>
+                    candidate !== null && candidate.teamId === team.id && candidate.status !== 'done')
+            if (blockers.length > 0) {
+                throw new TeamServiceError('invalid', `依赖未完成：${blockers.map((t) => `${t.title}(${t.status})`).join('、')}`)
+            }
+        }
+
         const updated = this.store.updateTask(taskId, {
             ...(patch.status !== undefined ? { status: patch.status } : {}),
-            ...(patch.assigneeSessionId !== undefined ? { assigneeSessionId: patch.assigneeSessionId } : {})
+            ...(patch.assigneeSessionId !== undefined ? { assigneeSessionId: patch.assigneeSessionId } : {}),
+            ...(patch.deliverable !== undefined || patch.dependsOn !== undefined ? { meta } : {})
         })
         if (!updated) {
             throw new TeamServiceError('not_found', 'Task not found in this team')
@@ -555,14 +607,16 @@ export class TeamService {
             const assigneeRole = members.find((member) => member.sessionId === patch.assigneeSessionId)?.role
             changes.push(`负责人 → ${assigneeRole ?? '未指派'}`)
         }
+        if (patch.deliverable !== undefined) changes.push('附交付物')
+        if (patch.dependsOn !== undefined) changes.push(`依赖 ${patch.dependsOn.length} 项`)
         this.store.appendMessage({
             teamId: team.id,
             fromKind: membership ? 'session' : 'human',
             fromSessionId: sessionId,
             toKind: 'broadcast',
             kind: 'task-update',
-            text: `任务「${updated.title}」${changes.join('，')}（${fromRole}）`,
-            meta: { taskId: updated.id, fromRole }
+            text: `任务「${updated.title}」${changes.join('，')}（${fromRole}）${deliverable ? `｜交付物：${deliverable.slice(0, 200)}` : ''}`,
+            meta: { taskId: updated.id, fromRole, ...(deliverable ? { deliverable } : {}) }
         })
         this.publishUpdate(team)
 
@@ -618,6 +672,62 @@ export class TeamService {
         this.publish({ type: 'team-updated', teamId, namespace })
     }
 
+    // ----------------------------------------------------------- agent tokens
+
+    /**
+     * Team-scoped credentials for agents that want to call the hub API
+     * directly. They can only reach this team's messages/tasks/status, so a
+     * leaked token cannot touch machines or other sessions.
+     */
+    issueAgentToken(
+        namespace: string,
+        teamId: string,
+        options: { label?: string; ttlMs?: number } = {}
+    ): { token: string; teamId: string; expiresAt: number } {
+        const team = this.store.getTeam(teamId, namespace)
+        if (!team) {
+            throw new TeamServiceError('not_found', 'Team not found')
+        }
+        const now = Date.now()
+        this.store.deleteExpiredAgentTokens(now)
+        const token = `hapi_team_${randomBytes(24).toString('base64url')}`
+        const expiresAt = now + (options.ttlMs ?? DEFAULT_AGENT_TOKEN_TTL_MS)
+        this.store.insertAgentToken({
+            token,
+            teamId: team.id,
+            namespace: team.namespace,
+            label: options.label ?? null,
+            createdAt: now,
+            expiresAt
+        })
+        return { token, teamId: team.id, expiresAt }
+    }
+
+    /** Reuse a live token for the team at spawn time, minting one when needed. */
+    getOrCreateAgentToken(namespace: string, teamId: string): string | null {
+        const existing = this.store.latestAgentToken(teamId, Date.now())
+        if (existing) {
+            return existing.token
+        }
+        try {
+            return this.issueAgentToken(namespace, teamId).token
+        } catch {
+            return null
+        }
+    }
+
+    /** Resolve a raw team token to its scope (web auth middleware). */
+    resolveAgentToken(token: string): { teamId: string; namespace: string } | null {
+        if (!token.startsWith('hapi_team_')) {
+            return null
+        }
+        const record = this.store.findAgentToken(token)
+        if (!record || record.expiresAt <= Date.now()) {
+            return null
+        }
+        return { teamId: record.teamId, namespace: record.namespace }
+    }
+
     // ---------------------------------------------------------------- spawning
 
     async spawnMember(
@@ -628,6 +738,9 @@ export class TeamService {
             task?: string
             agent?: AgentFlavor
             model?: string
+            modelReasoningEffort?: string
+            effort?: string
+            permissionMode?: PermissionMode
             sessionType?: 'simple' | 'worktree'
             worktreeName?: string
             yolo?: boolean
@@ -666,17 +779,25 @@ export class TeamService {
             ? (input.worktreeName ?? defaultWorktreeName(team, input.role))
             : undefined
 
+        // Members inherit the caller's runtime config (tool/model/thinking
+        // level/permission) unless the caller explicitly overrides it. This
+        // keeps a team homogeneous without asking the lead to re-specify it.
+        const permissionMode = input.permissionMode ?? caller.permissionMode ?? undefined
         const spawned = await this.runtime.spawnMember({
             machineId: caller.machineId,
             directory: caller.directory,
             agent: input.agent ?? caller.flavor ?? 'claude',
-            model: input.model,
+            model: input.model ?? caller.model ?? undefined,
+            modelReasoningEffort: input.modelReasoningEffort ?? caller.modelReasoningEffort ?? undefined,
+            effort: input.effort ?? caller.effort ?? undefined,
+            permissionMode,
             sessionType,
             worktreeName,
-            yolo: input.yolo === true,
+            yolo: input.yolo === true || permissionMode === 'yolo',
             teamId: team.id,
             teamName: team.name,
-            teamRole: input.role
+            teamRole: input.role,
+            teamNamespace: team.namespace
         })
         if (!spawned.ok) {
             throw new TeamServiceError('spawn_failed', spawned.message)
@@ -1036,9 +1157,11 @@ function buildLeadBrief(team: TeamRecord): string {
         `你是 HAPI 团队「${team.name}」的 Lead。`,
         '',
         '职责：拆解任务、派生成员、汇总进展，必要时把决策升级给人类。',
-        '可用工具：team_status（成员/任务/预算）、team_read（拉取团队消息，广播不会主动推送）、team_send（汇报/分派/通知人类）、spawn_peer（派生成员，需用户批准）。',
+        '可用工具：team_status（成员/任务/预算）、team_read（拉取团队消息，广播不会主动推送）、team_send（汇报/分派/通知人类）、team_task（任务列表/更新状态/交付物/依赖）、spawn_peer（派生成员，需用户批准）。',
+        '派生成员默认继承你的工具/模型/思考等级/权限，不需要手动指定；只有人类明确要求不同配置时才传覆盖参数。',
+        '需要直接调用 hub API 时用团队级凭证 $HAPI_TEAM_TOKEN（只能访问本团队的消息/任务/状态），不要读取 ~/.hapi/settings.json 的凭证。',
         '需要人类决策时用 team_send 的 to="human" 或 kind="decision"；人类也会在群聊里发言、加成员或调整任务。',
-        '你在自己会话里的正常回复会自动同步到团队群聊（人类可见），不需要用 team_send 转述。'
+        '回复人类刚发来的消息会自动同步到群聊；如果这一轮由其他事件触发（成员消息/任务/定时），而你有面向人类的结论或需要拍板，必须用 team_send（to="human" 或 kind="decision"）显式发出——这类内容不会自动同步。'
     ].join('\n')
 }
 
@@ -1060,10 +1183,12 @@ function buildAssignmentBrief(
         '',
         '团队规范：',
         '- 开工前可调用 team_read 拉取团队消息（广播不会主动推送）。',
-        '- 进展/完成/阻塞用 team_send 汇报（kind=status 或 task-update）；完成后用 team_status 核对任务状态。',
+        '- 进展/完成/阻塞用 team_send 汇报（kind=status 或 task-update）。',
+        '- 任务状态用 team_task 更新：开工标 doing、卡住标 blocked、完成标 done 并附交付物（分支/文件/测试结果）；有依赖的任务需依赖先完成。',
+        '- 需要 hub API 时用团队级凭证 $HAPI_TEAM_TOKEN 调 $HAPI_API_URL（只能访问本团队），不要读取 ~/.hapi/settings.json。',
         '- 不要用 team_send 闲聊或找人类对话；批量汇报，避免来回对话。',
         '- 需要人类决策时，用 team_send 的 to="human" 或 kind="decision"（会直接通知人类）。',
-        '- 你的普通回复会留在自己的会话里，并会自动同步到团队群聊（人类可见）。'
+        '- 回复人类刚发来的消息会自动同步到群聊；由其他事件（成员消息/任务/定时）触发的轮次里若有面向人类的结论或决策需求，必须用 team_send（to="human" 或 kind="decision"）显式发送——不会自动同步。'
     ].join('\n')
 }
 

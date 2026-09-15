@@ -220,6 +220,9 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
 
     // Agent Team (P0/P1): opt-in. When disabled, teams.db is never created and
     // no team routes or events exist, so hub behavior is unchanged.
+    // Declared before the team runtime so spawnMember can mint team-scoped
+    // agent tokens; assigned once the service is constructed below.
+    let teamService: TeamService | null = null
     const teamRuntime: TeamRuntime = {
         resolveSession: (sessionId) => {
             const session = syncEngine?.getSession(sessionId)
@@ -232,7 +235,11 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
                 machineId: session.metadata?.machineId ?? null,
                 directory: session.metadata?.path ?? null,
                 flavor: AgentFlavorSchema.safeParse(flavor).success ? (flavor as AgentFlavor) : null,
-                inWorktree: session.metadata?.worktree != null
+                inWorktree: session.metadata?.worktree != null,
+                model: session.model ?? null,
+                modelReasoningEffort: session.modelReasoningEffort ?? null,
+                effort: session.effort ?? null,
+                permissionMode: session.permissionMode ?? null
             }
         },
         lastAssistantText: (sessionId) => {
@@ -253,24 +260,25 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
             if (!syncEngine) {
                 return { ok: false, message: 'Hub is not ready' }
             }
+            const agentToken = teamService?.getOrCreateAgentToken(input.teamNamespace, input.teamId) ?? undefined
             const result = await syncEngine.spawnSession(
                 input.machineId,
                 input.directory,
                 input.agent,
                 input.model,
-                undefined,
+                input.modelReasoningEffort,
                 input.yolo === true,
                 input.sessionType,
                 input.worktreeName,
                 undefined,
+                input.effort,
+                input.permissionMode,
                 undefined,
                 undefined,
                 undefined,
                 undefined,
                 undefined,
-                undefined,
-                undefined,
-                { id: input.teamId, name: input.teamName, role: input.teamRole }
+                { id: input.teamId, name: input.teamName, role: input.teamRole, ...(agentToken ? { token: agentToken } : {}) }
             )
             if (result.type === 'success') {
                 return { ok: true, sessionId: result.sessionId }
@@ -285,7 +293,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         },
         sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms))
     }
-    const teamService = config.teamsEnabled
+    teamService = config.teamsEnabled
         ? new TeamService(
             new TeamStore(config.teamsDbPath),
             (event) => syncEngine?.publishEvent(event),

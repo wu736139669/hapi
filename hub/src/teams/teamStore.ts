@@ -18,7 +18,7 @@ import { dirname } from 'node:path'
 
 export const TEAM_SCHEMA_VERSION: number = 1
 
-const REQUIRED_TABLES = ['teams', 'team_members', 'team_tasks', 'team_messages', 'team_pending_pings'] as const
+const REQUIRED_TABLES = ['teams', 'team_members', 'team_tasks', 'team_messages', 'team_pending_pings', 'team_agent_tokens'] as const
 
 export type TeamStatus = 'active' | 'archived'
 export type TeamMemberStatus = 'idle' | 'working' | 'blocked' | 'offline'
@@ -78,6 +78,20 @@ export interface TeamPendingPingRecord {
     teamId: string
     at: number
     sawThinking: boolean
+}
+
+/**
+ * Team-scoped credential for agents that want to call the hub API directly
+ * (instead of, or in addition to, the MCP tools). Grants access only to this
+ * team's messages/tasks/status; never to machines or other sessions.
+ */
+export interface TeamAgentTokenRecord {
+    token: string
+    teamId: string
+    namespace: string
+    label: string | null
+    createdAt: number
+    expiresAt: number
 }
 
 export interface CreateTeamInput {
@@ -498,6 +512,35 @@ export class TeamStore {
         }))
     }
 
+    // ---------------------------------------------------- team agent tokens
+
+    insertAgentToken(record: TeamAgentTokenRecord): void {
+        this.db.prepare(
+            `INSERT OR REPLACE INTO team_agent_tokens (token, team_id, namespace, label, created_at, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?)`
+        ).run(record.token, record.teamId, record.namespace, record.label, record.createdAt, record.expiresAt)
+    }
+
+    findAgentToken(token: string): TeamAgentTokenRecord | null {
+        const row = this.db.prepare(
+            'SELECT token, team_id, namespace, label, created_at, expires_at FROM team_agent_tokens WHERE token = ?'
+        ).get(token) as TeamAgentTokenRow | undefined
+        return row ? mapAgentTokenRow(row) : null
+    }
+
+    latestAgentToken(teamId: string, now: number): TeamAgentTokenRecord | null {
+        const row = this.db.prepare(
+            `SELECT token, team_id, namespace, label, created_at, expires_at FROM team_agent_tokens
+             WHERE team_id = ? AND expires_at > ? ORDER BY created_at DESC LIMIT 1`
+        ).get(teamId, now) as TeamAgentTokenRow | undefined
+        return row ? mapAgentTokenRow(row) : null
+    }
+
+    deleteExpiredAgentTokens(now: number): number {
+        const result = this.db.prepare('DELETE FROM team_agent_tokens WHERE expires_at <= ?').run(now)
+        return result.changes
+    }
+
     // -------------------------------------------------------------- schema
 
     private initSchema(): void {
@@ -530,6 +573,17 @@ export class TeamStore {
                 at INTEGER NOT NULL,
                 saw_thinking INTEGER NOT NULL DEFAULT 0
             );
+
+            CREATE TABLE IF NOT EXISTS team_agent_tokens (
+                token TEXT PRIMARY KEY,
+                team_id TEXT NOT NULL,
+                namespace TEXT NOT NULL,
+                label TEXT,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL,
+                FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_team_agent_tokens_team ON team_agent_tokens(team_id, expires_at);
         `)
     }
 
@@ -662,6 +716,15 @@ interface TeamMessageRow {
     created_at: number
 }
 
+interface TeamAgentTokenRow {
+    token: string
+    team_id: string
+    namespace: string
+    label: string | null
+    created_at: number
+    expires_at: number
+}
+
 interface TeamJoinRow {
     team_id: string
     team_namespace: string
@@ -676,6 +739,17 @@ interface TeamJoinRow {
     member_role: string
     member_status: string
     member_joined_at: number
+}
+
+function mapAgentTokenRow(row: TeamAgentTokenRow): TeamAgentTokenRecord {
+    return {
+        token: row.token,
+        teamId: row.team_id,
+        namespace: row.namespace,
+        label: row.label,
+        createdAt: row.created_at,
+        expiresAt: row.expires_at
+    }
 }
 
 function mapTeamRow(row: TeamRow): TeamRecord {

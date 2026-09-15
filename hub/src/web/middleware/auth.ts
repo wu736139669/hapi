@@ -9,6 +9,8 @@ export type WebAppEnv = {
         sessionId?: string
         role?: 'session-guest'
         shareToken?: string
+        /** Set when the request was authenticated with a team-scoped agent token. */
+        teamScope?: { teamId: string }
     }
 }
 
@@ -20,7 +22,11 @@ const jwtPayloadSchema = z.object({
     sht: z.string().min(1).optional()
 })
 
-export function createAuthMiddleware(jwtSecret: Uint8Array, options?: { isGuestTokenActive?: (shareToken: string) => boolean }): MiddlewareHandler<WebAppEnv> {
+export function createAuthMiddleware(jwtSecret: Uint8Array, options?: {
+    isGuestTokenActive?: (shareToken: string) => boolean
+    /** Resolve a `hapi_team_*` token to its team scope; null = invalid/expired. */
+    resolveTeamAgentToken?: (token: string) => { teamId: string; namespace: string } | null
+}): MiddlewareHandler<WebAppEnv> {
     return async (c, next) => {
         const path = c.req.path
         if (path === '/api/auth' || path === '/api/bind' || path.startsWith('/api/public/studios/') || path.startsWith('/api/public/session-shares/')) {
@@ -35,6 +41,24 @@ export function createAuthMiddleware(jwtSecret: Uint8Array, options?: { isGuestT
 
         if (!token) {
             return c.json({ error: 'Missing authorization token' }, 401)
+        }
+
+        // Team-scoped agent tokens: limited to this team's messages/tasks/status.
+        // A leaked team token must never reach machines or other sessions.
+        if (token.startsWith('hapi_team_')) {
+            const scope = options?.resolveTeamAgentToken?.(token)
+            if (!scope) {
+                return c.json({ error: 'Invalid team token' }, 401)
+            }
+            if (!isTeamTokenRouteAllowed(c.req.method, path, scope.teamId)) {
+                return c.json({ error: 'Team token cannot access this endpoint' }, 403)
+            }
+            c.set('userId', 0)
+            c.set('namespace', scope.namespace)
+            c.set('teamScope', { teamId: scope.teamId })
+            console.log(`[TeamToken] team=${scope.teamId.slice(0, 8)} token=${token.slice(0, 18)}… ${c.req.method} ${path}`)
+            await next()
+            return
         }
 
         try {
@@ -70,4 +94,35 @@ export function createAuthMiddleware(jwtSecret: Uint8Array, options?: { isGuestT
             return c.json({ error: 'Invalid token' }, 401)
         }
     }
+}
+
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Endpoints a team-scoped agent token may call. Everything else (machines,
+ * other sessions, team administration, spawning, token minting) is denied.
+ */
+export function isTeamTokenRouteAllowed(method: string, path: string, teamId: string): boolean {
+    if (!path.startsWith('/api/teams')) {
+        return false
+    }
+    if (method === 'GET' && /^\/api\/teams\/by-session\/[^/]+$/.test(path)) {
+        return true
+    }
+    const id = escapeRegExp(teamId)
+    if (method === 'GET' && new RegExp(`^/api/teams/${id}$`).test(path)) {
+        return true
+    }
+    if (method === 'GET' && new RegExp(`^/api/teams/${id}/messages$`).test(path)) {
+        return true
+    }
+    if (method === 'POST' && new RegExp(`^/api/teams/${id}/messages$`).test(path)) {
+        return true
+    }
+    if (method === 'PATCH' && new RegExp(`^/api/teams/${id}/tasks/[^/]+$`).test(path)) {
+        return true
+    }
+    return false
 }

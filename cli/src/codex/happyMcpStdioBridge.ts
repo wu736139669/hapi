@@ -334,14 +334,28 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       {
         name: 'spawn_peer',
         title: 'Spawn Team Peer',
-        description: 'Agent Team: spawn a new teammate session with a role and an initial task. Requires user approval.',
+        description: 'Agent Team: spawn a new teammate session with a role and an initial task. Members inherit your tool/model/thinking level/permission by default. Requires user approval.',
         inputSchema: z.object({
           role: z.string().min(1).describe('Role / display name, unique in the team'),
           task: z.string().min(1).optional().describe('Initial task brief delivered to the new member'),
           agent: z.string().min(1).optional().describe('Agent flavor (claude, codex, ...). Defaults to the caller flavor.'),
-          model: z.string().min(1).optional().describe('Optional model override'),
+          model: z.string().min(1).optional().describe('Optional model override (defaults to yours)'),
+          modelReasoningEffort: z.string().min(1).max(50).optional().describe('Optional thinking-level override (defaults to yours)'),
+          permissionMode: z.string().min(1).max(50).optional().describe('Optional permission-mode override (defaults to yours)'),
           worktree: z.boolean().optional().describe('Run the member in an isolated git worktree'),
           worktreeName: z.string().min(1).max(80).optional(),
+        }),
+      },
+      {
+        name: 'team_task',
+        title: 'Team Tasks',
+        description: 'Agent Team: list team tasks or update one. doing/done requires dependencies to be done; done requires a deliverable (evidence).',
+        inputSchema: z.object({
+          action: z.enum(['list', 'update']),
+          taskId: z.string().min(1).optional().describe('Required for action=update'),
+          status: z.enum(['todo', 'doing', 'done', 'blocked']).optional(),
+          deliverable: z.string().min(1).max(2000).optional().describe('Evidence for done: branch/commit/files/test result'),
+          dependsOn: z.array(z.string().min(1)).max(20).optional(),
         }),
       },
     ];

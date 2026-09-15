@@ -31,9 +31,11 @@ export interface SpawnSessionOptions {
     validateDirectory?: (path: string) => Promise<boolean>
     /**
      * Agent Team context (hub-set). The runner exports HAPI_TEAM_* env vars so
-     * the child CLI can register team MCP tools and identify its role.
+     * the child CLI can register team MCP tools and identify its role. The
+     * optional token is team-scoped and lets the agent call hub APIs directly
+     * without reading the operator credentials.
      */
-    team?: { id: string; name: string; role: string }
+    team?: { id: string; name: string; role: string; token?: string }
 }
 
 export type SpawnSessionResult =
