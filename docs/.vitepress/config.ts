@@ -47,6 +47,7 @@ export default defineConfig({
         text: 'Advanced',
         items: [
           { text: 'Namespace', link: '/guide/namespace' },
+          { text: 'Team HAPI', link: '/guide/team-hapi' },
           { text: 'Deployment', link: '/guide/deployment' },
           { text: 'Notifications', link: '/guide/notifications' }
         ]

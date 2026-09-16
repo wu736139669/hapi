@@ -1,26 +1,21 @@
 import { describe, expect, it } from 'bun:test'
-import { DEFAULT_NAMESPACE, parseAccessToken } from './accessToken'
+import { parseAccessToken, resolveAccessToken } from './accessToken'
 
-describe('parseAccessToken', () => {
-    it('defaults namespace when missing', () => {
-        const parsed = parseAccessToken('token')
-        expect(parsed).toEqual({ baseToken: 'token', namespace: DEFAULT_NAMESPACE })
+describe('resolveAccessToken', () => {
+    it('resolves a stored user token without treating it as a namespace suffix', () => {
+        const lookup = { resolve: (raw: string) => raw === 'hapi_team_secret' ? { namespace: 'member-a' } : null }
+        expect(resolveAccessToken('hapi_team_secret', 'shared-base', lookup)).toEqual({
+            baseToken: 'hapi_team_secret',
+            namespace: 'member-a'
+        })
+        expect(resolveAccessToken('hapi_team_secret:member-b', 'shared-base', lookup)).toBeNull()
     })
 
-    it('parses namespace suffix', () => {
-        const parsed = parseAccessToken('token:alice')
-        expect(parsed).toEqual({ baseToken: 'token', namespace: 'alice' })
-    })
-
-    it('rejects empty namespace', () => {
-        expect(parseAccessToken('token:')).toBeNull()
-    })
-
-    it('rejects missing base token', () => {
-        expect(parseAccessToken(':alice')).toBeNull()
-    })
-
-    it('rejects whitespace inside namespace', () => {
-        expect(parseAccessToken('token: alice')).toBeNull()
+    it('keeps the legacy base-token namespace behavior for the hub owner', () => {
+        expect(resolveAccessToken('shared-base:default', 'shared-base')).toEqual({
+            baseToken: 'shared-base',
+            namespace: 'default'
+        })
+        expect(parseAccessToken('shared-base:member-a')?.namespace).toBe('member-a')
     })
 })

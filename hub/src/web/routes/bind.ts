@@ -2,8 +2,7 @@ import { Hono } from 'hono'
 import { SignJWT } from 'jose'
 import { z } from 'zod'
 import { getConfiguration } from '../../configuration'
-import { constantTimeEquals } from '../../utils/crypto'
-import { parseAccessToken } from '../../utils/accessToken'
+import { resolveAccessToken } from '../../utils/accessToken'
 import { validateTelegramInitData } from '../telegramInitData'
 import { getOrCreateOwnerId } from '../../config/ownerId'
 import type { WebAppEnv } from '../middleware/auth'
@@ -25,8 +24,12 @@ export function createBindRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
         }
 
         const configuration = getConfiguration()
-        const parsedToken = parseAccessToken(parsed.data.accessToken)
-        if (!parsedToken || !constantTimeEquals(parsedToken.baseToken, configuration.cliApiToken)) {
+        const parsedToken = resolveAccessToken(
+            parsed.data.accessToken,
+            configuration.cliApiToken,
+            store.accessTokens
+        )
+        if (!parsedToken) {
             return c.json({ error: 'Invalid access token' }, 401)
         }
         const namespace = parsedToken.namespace

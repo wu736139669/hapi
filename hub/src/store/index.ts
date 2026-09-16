@@ -13,6 +13,7 @@ import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
+import { AccessTokenStore } from './accessTokens'
 
 export type {
     NativeDevicePlatform,
@@ -36,6 +37,7 @@ export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 export { UsageStore } from './usageStore'
 export { WorkGraphStore } from './workGraphStore'
+export { AccessTokenStore } from './accessTokens'
 export {
     WorkGraphNotFoundError,
     WorkGraphPrincipalError,
@@ -72,6 +74,7 @@ export class Store {
     readonly scratchlist: ScratchlistStore
     readonly usage: UsageStore
     readonly workGraph: WorkGraphStore
+    readonly accessTokens: AccessTokenStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -126,6 +129,7 @@ export class Store {
         this.scratchlist = new ScratchlistStore(this.db)
         this.usage = new UsageStore(this.db)
         this.workGraph = new WorkGraphStore(this.db)
+        this.accessTokens = new AccessTokenStore(this.db)
     }
 
     /**
@@ -367,11 +371,13 @@ export class Store {
                 // a partially-built legacy DB may not have yet.
                 this.createSchema()
                 this.setUserVersion(SCHEMA_VERSION)
+                this.ensureAccessTokenSchema()
                 return
             }
 
             this.createSchema()
             this.setUserVersion(SCHEMA_VERSION)
+            this.ensureAccessTokenSchema()
             return
         }
 
@@ -383,6 +389,7 @@ export class Store {
                 step()
             }
             this.setUserVersion(SCHEMA_VERSION)
+            this.ensureAccessTokenSchema()
             return
         }
 
@@ -390,7 +397,39 @@ export class Store {
             throw this.buildSchemaMismatchError(currentVersion)
         }
 
+        this.ensureAccessTokenSchema()
         this.assertRequiredTablesPresent()
+    }
+
+    /** Additive auth tables; intentionally independent from the main schema ladder. */
+    private ensureAccessTokenSchema(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS team_access_tokens (
+                id TEXT PRIMARY KEY,
+                token_hash TEXT NOT NULL UNIQUE,
+                namespace TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                last_used_at INTEGER,
+                revoked_at INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_team_access_tokens_namespace
+                ON team_access_tokens(namespace, created_at DESC);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_team_access_tokens_active_hash
+                ON team_access_tokens(token_hash)
+                WHERE revoked_at IS NULL;
+
+            CREATE TABLE IF NOT EXISTS team_invites (
+                id TEXT PRIMARY KEY,
+                invite_hash TEXT NOT NULL UNIQUE,
+                kind TEXT NOT NULL CHECK (kind IN ('enroll', 'recovery')),
+                namespace TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL,
+                used_at INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_team_invites_expiry
+                ON team_invites(expires_at, used_at);
+        `)
     }
 
     private createSchema(): void {
