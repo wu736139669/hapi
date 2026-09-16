@@ -35,6 +35,7 @@ const statusBody: TeamStatusView = {
     members: [{ sessionId: 'sess-lead', role: 'lead', status: 'idle' }],
     tasks: [],
     pendingTasks: [],
+    requirements: [],
     budget: { maxMembers: 5, maxMessagesPerMinute: 30, maxChainDepth: 8 }
 }
 

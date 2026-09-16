@@ -329,6 +329,8 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
           to: z.string().min(1).optional().describe('"all" (default), "lead", "human", or a member session id/prefix'),
           kind: z.enum(['chat', 'status', 'question', 'task-update', 'decision']).optional(),
           inReplyTo: z.number().int().positive().optional().describe('seq of the message you are replying to'),
+          taskId: z.string().min(1).optional().describe('Task this message reports on (files it under the task requirement)'),
+          requirementId: z.string().min(1).optional(),
         }),
       },
       {
@@ -342,6 +344,7 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
           model: z.string().min(1).optional().describe('Optional model override (defaults to yours)'),
           modelReasoningEffort: z.string().min(1).max(50).optional().describe('Optional thinking-level override (defaults to yours)'),
           permissionMode: z.string().min(1).max(50).optional().describe('Optional permission-mode override (defaults to yours)'),
+          requirementId: z.string().min(1).optional().describe('Requirement the new member\'s task belongs to'),
           worktree: z.boolean().optional().describe('Run the member in an isolated git worktree'),
           worktreeName: z.string().min(1).max(80).optional(),
         }),
@@ -356,6 +359,17 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
           status: z.enum(['todo', 'doing', 'done', 'blocked']).optional(),
           deliverable: z.string().min(1).max(2000).optional().describe('Evidence for done: branch/commit/files/test result'),
           dependsOn: z.array(z.string().min(1)).max(20).optional(),
+        }),
+      },
+      {
+        name: 'team_requirement',
+        title: 'Team Requirements',
+        description: 'Agent Team: list requirements (human asks) or update one; set status=done plus a conclusion when a requirement is finished.',
+        inputSchema: z.object({
+          action: z.enum(['list', 'update']),
+          requirementId: z.string().min(1).optional().describe('Required for action=update'),
+          status: z.enum(['open', 'doing', 'done', 'blocked']).optional(),
+          conclusion: z.string().max(4000).optional(),
         }),
       },
     ];

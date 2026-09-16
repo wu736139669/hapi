@@ -51,9 +51,24 @@ export interface TeamWithMembers extends TeamSummary {
     members: TeamMember[]
 }
 
+export type TeamRequirementStatus = 'open' | 'doing' | 'done' | 'blocked'
+
+export interface TeamRequirement {
+    id: string
+    teamId: string
+    title: string
+    body: string | null
+    status: TeamRequirementStatus
+    conclusion: string | null
+    createdBySessionId: string | null
+    createdAt: number
+    updatedAt: number
+}
+
 export interface TeamDetail {
     team: TeamSummary
     members: TeamMember[]
     tasks: TeamTask[]
+    requirements: TeamRequirement[]
 }
 

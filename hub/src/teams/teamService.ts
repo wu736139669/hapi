@@ -7,6 +7,8 @@ import {
     type TeamMemberRecord,
     type TeamMessageRecord,
     type TeamRecord,
+    type TeamRequirementRecord,
+    type TeamRequirementStatus,
     type TeamTaskRecord,
     type TeamTaskStatus
 } from './teamStore'
@@ -15,6 +17,7 @@ export interface TeamDetail {
     team: TeamRecord
     members: TeamMemberRecord[]
     tasks: TeamTaskRecord[]
+    requirements: TeamRequirementRecord[]
 }
 
 export interface CreateTeamServiceInput {
@@ -84,6 +87,7 @@ export interface TeamStatus {
     members: TeamMemberRecord[]
     tasks: TeamTaskRecord[]
     pendingTasks: TeamTaskRecord[]
+    requirements: TeamRequirementRecord[]
     budget: TeamBudget
 }
 
@@ -173,7 +177,8 @@ export class TeamService {
         return {
             team,
             members: this.store.listMembers(team.id).map((member) => this.deriveMemberStatus(member)),
-            tasks: this.store.listTasks(team.id)
+            tasks: this.store.listTasks(team.id),
+            requirements: this.store.listRequirements(team.id)
         }
     }
 
@@ -213,6 +218,7 @@ export class TeamService {
             pendingTasks: tasks.filter((task) =>
                 task.assigneeSessionId === sessionId && (task.status === 'todo' || task.status === 'doing')
             ),
+            requirements: this.store.listRequirements(membership.team.id),
             budget: readBudget(membership.team.config)
         }
     }
@@ -244,7 +250,7 @@ export class TeamService {
     async sendMessage(
         sessionId: string,
         namespace: string,
-        input: { text: string; to?: string; kind?: string; inReplyTo?: number }
+        input: { text: string; to?: string; kind?: string; inReplyTo?: number; taskId?: string; requirementId?: string }
     ): Promise<TeamMessageRecord> {
         const membership = this.requireMembership(sessionId, namespace)
         const { team, member } = membership
@@ -262,7 +268,9 @@ export class TeamService {
             fromRole: member.role,
             text: input.text,
             kind: input.kind,
-            inReplyTo: input.inReplyTo
+            inReplyTo: input.inReplyTo,
+            taskId: input.taskId,
+            requirementId: input.requirementId
         })
     }
 
@@ -322,6 +330,10 @@ export class TeamService {
             text: string
             kind?: string
             inReplyTo?: number
+            /** Explicit requirement to file this message under. */
+            requirementId?: string
+            /** Task the message reports on; inherits the task's requirement. */
+            taskId?: string
         }
     ): Promise<TeamMessageRecord> {
         if (input.fromKind === 'session' && input.fromSessionId) {
@@ -337,6 +349,19 @@ export class TeamService {
         // toast) and must not clutter the inbox with status reports.
         const awaitingHuman = input.fromKind === 'session' && kind === 'decision'
 
+        // Requirement attribution: explicit > task > reply chain. A fresh human
+        // ask opens a new requirement so the timeline can group the work that
+        // follows under "requirement -> process -> conclusion".
+        let requirementId = this.resolveRequirementId(team.id, input)
+        if (!requirementId && input.fromKind === 'human') {
+            requirementId = this.store.createRequirement({
+                teamId: team.id,
+                title: requirementTitle(input.text),
+                body: input.text,
+                createdBySessionId: null
+            }).id
+        }
+
         const message = this.store.appendMessage({
             teamId: team.id,
             fromKind: input.fromKind,
@@ -350,7 +375,8 @@ export class TeamService {
                 ...(target.toHuman ? { toHuman: true } : {}),
                 ...(awaitingHuman ? { awaitingHuman: true } : {}),
                 ...(replyDepth > 0 ? { replyDepth } : {}),
-                ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {})
+                ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {}),
+                ...(requirementId ? { requirementId } : {})
             }
         })
         this.publishUpdate(team)
@@ -435,7 +461,7 @@ export class TeamService {
     async createTaskForHuman(
         namespace: string,
         teamId: string,
-        input: { title: string; assigneeSessionId?: string | null; dependsOn?: string[] }
+        input: { title: string; assigneeSessionId?: string | null; dependsOn?: string[]; requirementId?: string }
     ): Promise<TeamTaskRecord> {
         const team = this.store.getTeam(teamId, namespace)
         if (!team) {
@@ -453,7 +479,14 @@ export class TeamService {
             title: input.title,
             assigneeSessionId,
             status: 'todo',
-            ...(input.dependsOn && input.dependsOn.length > 0 ? { meta: { dependsOn: input.dependsOn } } : {})
+            ...((input.dependsOn && input.dependsOn.length > 0) || input.requirementId
+                ? {
+                    meta: {
+                        ...(input.dependsOn && input.dependsOn.length > 0 ? { dependsOn: input.dependsOn } : {}),
+                        ...(input.requirementId ? { requirementId: input.requirementId } : {})
+                    }
+                }
+                : {})
         })
         const assigneeRole = members.find((member) => member.sessionId === assigneeSessionId)?.role
         this.store.appendMessage({
@@ -494,7 +527,7 @@ export class TeamService {
     async addMemberFromSession(
         namespace: string,
         teamId: string,
-        input: { sessionId: string; role: string; task?: string }
+        input: { sessionId: string; role: string; task?: string; requirementId?: string }
     ): Promise<{ teamId: string; sessionId: string; role: string; taskId: string | null }> {
         const team = this.store.getTeam(teamId, namespace)
         if (!team) {
@@ -524,7 +557,7 @@ export class TeamService {
                 title: taskTitle(input.task),
                 assigneeSessionId: input.sessionId,
                 status: 'todo',
-                meta: { brief: input.task }
+                meta: { brief: input.task, ...(input.requirementId ? { requirementId: input.requirementId } : {}) }
             })
             taskId = task.id
         }
@@ -692,6 +725,42 @@ export class TeamService {
     }
 
     /**
+     * Update a requirement (status / conclusion) from the web or the lead.
+     */
+    async updateRequirement(
+        sessionId: string | null,
+        namespace: string,
+        requirementId: string,
+        patch: { status?: TeamRequirementStatus; conclusion?: string | null }
+    ): Promise<TeamRequirementRecord> {
+        const membership = sessionId ? this.requireMembership(sessionId, namespace) : null
+        const requirement = this.store.getRequirement(requirementId)
+        const team = membership?.team ?? (requirement ? this.store.getTeam(requirement.teamId, namespace) : null)
+        if (!requirement || !team || requirement.teamId !== team.id) {
+            throw new TeamServiceError('not_found', 'Requirement not found in this team')
+        }
+        const updated = this.store.updateRequirement(requirementId, patch)
+        if (!updated) {
+            throw new TeamServiceError('not_found', 'Requirement not found in this team')
+        }
+        const fromRole = membership?.member.role ?? '人类'
+        const changes: string[] = []
+        if (patch.status !== undefined) changes.push(`→ ${patch.status}`)
+        if (patch.conclusion !== undefined) changes.push('结论已更新')
+        this.store.appendMessage({
+            teamId: team.id,
+            fromKind: membership ? 'session' : 'hub',
+            fromSessionId: sessionId,
+            toKind: 'broadcast',
+            kind: 'system',
+            text: `需求「${updated.title}」${changes.join('，')}（${fromRole}）${updated.conclusion ? `：${updated.conclusion.slice(0, 200)}` : ''}`,
+            meta: { requirementId: updated.id, fromRole }
+        })
+        this.publishUpdate(team)
+        return updated
+    }
+
+    /**
      * Remove a member (human action). The member's session survives unless
      * `stopSession` is set; the lead cannot be removed (change the lead first).
      */
@@ -817,6 +886,8 @@ export class TeamService {
             sessionType?: 'simple' | 'worktree'
             worktreeName?: string
             yolo?: boolean
+            /** File the new member's task under this requirement. */
+            requirementId?: string
         }
     ): Promise<{
         teamId: string
@@ -886,7 +957,7 @@ export class TeamService {
                 title: taskTitle(input.task),
                 assigneeSessionId: newSessionId,
                 status: 'todo',
-                meta: { brief: input.task }
+                meta: { brief: input.task, ...(input.requirementId ? { requirementId: input.requirementId } : {}) }
             })
             taskId = task.id
         }
@@ -1124,6 +1195,41 @@ export class TeamService {
         this.messageLog.set(teamId, recent)
     }
 
+    /** Explicit requirement > task's requirement > reply parent's requirement. */
+    private resolveRequirementId(
+        teamId: string,
+        input: { requirementId?: string; taskId?: string; inReplyTo?: number }
+    ): string | null {
+        const explicit = input.requirementId?.trim()
+        if (explicit) {
+            const requirement = this.store.getRequirement(explicit)
+            if (requirement && requirement.teamId === teamId) {
+                return requirement.id
+            }
+        }
+        if (input.taskId) {
+            const task = this.store.getTask(input.taskId)
+            const fromTask = task?.meta && typeof task.meta.requirementId === 'string' ? task.meta.requirementId : null
+            if (fromTask) {
+                const requirement = this.store.getRequirement(fromTask)
+                if (requirement && requirement.teamId === teamId) {
+                    return requirement.id
+                }
+            }
+        }
+        if (input.inReplyTo) {
+            const parent = this.store.getMessage(teamId, input.inReplyTo)
+            const fromParent = parent?.meta && typeof parent.meta.requirementId === 'string' ? parent.meta.requirementId : null
+            if (fromParent) {
+                const requirement = this.store.getRequirement(fromParent)
+                if (requirement && requirement.teamId === teamId) {
+                    return requirement.id
+                }
+            }
+        }
+        return null
+    }
+
     private resolveReplyDepth(teamId: string, inReplyTo: number | undefined, budget: TeamBudget): number {
         if (!inReplyTo) return 0
         const parent = this.store.getMessage(teamId, inReplyTo)
@@ -1230,7 +1336,8 @@ function buildLeadBrief(team: TeamRecord): string {
         `你是 HAPI 团队「${team.name}」的 Lead。`,
         '',
         '职责：拆解任务、派生成员、汇总进展，必要时把决策升级给人类。',
-        '可用工具：team_status（成员/任务/预算）、team_read（拉取团队消息，广播不会主动推送）、team_send（汇报/分派/通知人类）、team_task（任务列表/更新状态/交付物/依赖）、spawn_peer（派生成员，需用户批准）。',
+        '可用工具：team_status（成员/任务/需求/预算）、team_read（拉取团队消息，广播不会主动推送）、team_send（汇报/分派/通知人类）、team_task（任务列表/更新状态/交付物/依赖）、team_requirement（需求列表/状态/结论）、spawn_peer（派生成员，需用户批准）。',
+        '人类每条新消息会自动成为一个"需求"：派生任务时带上 requirementId（spawn_peer），完成后用 team_requirement 把需求标 done 并写一句 conclusion（结果）——人类只读结论即可。',
         '派生成员默认继承你的工具/模型/思考等级/权限，不需要手动指定；只有人类明确要求不同配置时才传覆盖参数。',
         '需要直接调用 hub API 时用团队级凭证 $HAPI_TEAM_TOKEN（只能访问本团队的消息/任务/状态），不要读取 ~/.hapi/settings.json 的凭证。',
         '需要人类决策时用 kind="decision"（会通知人类并进"待确认"收件箱）；只是汇报进展/结论用普通广播，不要用 to="human"——那会打扰人类；人类也会在群聊里发言、加成员或调整任务。',
@@ -1258,6 +1365,7 @@ function buildAssignmentBrief(
         '- 开工前可调用 team_read 拉取团队消息（广播不会主动推送）。',
         '- 进展/完成/阻塞用 team_send 汇报（kind=status 或 task-update）。',
         '- 任务状态用 team_task 更新：开工标 doing、卡住标 blocked、完成标 done 并附交付物（分支/文件/测试结果）；有依赖的任务需依赖先完成。',
+        '- 汇报时带上 taskId（team_send 的 taskId 参数），消息会自动归入对应需求。',
         '- 需要 hub API 时用团队级凭证 $HAPI_TEAM_TOKEN 调 $HAPI_API_URL（只能访问本团队），不要读取 ~/.hapi/settings.json。',
         '- 不要用 team_send 闲聊或找人类对话；批量汇报，避免来回对话。',
         '- 需要人类决策时，用 team_send 的 kind="decision"（会通知人类并进"待确认"）；只是汇报进展用普通广播，不要用 to="human"。',
@@ -1277,4 +1385,14 @@ function slug(value: string): string {
         .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
         .replace(/^-+|-+$/g, '')
         .slice(0, 40)
+}
+
+/** Human ask -> requirement title: first non-empty line, capped. */
+function requirementTitle(text: string): string {
+    const firstLine = text.split('\n').map((line) => line.trim()).find((line) => line.length > 0) ?? ''
+    const compact = firstLine.replace(/\s+/g, ' ')
+    if (compact.length === 0) {
+        return '需求'
+    }
+    return compact.length > 60 ? `${compact.slice(0, 57)}...` : compact
 }

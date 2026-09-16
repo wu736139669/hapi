@@ -37,6 +37,7 @@ import {
     resolveCurrentTeam,
     sendTeamMessage,
     spawnTeamMember,
+    updateTeamRequirement,
     updateTeamTask
 } from "@/modules/team/teamClient";
 
@@ -486,8 +487,10 @@ function createHapiMcpServer(
                 to: z.string().min(1).optional().describe('"all" (default), "lead", "human", or a member session id/prefix'),
                 kind: z.enum(['chat', 'status', 'question', 'task-update', 'decision']).optional().describe('Message kind (default chat)'),
                 inReplyTo: z.number().int().positive().optional().describe('seq of the message you are replying to'),
+                taskId: z.string().min(1).optional().describe('Task this message reports on (files it under the task requirement)'),
+                requirementId: z.string().min(1).optional().describe('Explicit requirement id to file this message under'),
             }),
-        }, async (args: { text: string; to?: string; kind?: string; inReplyTo?: number }) => {
+        }, async (args: { text: string; to?: string; kind?: string; inReplyTo?: number; taskId?: string; requirementId?: string }) => {
             try {
                 const status = await requireTeam();
                 const message = await sendTeamMessage({
@@ -497,6 +500,8 @@ function createHapiMcpServer(
                     to: args.to,
                     kind: args.kind,
                     inReplyTo: args.inReplyTo,
+                    taskId: args.taskId,
+                    requirementId: args.requirementId,
                 });
                 return {
                     content: [{ type: 'text' as const, text: `Sent as team message #${message.seq}${args.to && args.to !== 'all' ? ` to ${args.to}` : ' (broadcast)'}` }],
@@ -517,10 +522,11 @@ function createHapiMcpServer(
                 model: z.string().min(1).optional().describe('Optional model override (defaults to yours)'),
                 modelReasoningEffort: z.string().min(1).max(50).optional().describe('Optional thinking-level override (defaults to yours)'),
                 permissionMode: z.string().min(1).max(50).optional().describe('Optional permission-mode override (defaults to yours)'),
+                requirementId: z.string().min(1).optional().describe('Requirement the new member\'s task belongs to (see team_status)'),
                 worktree: z.boolean().optional().describe('Run the member in an isolated git worktree (default: follow the caller)'),
                 worktreeName: z.string().min(1).max(80).optional().describe('Explicit worktree name'),
             }),
-        }, async (args: { role: string; task?: string; agent?: string; model?: string; modelReasoningEffort?: string; permissionMode?: string; worktree?: boolean; worktreeName?: string }) => {
+        }, async (args: { role: string; task?: string; agent?: string; model?: string; modelReasoningEffort?: string; permissionMode?: string; requirementId?: string; worktree?: boolean; worktreeName?: string }) => {
             try {
                 const status = await requireTeam();
                 const result = await spawnTeamMember({
@@ -534,6 +540,7 @@ function createHapiMcpServer(
                     permissionMode: args.permissionMode,
                     sessionType: args.worktree === undefined ? undefined : (args.worktree ? 'worktree' : 'simple'),
                     worktreeName: args.worktreeName,
+                    requirementId: args.requirementId,
                 });
                 return {
                     content: [{
@@ -579,8 +586,42 @@ function createHapiMcpServer(
                 return { content: [{ type: 'text' as const, text: `Failed to update task: ${teamErrorText(error)}` }], isError: true };
             }
         });
-    }
 
+        mcp.registerTool<any, any>('team_requirement', {
+            description: 'Agent Team: list requirements (human asks) or update one. When a requirement is finished, set status=done and write the conclusion so the human sees the result without reading the whole thread.',
+            title: 'Team Requirements',
+            inputSchema: z.object({
+                action: z.enum(['list', 'update']).describe('list = show requirements; update = change one'),
+                requirementId: z.string().min(1).optional().describe('Required for action=update'),
+                status: z.enum(['open', 'doing', 'done', 'blocked']).optional(),
+                conclusion: z.string().max(4000).optional().describe('Result summary for the human (update)'),
+            }),
+        }, async (args: { action: 'list' | 'update'; requirementId?: string; status?: 'open' | 'doing' | 'done' | 'blocked'; conclusion?: string }) => {
+            try {
+                const status = await requireTeam();
+                if (args.action === 'list') {
+                    const requirements = status.requirements ?? [];
+                    const text = requirements.length === 0
+                        ? '（暂无需求）'
+                        : requirements.map((requirement) => `- [${requirement.status}] ${requirement.title} id=${requirement.id}${requirement.conclusion ? ` · 结论: ${requirement.conclusion.slice(0, 80)}` : ''}`).join('\n');
+                    return { content: [{ type: 'text' as const, text }], isError: false };
+                }
+                if (!args.requirementId) {
+                    return { content: [{ type: 'text' as const, text: 'requirementId is required for action=update' }], isError: true };
+                }
+                const requirement = await updateTeamRequirement({
+                    sessionId: client.sessionId,
+                    teamId: status.team.id,
+                    requirementId: args.requirementId,
+                    status: args.status,
+                    conclusion: args.conclusion,
+                });
+                return { content: [{ type: 'text' as const, text: `需求「${requirement?.title ?? args.requirementId}」已更新为 ${requirement?.status ?? 'ok'}` }], isError: false };
+            } catch (error) {
+                return { content: [{ type: 'text' as const, text: `Failed to update requirement: ${teamErrorText(error)}` }], isError: true };
+            }
+        });
+    }
 
     if (skillLookup) {
         mcp.registerTool<any, any>('skill_lookup', {
@@ -709,7 +750,7 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
         ? ['change_title', 'display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer']
         : ['display_image', 'display_video', 'display_media', 'list_peers', 'ping_peer', 'inspect_peer'];
     if (teamToolsEnabled) {
-        toolNames.push('team_status', 'team_read', 'team_send', 'spawn_peer', 'team_task');
+        toolNames.push('team_status', 'team_read', 'team_send', 'spawn_peer', 'team_task', 'team_requirement');
     }
     if (options.skillLookup) {
         toolNames.push('skill_lookup');
