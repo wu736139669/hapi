@@ -76,35 +76,35 @@ cd android && ./gradlew :core:protocol:test  # Android protocol conformance
 
 ## Local binary deployment
 
-The macOS all-in-one executable is ad-hoc signed. **Do not overwrite
-`~/.hapi/bin/hapi` in place, even with an atomic rename.** macOS caches the
-Mach-O code signature by executable path/mtime; replacing that path can make
-the embedded signature disagree with the cached signature and kill every new
-process with `OS_REASON_CODESIGNING` / `embedded signature doesn't match
-attached signature` (often exit 137). A plain `cp` also loses the signed
-mtime.
+Deploy with `scripts/deploy-local.sh [tag]` after `bun run build:single-exe`.
+The script signs with a pinned codesigning identity, copies to a new versioned
+filename, repoints the `~/.hapi/bin/hapi` symlink, restarts the hub, and rolls
+back if `/health` fails.
 
-Safe deployment sequence:
+Two macOS rules the script enforces:
 
-1. Build the executable.
-2. Remove Bun's linker signature, then apply a fresh ad-hoc signature:
+1. **Never overwrite `~/.hapi/bin/hapi` in place**, even with an atomic
+   rename. macOS caches the Mach-O code signature by executable path/mtime;
+   replacing that path can make the embedded signature disagree with the
+   cached signature and kill every new process with `OS_REASON_CODESIGNING` /
+   `embedded signature doesn't match attached signature` (often exit 137). A
+   plain `cp` also loses the signed mtime. Always copy to a new versioned
+   filename, keep the stable path as a symlink, and keep the previous
+   versioned file for rollback (do not delete it while sessions are running).
+2. **Never ship an ad-hoc signature** (`--sign -`). Ad-hoc signatures have no
+   stable identity, so macOS TCC treats every build as a new app and re-asks
+   each protected permission (Documents, Downloads, media library, ...). Pin
+   one Apple Development identity instead: SHA-1 in `~/.hapi/signing-identity`,
+   override via `HAPI_SIGN_IDENTITY`, signed identifier `run.hapi.cli`.
 
-   ```bash
-   codesign --remove-signature cli/dist-exe/bun-darwin-arm64/hapi 2>/dev/null || true
-   codesign --force --sign - cli/dist-exe/bun-darwin-arm64/hapi
-   codesign --verify --deep --strict cli/dist-exe/bun-darwin-arm64/hapi
-   ```
+Agent sessions must not run recursive `$HOME` sweeps (`find ~`, `du -sh ~`)
+without pruning TCC-protected folders (`~/Music`, `~/Pictures`, `~/Movies`,
+`~/Library`): a walk into `~/Music/Music/Media.localized` raises a spurious
+Apple Music prompt attributed to the hapi binary.
 
-3. Copy with `cp -p` to a **new, versioned filename** under `~/.hapi/bin/`;
-   never reuse a previous executable pathname. Verify and run `--help` from
-   that versioned path.
-4. Point `~/.hapi/bin/hapi` at the versioned file with a symlink. Keep the
-   previous versioned file for rollback; do not delete it while sessions are
-   running.
-5. Restart the launch agent, then check `curl -fsS
-   http://127.0.0.1:3006/health`, `~/.hapi/bin/hapi --version`, and `hapi
-   runner status`. If health fails, restore the previous symlink before doing
-   anything else.
+After deploy: `curl -fsS http://127.0.0.1:3006/health`, `~/.hapi/bin/hapi
+--version`, `hapi runner status`. If health fails, restore the previous
+symlink before doing anything else.
 
 `docs/local-deployment.md` contains the same rationale and rollback checklist.
 

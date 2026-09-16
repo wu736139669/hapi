@@ -39,10 +39,22 @@ These branches must not be deleted during cleanup or upstream updates.
 
 ## macOS executable deployment (important)
 
-The all-in-one Bun executable uses an ad-hoc Mach-O signature. macOS caches
-that signature against the executable pathname and modification time. Replacing
-`~/.hapi/bin/hapi` in place (including a temp-file + rename) or using a plain
-`cp` can leave a stale code-signature cache. The next launch then fails with:
+Deploy with:
+
+```bash
+bun run build:single-exe
+scripts/deploy-local.sh [tag]
+```
+
+The script implements the sequence below; read on to understand the two macOS
+constraints it works around.
+
+### Code-signature cache (never overwrite the stable path)
+
+macOS caches the Mach-O signature against the executable pathname and
+modification time. Replacing `~/.hapi/bin/hapi` in place (including a
+temp-file + rename) or using a plain `cp` can leave a stale code-signature
+cache. The next launch then fails with:
 
 ```text
 OS_REASON_CODESIGNING
@@ -53,7 +65,28 @@ This is a deployment/install issue, not a HAPI application error. Use a fresh
 versioned path for every build and keep the stable command path as a symlink.
 Do not deploy by copying over the stable path.
 
-Example for the macOS arm64 local machine:
+### Sign with a stable identity (TCC)
+
+macOS TCC records permission grants against the code-signing identity. An
+ad-hoc signature (`codesign --sign -`) has no stable identity, so each rebuild
+looks like a brand-new app and every protected permission (Documents,
+Downloads, Apple Music/media library, ...) is asked again. Sign every build
+with one pinned identity:
+
+- `scripts/deploy-local.sh` stores the chosen Apple Development SHA-1 in
+  `~/.hapi/signing-identity` and reuses it. Override with
+  `HAPI_SIGN_IDENTITY` when rotating certificates.
+- All builds use the signed identifier `run.hapi.cli`.
+- With no Apple Development identity the script falls back to ad-hoc; that
+  still works, but expect TCC prompts to reappear after every deploy.
+
+Agent sessions should also avoid recursive `$HOME` sweeps (`find ~`,
+`du -sh ~`, ...) unless they prune TCC-protected folders (`~/Music`,
+`~/Pictures`, `~/Movies`, `~/Library`): a walk into
+`~/Music/Music/Media.localized` raises a spurious Apple Music prompt
+attributed to the hapi binary.
+
+### Manual sequence
 
 ```bash
 set -euo pipefail
@@ -61,15 +94,17 @@ build=cli/dist-exe/bun-darwin-arm64/hapi
 stamp=$(date +%Y%m%d-%H%M%S)
 release="$HOME/.hapi/bin/hapi.$stamp"
 
+identity=$(cat "$HOME/.hapi/signing-identity")   # SHA-1, or a unique cert name
+
 # Bun's linker signature is not suitable after installation; re-sign once.
 codesign --remove-signature "$build" 2>/dev/null || true
-codesign --force --sign - "$build"
+codesign --force --sign "$identity" --identifier run.hapi.cli "$build"
 codesign --verify --deep --strict "$build"
 
 # -p preserves the mtime covered by the code-signature cache.
 cp -p "$build" "$release"
 codesign --verify --deep --strict "$release"
-"$release" --help >/dev/null
+"$release" --version
 
 # Keep the old target as a rollback point. If hapi is already a symlink,
 # replace only the link; otherwise move the legacy regular file aside first.
