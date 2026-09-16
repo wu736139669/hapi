@@ -45,6 +45,9 @@ describe('Team onboarding', () => {
             expect(html).toContain('【你的个人 Token】')
             expect(html).toContain('cliApiToken')
             expect(html).toContain('codex-prompt')
+            expect(html).toContain('使用教程')
+            expect(html).toContain('添加到主屏幕')
+            expect(html).toContain('Yolo')
         } finally {
             store.close()
         }

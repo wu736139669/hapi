@@ -63,6 +63,7 @@ main { max-width: 720px; margin: 0 auto; padding: 32px 20px 56px; }
 section { background: white; border-radius: 18px; padding: 24px; margin: 16px 0; box-shadow: 0 5px 24px #0000000d; }
 h1 { margin: 0 0 8px; font-size: 28px; }
 h2 { font-size: 18px; margin: 0 0 12px; }
+h3 { font-size: 15px; margin: 20px 0 8px; }
 p, li { line-height: 1.65; }
 code, pre { font-family: ui-monospace,SFMono-Regular,Menlo,monospace; }
 pre { overflow: auto; background: #f0f1f4; border-radius: 10px; padding: 14px; }
@@ -112,6 +113,28 @@ Team HAPI 地址：${safeOrigin}
 
 整个过程只操作当前用户的 HAPI 配置，不读取或修改其他用户、其他 Namespace 或无关项目。</pre>
 <p class="muted">Token 会经过 Codex 聊天记录；不放心的话，可以之后让管理员生成恢复链接换一个新 Token。</p>
+</section>
+<section>
+<h2>使用教程</h2>
+<h3>界面语言</h3>
+<p>进入「设置 → 通用 → 语言」，可切换 English / 简体中文。</p>
+<h3>手机上添加到桌面（推荐）</h3>
+<p>iPhone：先用 Safari 打开本页，点底部「分享」按钮 → 「添加到主屏幕」→ 「添加」。页面顶部的 Install 提示里也有一键步骤引导。<br>Android：用 Chrome 打开，菜单里选「添加到主屏幕」。</p>
+<p class="muted">加到桌面后会像 App 一样打开，随时查看和继续会话。</p>
+<h3>让电脑在线</h3>
+<p>会话跑在你自己的电脑上。先在电脑终端运行 <code>hapi codex</code>（或 <code>hapi claude</code>）并保持开启，Team HAPI 里就会出现你的机器；想让电脑一直在线，可以运行 <code>hapi runner start</code>。</p>
+<h3>新建会话</h3>
+<p>点「新建会话」，填好下面几项，再点「创建」：</p>
+<ol>
+<li><b>机器</b>：选择你自己的电脑。</li>
+<li><b>目录</b>：填电脑上项目文件夹的路径（例如 /Users/你的用户名/projects/demo），或点「浏览」选择、点「最近路径」快速填入。Agent 就在这个目录里干活。</li>
+<li><b>会话类型</b>：保持「简单」即可（直接使用选定的目录）；「工作树」「团队」是进阶用法。</li>
+<li><b>代理</b>：选 Codex（或电脑上已装好的其他 Agent）。</li>
+<li><b>模型 / 推理强度</b>：默认即可，推理强度可选 High。</li>
+<li><b>权限模式</b>：建议选 Yolo，Agent 干活不再逐条等待审批。</li>
+</ol>
+<h3>导入电脑上的 Codex 历史会话</h3>
+<p>在「创建会话」页面找到「导入 Codex 历史」，点「选择…」挑一个本机已有的 Codex 会话，再选好模型 / 推理强度，点「创建」时就会导入这段历史，可以接着聊。</p>
 </section>
 <section>
 <h2>Token 丢失怎么办</h2>
