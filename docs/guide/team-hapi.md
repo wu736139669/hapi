@@ -36,7 +36,8 @@ Team HAPI 地址：https://team-hapi.aichickenfarm.cn
 2. 执行 npm install -g @twsxtd/hapi；如果已经安装 hapi，检查并更新到最新稳定版。
 3. 在 ~/.hapi/settings.json 中合并写入两项配置（保留文件里已有的其他字段）：apiUrl = https://team-hapi.aichickenfarm.cn，cliApiToken = 我的个人 Token。不要启动本地 Hub。
 4. 运行 hapi auth status，确认 HAPI_API_URL 正确、CLI_API_TOKEN 显示 set；不要把 Token 输出到聊天或日志里。
-5. 完成后告诉我可以用 hapi codex 开始工作了。除非我明确要求，不要替我启动新的 Codex 会话。
+5. 运行 hapi runner start 启动后台服务，然后运行 hapi runner status 确认正常。这样这台电脑会出现在 Team HAPI 的机器列表里，我就能从手机或网页直接新建会话。
+6. 完成后告诉我：已经可以从 Team HAPI 新建会话了。除非我明确要求，不要替我启动新的 Codex 会话。
 
 整个过程只操作当前用户的 HAPI 配置，不读取或修改其他用户、其他 Namespace 或无关项目。
 ```
@@ -64,7 +65,9 @@ Token 会经过 Codex 聊天记录；不放心的话，可以之后让管理员�
 
 ### 让电脑在线
 
-会话跑在你自己的电脑上。先在电脑终端运行 `hapi codex`（或 `hapi claude`）并保持开启，Team HAPI 里就会出现你的机器；想让电脑一直在线，可以运行 `hapi runner start`。
+会话跑在你自己的电脑上。初始化时 Codex 已经帮你启动了后台 runner，电脑会自动出现在机器列表里，之后即使手机关掉网页，也能随时新建会话。
+
+如果列表里没有你的电脑（常见于电脑重启后），把这句话发给 Codex：「运行 `hapi runner start`」即可恢复。电脑需要保持开机联网，合盖休眠会暂时离线。
 
 ### 新建会话
 

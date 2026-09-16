@@ -49,6 +49,7 @@ describe('Team onboarding', () => {
             expect(html).toContain('添加到主屏幕')
             expect(html).toContain('Yolo')
             expect(html).toContain('/team-guide/new-session.png')
+            expect(html).toContain('hapi runner start')
         } finally {
             store.close()
         }
