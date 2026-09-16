@@ -97,21 +97,21 @@ hapi codex</pre>
 </section>
 <section>
 <h2>让 Codex 自动初始化 HAPI</h2>
-<p>如果你的电脑还没有安装 HAPI，可以把下面整段复制给 Codex。它会帮你安装、配置并检查连接；个人 Token 只在本机终端交互输入，不要粘贴到 Codex 聊天里。</p>
-<pre>请帮我把这台电脑接入 Team HAPI，并完成本地 HAPI 初始化。
+<p>如果电脑还没有安装 HAPI，把下面整段复制给 Codex（领取账号后 Token 会自动填入）。它会帮你安装、配置并检查连接。</p>
+<pre id="codex-prompt">请帮我把这台电脑接入 Team HAPI，并完成本地 HAPI 初始化。
 
 Team HAPI 地址：${safeOrigin}
+我的个人 Token：【你的个人 Token】
 
 请按以下步骤操作：
 1. 检查 Node.js 和 npm 是否可用。如果缺少，请先告诉我安装 Node.js LTS；不要使用来源不明的安装脚本。
 2. 执行 npm install -g @twsxtd/hapi；如果已经安装 hapi，检查并更新到最新稳定版。
-3. 把 HAPI_API_URL 持久化为 ${safeOrigin}：在 shell 配置文件（~/.zshrc 或 ~/.bashrc）中 export，或合并写入 ~/.hapi/settings.json 的 apiUrl 字段并保留已有字段。不要启动本地 Hub。
-4. 运行 hapi auth login，让我在本机终端按提示粘贴管理员发给我的个人 Token。Token 不得出现在聊天内容、命令参数、脚本、日志或 git 文件中。
-5. 如果当前终端不支持交互式输入，不要让我把 Token 粘贴到聊天里；请停止并告诉我在本机终端手动运行 hapi auth login。
-6. 运行 hapi auth status 验证 HAPI_API_URL 正确且 CLI_API_TOKEN 显示 set；不要输出 Token 本身。
-7. 完成后告诉我可以使用 hapi codex 开始工作。除非我明确要求，不要替我启动新的 Codex 会话。
+3. 在 ~/.hapi/settings.json 中合并写入两项配置（保留文件里已有的其他字段）：apiUrl = ${safeOrigin}，cliApiToken = 我的个人 Token。不要启动本地 Hub。
+4. 运行 hapi auth status，确认 HAPI_API_URL 正确、CLI_API_TOKEN 显示 set；不要把 Token 输出到聊天或日志里。
+5. 完成后告诉我可以用 hapi codex 开始工作了。除非我明确要求，不要替我启动新的 Codex 会话。
 
-整个过程中只操作当前用户的 HAPI 配置，不读取或修改其他用户、其他 Namespace 或无关项目。</pre>
+整个过程只操作当前用户的 HAPI 配置，不读取或修改其他用户、其他 Namespace 或无关项目。</pre>
+<p class="muted">Token 会经过 Codex 聊天记录；不放心的话，可以之后让管理员生成恢复链接换一个新 Token。</p>
 </section>
 <section>
 <h2>Token 丢失怎么办</h2>
@@ -135,6 +135,10 @@ Team HAPI 地址：${safeOrigin}
     const body = await response.json().catch(() => ({}));
     if (!response.ok || !body.accessToken) throw new Error(body.error || '邀请链接无效或已使用');
     localStorage.setItem('hapi_access_token::' + location.origin, body.accessToken);
+    const promptBlock = document.getElementById('codex-prompt');
+    if (promptBlock) {
+      promptBlock.textContent = promptBlock.textContent.split('【你的个人 Token】').join(body.accessToken);
+    }
     status.textContent = '账号已创建，请保存下面的 Token。';
     result.innerHTML = '<p class="success">Namespace：<strong>' + body.namespace + '</strong></p>'
       + '<p class="token">' + body.accessToken + '</p>'

@@ -42,7 +42,9 @@ describe('Team onboarding', () => {
             expect(html).toContain('location.hash')
             expect(html).toContain('让 Codex 自动初始化 HAPI')
             expect(html).toContain('npm install -g @twsxtd/hapi')
-            expect(html).toContain('不要粘贴到 Codex 聊天里')
+            expect(html).toContain('【你的个人 Token】')
+            expect(html).toContain('cliApiToken')
+            expect(html).toContain('codex-prompt')
         } finally {
             store.close()
         }
