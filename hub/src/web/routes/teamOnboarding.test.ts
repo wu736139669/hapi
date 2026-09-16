@@ -40,6 +40,9 @@ describe('Team onboarding', () => {
             expect(response.status).toBe(200)
             expect(html).toContain('Team HAPI')
             expect(html).toContain('location.hash')
+            expect(html).toContain('让 Codex 自动初始化 HAPI')
+            expect(html).toContain('npm install -g @twsxtd/hapi')
+            expect(html).toContain('不要粘贴到 Codex 聊天里')
         } finally {
             store.close()
         }

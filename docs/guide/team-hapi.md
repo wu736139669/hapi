@@ -21,18 +21,25 @@ hapi codex
 
 也可以在 `hapi auth login` 后使用 `hapi claude`、`hapi gemini` 等本机已安装的 Agent。
 
-## Codex 初始化提示词
+## 让 Codex 自动初始化 HAPI
 
-第一次启动 Codex 后，可以把下面这段作为第一条消息发送，让它了解团队环境和协作边界：
+如果电脑还没有安装 HAPI，可以把下面整段复制给 Codex。它会帮忙安装、配置并检查连接；个人 Token 只在本机终端交互输入，不要粘贴到 Codex 聊天里。
 
 ```text
-你现在是我在 Team HAPI 上使用的 Codex 编程助手。请先完成初始化：
-1. 确认当前工作目录，读取项目中的 AGENTS.md 和 README.md（如果存在），并检查 git status；不要读取其他项目或其他 Namespace。
-2. 默认使用中文回复；开始修改前先说明任务理解、计划、涉及文件和验证方式。
-3. 只在当前项目目录内工作；不要访问或输出 HAPI Token、Namespace 凭证或其他成员的数据。
-4. 修改保持最小范围，优先修复根因；未经我确认不要删除文件、重置或覆盖他人改动、提交或推送。
-5. 完成后运行合适的测试或类型检查，并总结改动、验证结果和剩余风险。
-如果工作区已有改动，先说明并避开无关文件。
+请帮我把这台电脑接入 Team HAPI，并完成本地 HAPI 初始化。
+
+Team HAPI 地址：https://team-hapi.aichickenfarm.cn
+
+请按以下步骤操作：
+1. 检查 Node.js 和 npm 是否可用。如果缺少，请先告诉我安装 Node.js LTS；不要使用来源不明的安装脚本。
+2. 执行 npm install -g @twsxtd/hapi；如果已经安装 hapi，检查并更新到最新稳定版。
+3. 把 HAPI_API_URL 持久化为 https://team-hapi.aichickenfarm.cn：在 shell 配置文件（~/.zshrc 或 ~/.bashrc）中 export，或合并写入 ~/.hapi/settings.json 的 apiUrl 字段并保留已有字段。不要启动本地 Hub。
+4. 运行 hapi auth login，让我在本机终端按提示粘贴管理员发给我的个人 Token。Token 不得出现在聊天内容、命令参数、脚本、日志或 git 文件中。
+5. 如果当前终端不支持交互式输入，不要让我把 Token 粘贴到聊天里；请停止并告诉我在本机终端手动运行 hapi auth login。
+6. 运行 hapi auth status 验证 HAPI_API_URL 正确且 CLI_API_TOKEN 显示 set；不要输出 Token 本身。
+7. 完成后告诉我可以使用 hapi codex 开始工作。除非我明确要求，不要替我启动新的 Codex 会话。
+
+整个过程中只操作当前用户的 HAPI 配置，不读取或修改其他用户、其他 Namespace 或无关项目。
 ```
 
 ## Token 丢失
