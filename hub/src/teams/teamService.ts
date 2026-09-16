@@ -61,6 +61,8 @@ export interface TeamRuntime {
     lastAssistantText(sessionId: string): string | null
     spawnMember(input: TeamSpawnMemberInput): Promise<{ ok: true; sessionId: string } | { ok: false; message: string }>
     deliverPeerMessage(input: { sessionId: string; text: string }): Promise<void>
+    /** Archive/stop a session (used when a member is removed and stopped). */
+    archiveSession?: (sessionId: string) => Promise<void>
     sleep(ms: number): Promise<void>
 }
 
@@ -92,7 +94,7 @@ export interface TeamBudget {
 }
 
 const DEFAULT_BUDGET: TeamBudget = {
-    maxMembers: 5,
+    maxMembers: 8,
     maxMessagesPerMinute: 30,
     maxChainDepth: 8
 }
@@ -642,15 +644,42 @@ export class TeamService {
     updateTeamMeta(
         namespace: string,
         teamId: string,
-        patch: { name?: string; status?: 'active' | 'archived'; leadSessionId?: string | null }
+        patch: {
+            name?: string
+            status?: 'active' | 'archived'
+            leadSessionId?: string | null
+            budget?: { maxMembers?: number; maxMessagesPerMinute?: number; maxChainDepth?: number }
+        }
     ): TeamRecord {
+        const current = this.store.getTeam(teamId, namespace)
+        if (!current) {
+            throw new TeamServiceError('not_found', 'Team not found')
+        }
         if (patch.leadSessionId) {
             const view = this.runtime?.resolveSession(patch.leadSessionId)
             if (this.runtime && !view) {
                 throw new TeamServiceError('invalid', 'Lead session not found on this hub')
             }
         }
-        const updated = this.store.updateTeam(teamId, namespace, patch)
+        // Merge the budget patch into the existing config so unrelated keys survive.
+        const existingBudget = current.config?.budget
+        const config = patch.budget
+            ? {
+                ...(current.config ?? {}),
+                budget: {
+                    ...(existingBudget && typeof existingBudget === 'object' && !Array.isArray(existingBudget)
+                        ? existingBudget as Record<string, unknown>
+                        : {}),
+                    ...patch.budget
+                }
+            }
+            : undefined
+        const updated = this.store.updateTeam(teamId, namespace, {
+            ...(patch.name !== undefined ? { name: patch.name } : {}),
+            ...(patch.status !== undefined ? { status: patch.status } : {}),
+            ...(patch.leadSessionId !== undefined ? { leadSessionId: patch.leadSessionId } : {}),
+            ...(config !== undefined ? { config } : {})
+        })
         if (!updated) {
             throw new TeamServiceError('not_found', 'Team not found')
         }
@@ -660,6 +689,50 @@ export class TeamService {
         }
         this.publishUpdate(updated)
         return updated
+    }
+
+    /**
+     * Remove a member (human action). The member's session survives unless
+     * `stopSession` is set; the lead cannot be removed (change the lead first).
+     */
+    async removeMember(
+        namespace: string,
+        teamId: string,
+        sessionId: string,
+        options: { stopSession?: boolean } = {}
+    ): Promise<void> {
+        const team = this.store.getTeam(teamId, namespace)
+        if (!team) {
+            throw new TeamServiceError('not_found', 'Team not found')
+        }
+        if (team.leadSessionId === sessionId) {
+            throw new TeamServiceError('invalid', '不能移除 Lead：请先在设置里把 Lead 换成其他人')
+        }
+        const member = this.store.listMembers(team.id).find((candidate) => candidate.sessionId === sessionId)
+        if (!member) {
+            throw new TeamServiceError('not_found', '该会话不是团队成员')
+        }
+        if (!this.store.removeMember(team.id, sessionId)) {
+            throw new TeamServiceError('not_found', '该会话不是团队成员')
+        }
+        this.store.appendMessage({
+            teamId: team.id,
+            fromKind: 'hub',
+            toKind: 'broadcast',
+            kind: 'system',
+            text: `「${member.role}」已被移出团队（人类操作）`,
+            meta: { removedSessionId: sessionId, removedRole: member.role }
+        })
+        this.publishUpdate(team)
+        if (this.runtime) {
+            void this.runtime.deliverPeerMessage({
+                sessionId,
+                text: `你已被移出团队「${team.name}」。${options.stopSession ? '该会话即将停止。' : '该会话仍可单独继续使用。'}`
+            }).catch(() => {})
+            if (options.stopSession) {
+                void this.runtime.archiveSession?.(sessionId).catch(() => {})
+            }
+        }
     }
 
     /** Delete a team (members/tasks/messages cascade). Member sessions survive. */

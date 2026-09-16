@@ -16,6 +16,15 @@ function sessionLabel(session: SessionSummary): string {
     return base ?? session.id.slice(0, 8)
 }
 
+function readBudgetNumber(config: Record<string, unknown> | null | undefined, key: string, fallback: number): number {
+    const budget = config?.budget
+    if (budget !== null && typeof budget === 'object' && !Array.isArray(budget)) {
+        const value = (budget as Record<string, unknown>)[key]
+        if (typeof value === 'number' && Number.isFinite(value)) return value
+    }
+    return fallback
+}
+
 export function TeamSettingsDialog(props: {
     open: boolean
     team: TeamSummary | null
@@ -29,6 +38,9 @@ export function TeamSettingsDialog(props: {
     const { sessions } = useSessions(api)
     const [name, setName] = useState('')
     const [leadSessionId, setLeadSessionId] = useState('')
+    const [maxMembers, setMaxMembers] = useState('')
+    const [maxMessagesPerMinute, setMaxMessagesPerMinute] = useState('')
+    const [maxChainDepth, setMaxChainDepth] = useState('')
     const [confirmDelete, setConfirmDelete] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
@@ -36,6 +48,9 @@ export function TeamSettingsDialog(props: {
         if (props.team) {
             setName(props.team.name)
             setLeadSessionId(props.team.leadSessionId ?? '')
+            setMaxMembers(String(readBudgetNumber(props.team.config, 'maxMembers', 8)))
+            setMaxMessagesPerMinute(String(readBudgetNumber(props.team.config, 'maxMessagesPerMinute', 30)))
+            setMaxChainDepth(String(readBudgetNumber(props.team.config, 'maxChainDepth', 8)))
             setConfirmDelete(false)
             setError(null)
         }
@@ -43,6 +58,19 @@ export function TeamSettingsDialog(props: {
 
     const leadChanged = Boolean(props.team) && (props.team?.leadSessionId ?? '') !== leadSessionId
     const nameChanged = Boolean(props.team) && name.trim().length > 0 && name.trim() !== props.team?.name
+    const budgetValues = {
+        maxMembers: Number.parseInt(maxMembers, 10),
+        maxMessagesPerMinute: Number.parseInt(maxMessagesPerMinute, 10),
+        maxChainDepth: Number.parseInt(maxChainDepth, 10)
+    }
+    const budgetChanged = Boolean(props.team) && (
+        budgetValues.maxMembers !== readBudgetNumber(props.team?.config, 'maxMembers', 8)
+        || budgetValues.maxMessagesPerMinute !== readBudgetNumber(props.team?.config, 'maxMessagesPerMinute', 30)
+        || budgetValues.maxChainDepth !== readBudgetNumber(props.team?.config, 'maxChainDepth', 8)
+    )
+    const budgetValid = Number.isFinite(budgetValues.maxMembers) && budgetValues.maxMembers >= 2 && budgetValues.maxMembers <= 64
+        && Number.isFinite(budgetValues.maxMessagesPerMinute) && budgetValues.maxMessagesPerMinute >= 1 && budgetValues.maxMessagesPerMinute <= 600
+        && Number.isFinite(budgetValues.maxChainDepth) && budgetValues.maxChainDepth >= 1 && budgetValues.maxChainDepth <= 50
 
     const saveSettings = useMutation({
         mutationFn: async () => {
@@ -50,6 +78,7 @@ export function TeamSettingsDialog(props: {
             return await api.updateTeam(props.team.id, {
                 ...(nameChanged ? { name: name.trim() } : {}),
                 ...(leadChanged ? { leadSessionId: leadSessionId || null } : {}),
+                ...(budgetChanged && budgetValid ? { config: { budget: budgetValues } } : {}),
             })
         },
         onSuccess: async () => {
@@ -109,7 +138,7 @@ export function TeamSettingsDialog(props: {
                     </button>
                     <button
                         type="button"
-                        disabled={busy || (!nameChanged && !leadChanged)}
+                        disabled={busy || (!nameChanged && !leadChanged && !budgetChanged) || (budgetChanged && !budgetValid)}
                         onClick={() => saveSettings.mutate()}
                         className="rounded-lg bg-[var(--app-fg)] px-3 py-1.5 text-sm font-medium text-[var(--app-bg)] disabled:opacity-40"
                     >
@@ -142,6 +171,40 @@ export function TeamSettingsDialog(props: {
                     </select>
                     <span className="text-[11px] text-[var(--app-hint)]">{t('team.settings.leadHint')}</span>
                 </label>
+
+                <div className="flex flex-col gap-1">
+                    <span className="text-xs text-[var(--app-hint)]">{t('team.settings.budget')}</span>
+                    <div className="grid grid-cols-3 gap-2">
+                        <label className="flex flex-col gap-1">
+                            <span className="text-[11px] text-[var(--app-hint)]">{t('team.settings.budget.members')}</span>
+                            <input
+                                inputMode="numeric"
+                                value={maxMembers}
+                                onChange={(event) => setMaxMembers(event.target.value)}
+                                className="rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1.5 text-sm text-[var(--app-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
+                            />
+                        </label>
+                        <label className="flex flex-col gap-1">
+                            <span className="text-[11px] text-[var(--app-hint)]">{t('team.settings.budget.messages')}</span>
+                            <input
+                                inputMode="numeric"
+                                value={maxMessagesPerMinute}
+                                onChange={(event) => setMaxMessagesPerMinute(event.target.value)}
+                                className="rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1.5 text-sm text-[var(--app-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
+                            />
+                        </label>
+                        <label className="flex flex-col gap-1">
+                            <span className="text-[11px] text-[var(--app-hint)]">{t('team.settings.budget.chain')}</span>
+                            <input
+                                inputMode="numeric"
+                                value={maxChainDepth}
+                                onChange={(event) => setMaxChainDepth(event.target.value)}
+                                className="rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1.5 text-sm text-[var(--app-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
+                            />
+                        </label>
+                    </div>
+                    <span className="text-[11px] text-[var(--app-hint)]">{t('team.settings.budgetHint')}</span>
+                </div>
 
                 <button
                     type="button"

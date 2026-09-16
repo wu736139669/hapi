@@ -89,6 +89,8 @@ export function TeamSidePanel(props: {
     onDismissDecision: (message: TeamMessage) => void
     activeTaskId: string | null
     onOpenSession: (sessionId: string) => void
+    /** Removes a member from the team (human-confirmed; optionally archives the session). */
+    onRemoveMember: (sessionId: string, stopSession: boolean) => void
     /** Opens the task editor dialog (status/assignee + timeline). */
     onSelectTask: (taskId: string) => void
     onCreateTask: (input: { title: string; assigneeSessionId: string | null }) => void
@@ -97,6 +99,8 @@ export function TeamSidePanel(props: {
 }) {
     const { t } = useTranslation()
     const [newTaskTitle, setNewTaskTitle] = useState('')
+    const [removingMemberId, setRemovingMemberId] = useState<string | null>(null)
+    const [stopRemovedSession, setStopRemovedSession] = useState(false)
     const [newTaskAssignee, setNewTaskAssignee] = useState('')
     const detail = props.detail
     const members = detail?.members ?? []
@@ -181,18 +185,68 @@ export function TeamSidePanel(props: {
                 </div>
                 <div className="mb-3 flex flex-col gap-0.5">
                     {members.map((member) => (
-                        <button
-                            key={member.sessionId}
-                            type="button"
-                            onClick={() => props.onOpenSession(member.sessionId)}
-                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-[var(--app-subtle-bg)]"
-                            title={t('team.panel.openSession')}
-                        >
-                            <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(member.status)}`} />
-                            <span className="min-w-0 truncate font-medium text-[var(--app-fg)]">{member.role}</span>
-                            <span className="shrink-0 font-mono text-[10px] text-[var(--app-hint)]">{member.sessionId.slice(0, 8)}</span>
-                            <span className="ml-auto shrink-0 text-[10px] text-[var(--app-hint)]">{memberStatusLabel(t, member.status)}</span>
-                        </button>
+                        <div key={member.sessionId} className="flex flex-col">
+                            <div className="flex w-full items-center gap-1 rounded-lg px-2 py-1.5 text-xs transition-colors hover:bg-[var(--app-subtle-bg)]">
+                                <button
+                                    type="button"
+                                    onClick={() => props.onOpenSession(member.sessionId)}
+                                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                                    title={t('team.panel.openSession')}
+                                >
+                                    <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(member.status)}`} />
+                                    <span className="min-w-0 truncate font-medium text-[var(--app-fg)]">{member.role}</span>
+                                    <span className="shrink-0 font-mono text-[10px] text-[var(--app-hint)]">{member.sessionId.slice(0, 8)}</span>
+                                    <span className="ml-auto shrink-0 text-[10px] text-[var(--app-hint)]">{memberStatusLabel(t, member.status)}</span>
+                                </button>
+                                {member.sessionId === detail?.team.leadSessionId ? null : (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setRemovingMemberId(removingMemberId === member.sessionId ? null : member.sessionId)
+                                            setStopRemovedSession(false)
+                                        }}
+                                        className="shrink-0 rounded px-1 text-[10px] text-[var(--app-hint)] hover:text-red-600"
+                                        title={t('team.member.remove')}
+                                    >
+                                        ✕
+                                    </button>
+                                )}
+                            </div>
+                            {removingMemberId === member.sessionId ? (
+                                <div className="mx-2 mb-1 flex flex-col gap-2 rounded-md border border-[var(--app-border)] p-2">
+                                    <div className="text-[11px] text-red-600">
+                                        {t('team.member.removeConfirm', { role: member.role })}
+                                    </div>
+                                    <label className="flex items-center gap-1 text-[11px] text-[var(--app-hint)]">
+                                        <input
+                                            type="checkbox"
+                                            checked={stopRemovedSession}
+                                            onChange={(event) => setStopRemovedSession(event.target.checked)}
+                                        />
+                                        {t('team.member.removeStopSession')}
+                                    </label>
+                                    <div className="flex gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                props.onRemoveMember(member.sessionId, stopRemovedSession)
+                                                setRemovingMemberId(null)
+                                            }}
+                                            className="rounded-lg bg-red-600 px-2 py-1 text-[11px] font-medium text-white"
+                                        >
+                                            {t('team.member.removeConfirmYes')}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setRemovingMemberId(null)}
+                                            className="rounded-lg border border-[var(--app-border)] px-2 py-1 text-[11px] text-[var(--app-fg)]"
+                                        >
+                                            {t('button.cancel')}
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : null}
+                        </div>
                     ))}
                 </div>
 

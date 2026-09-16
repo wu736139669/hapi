@@ -177,6 +177,27 @@ export function TeamChatPage() {
         },
     })
 
+    const removeMember = useMutation({
+        mutationFn: async (input: { sessionId: string; stopSession: boolean }) => {
+            if (!api) throw new Error('API unavailable')
+            return await api.removeTeamMember(teamId, input.sessionId, input.stopSession)
+        },
+        onSuccess: async () => {
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: queryKeys.team(teamId) }),
+                queryClient.invalidateQueries({ queryKey: queryKeys.teams }),
+            ])
+        },
+        onError: (mutationError) => {
+            addToast({
+                title: t('team.member.removeFailed'),
+                body: mutationError instanceof Error ? mutationError.message : t('dialog.error.default'),
+                sessionId: '',
+                url: '',
+            })
+        },
+    })
+
     const handleSelectTask = (selectedTaskId: string) => {
         setFilter('task')
         setTaskId(selectedTaskId)
@@ -207,6 +228,7 @@ export function TeamChatPage() {
             onDismissDecision={(message) => dismissDecision.mutate(message)}
             activeTaskId={filter === 'task' ? taskId : null}
             onOpenSession={(sessionId) => navigate({ to: '/sessions/$sessionId', params: { sessionId } })}
+            onRemoveMember={(sessionId, stopSession) => removeMember.mutate({ sessionId, stopSession })}
             onSelectTask={(selectedTaskId) => setTaskDialogId(selectedTaskId)}
             onCreateTask={(input) => createTask.mutate(input)}
             creatingTask={createTask.isPending}

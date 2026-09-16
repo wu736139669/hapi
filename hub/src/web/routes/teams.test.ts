@@ -24,6 +24,7 @@ function createApp(getNamespace: () => string = () => 'alpha') {
         inWorktree: false
     })
     const delivered: Array<{ sessionId: string; text: string }> = []
+    const archived: string[] = []
     const runtime: TeamRuntime = {
         resolveSession: (sessionId) => sessions.get(sessionId) ?? null,
         lastAssistantText: () => null,
@@ -43,6 +44,9 @@ function createApp(getNamespace: () => string = () => 'alpha') {
         deliverPeerMessage: async (input) => {
             delivered.push(input)
         },
+        archiveSession: async (sessionId) => {
+            archived.push(sessionId)
+        },
         sleep: async () => {}
     }
     const service = new TeamService(new TeamStore(':memory:'), (event) => events.push(event), runtime)
@@ -52,7 +56,7 @@ function createApp(getNamespace: () => string = () => 'alpha') {
         await next()
     })
     app.route('/api', createTeamsRoutes(service))
-    return { app, events, service, delivered }
+    return { app, events, service, delivered, archived }
 }
 
 describe('Agent Team member routes', () => {
@@ -147,6 +151,60 @@ describe('Agent Team member routes', () => {
         const detail = await app.request(`/api/teams/${teamId}`)
         const members = (await detail.json() as { members: Array<{ role: string; sessionId: string }> }).members
         expect(members.some((member) => member.role === 'Builder A')).toBe(true)
+    })
+
+    it('updates the team budget through PATCH config', async () => {
+        const { app } = createApp()
+        const teamId = await createTeam(app)
+
+        const res = await app.request(`/api/teams/${teamId}`, {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ config: { budget: { maxMembers: 2 } } })
+        })
+        expect(res.status).toBe(200)
+        const body = await res.json() as { team: { config: { budget: { maxMembers: number } } } }
+        expect(body.team.config.budget.maxMembers).toBe(2)
+
+        // The new cap applies immediately: lead + 1 member fills the team.
+        const first = await app.request(`/api/teams/${teamId}/spawn`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ fromSessionId: 'sess-lead', role: 'builder' })
+        })
+        expect(first.status).toBe(201)
+        const second = await app.request(`/api/teams/${teamId}/spawn`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ fromSessionId: 'sess-lead', role: 'reviewer' })
+        })
+        expect(second.status).toBe(429)
+    })
+
+    it('removes a member and can stop the session', async () => {
+        const { app, archived } = createApp()
+        const teamId = await createTeam(app)
+        await app.request(`/api/teams/${teamId}/spawn`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ fromSessionId: 'sess-lead', role: 'builder' })
+        })
+
+        const removed = await app.request(`/api/teams/${teamId}/members/sess-builder?stopSession=1`, {
+            method: 'DELETE'
+        })
+        expect(removed.status).toBe(200)
+        expect(archived).toEqual(['sess-builder'])
+
+        const detail = await app.request(`/api/teams/${teamId}`)
+        const members = (await detail.json() as { members: Array<{ sessionId: string }> }).members
+        expect(members.some((member) => member.sessionId === 'sess-builder')).toBe(false)
+
+        // The lead cannot be removed; missing members are a 404.
+        const lead = await app.request(`/api/teams/${teamId}/members/sess-lead`, { method: 'DELETE' })
+        expect(lead.status).toBe(400)
+        const missing = await app.request(`/api/teams/${teamId}/members/sess-nobody`, { method: 'DELETE' })
+        expect(missing.status).toBe(404)
     })
 
     it('updates task status', async () => {
