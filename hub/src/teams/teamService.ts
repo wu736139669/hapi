@@ -278,7 +278,7 @@ export class TeamService {
     async sendHumanMessage(
         namespace: string,
         teamId: string,
-        input: { text: string; to?: string; kind?: string; inReplyTo?: number }
+        input: { text: string; to?: string; kind?: string; inReplyTo?: number; requirementId?: string; newRequirement?: boolean }
     ): Promise<TeamMessageRecord> {
         const team = this.store.getTeam(teamId, namespace)
         if (!team) {
@@ -295,7 +295,9 @@ export class TeamService {
             fromRole: '人类',
             text: input.text,
             kind: input.kind,
-            inReplyTo: input.inReplyTo
+            inReplyTo: input.inReplyTo,
+            requirementId: input.requirementId,
+            newRequirement: input.newRequirement
         })
     }
 
@@ -332,6 +334,8 @@ export class TeamService {
             inReplyTo?: number
             /** Explicit requirement to file this message under. */
             requirementId?: string
+            /** Force a brand-new requirement even if a parent could be inherited. */
+            newRequirement?: boolean
             /** Task the message reports on; inherits the task's requirement. */
             taskId?: string
         }
@@ -352,7 +356,7 @@ export class TeamService {
         // Requirement attribution: explicit > task > reply chain. A fresh human
         // ask opens a new requirement so the timeline can group the work that
         // follows under "requirement -> process -> conclusion".
-        let requirementId = this.resolveRequirementId(team.id, input)
+        let requirementId = input.newRequirement ? null : this.resolveRequirementId(team.id, input)
         if (!requirementId && input.fromKind === 'human') {
             requirementId = this.store.createRequirement({
                 teamId: team.id,
@@ -747,7 +751,7 @@ export class TeamService {
         const changes: string[] = []
         if (patch.status !== undefined) changes.push(`→ ${patch.status}`)
         if (patch.conclusion !== undefined) changes.push('结论已更新')
-        this.store.appendMessage({
+        const message = this.store.appendMessage({
             teamId: team.id,
             fromKind: membership ? 'session' : 'hub',
             fromSessionId: sessionId,
@@ -757,6 +761,23 @@ export class TeamService {
             meta: { requirementId: updated.id, fromRole }
         })
         this.publishUpdate(team)
+        // Closing a requirement (or writing its conclusion) is human-facing news.
+        if (patch.status === 'done' || patch.conclusion !== undefined) {
+            this.publish({
+                type: 'team-attention',
+                teamId: team.id,
+                namespace: team.namespace,
+                data: {
+                    teamName: team.name,
+                    seq: message.seq,
+                    kind: 'requirement',
+                    fromRole,
+                    text: updated.conclusion
+                        ? `需求「${updated.title}」结论：${updated.conclusion}`
+                        : `需求「${updated.title}」→ ${updated.status}`
+                }
+            })
+        }
         return updated
     }
 

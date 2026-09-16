@@ -186,7 +186,11 @@ function MessageRow(props: {
                     <span className="rounded bg-[var(--app-subtle-bg)] px-1">{t('team.reply.dismissed')}</span>
                 ) : null}
             </div>
-            <div className={`rounded-xl border px-3 py-2 ${isDecision ? 'border-[var(--app-fg)] bg-[var(--app-subtle-bg)]/40' : 'border-[var(--app-border)] bg-[var(--app-bg)]'}`}>
+            <div className={`rounded-lg px-2.5 py-1.5 ${
+                isDecision
+                    ? 'border border-[var(--app-fg)] bg-[var(--app-subtle-bg)]/40'
+                    : 'border-l-2 border-[var(--app-border)] bg-[var(--app-subtle-bg)]/30'
+            }`}>
                 {isDecision ? <div className="mb-1 text-[11px] font-semibold text-[var(--app-fg)]">{t('team.message.decision')}</div> : null}
                 <MarkdownRenderer content={message.text} className="text-sm" preserveSingleLineBreaks standalone />
                 {replyState === 'pending' && onReply ? (
