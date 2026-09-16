@@ -31,8 +31,10 @@ describe('humanReplyState', () => {
         expect(humanReplyState(message({ kind: 'decision', meta: { humanDismissedAt: 123 } }))).toBe('dismissed')
     })
 
-    it('treats explicit to: human messages as decisions too', () => {
-        expect(humanReplyState(message({ meta: { toHuman: true } }))).toBe('pending')
+    it('keeps notification-only to: human messages out of the inbox', () => {
+        // `to: human` alone is a notification, not a decision.
+        expect(humanReplyState(message({ meta: { toHuman: true } }))).toBeNull()
+        // Legacy rows stored by older hubs still count.
         expect(humanReplyState(message({ meta: { awaitingHuman: true } }))).toBe('pending')
     })
 })
@@ -46,6 +48,6 @@ describe('pendingHumanDecisions', () => {
             message({ seq: 4, kind: 'decision', meta: { humanDismissedAt: 1 } }),
             message({ seq: 5, meta: { toHuman: true } }),
         ])
-        expect(pending.map((entry) => entry.seq)).toEqual([2, 5])
+        expect(pending.map((entry) => entry.seq)).toEqual([2])
     })
 })

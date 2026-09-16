@@ -230,8 +230,32 @@ describe('TeamService messaging', () => {
             expect(message.toKind).toBe('mention')
             expect(message.toSessionId).toBeNull()
             expect(message.meta?.toHuman).toBe(true)
+            // Notification only: no inbox item unless the kind is a decision.
+            expect(message.meta?.awaitingHuman).toBeUndefined()
             expect(delivered).toHaveLength(0)
             expect(events.some((event) => event.type === 'team-attention')).toBe(true)
+        } finally {
+            service.close()
+        }
+    })
+
+    it('flags only decisions as awaiting the human', async () => {
+        const { service } = setup()
+        try {
+            const decision = await service.sendMessage('sess-builder', 'alpha', {
+                text: 'pick one',
+                to: 'human',
+                kind: 'decision'
+            })
+            expect(decision.meta?.awaitingHuman).toBe(true)
+
+            const status = await service.sendMessage('sess-builder', 'alpha', {
+                text: 'progress update',
+                to: 'human',
+                kind: 'status'
+            })
+            expect(status.meta?.toHuman).toBe(true)
+            expect(status.meta?.awaitingHuman).toBeUndefined()
         } finally {
             service.close()
         }

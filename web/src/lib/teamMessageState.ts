@@ -11,12 +11,15 @@ function hasMetaValue(message: TeamMessage, key: string): boolean {
     return typeof value === 'number' || value === true
 }
 
-/** True for member messages that explicitly ask the human (decision / to: human). */
+/**
+ * True for member messages that explicitly ask the human for an answer.
+ * `meta.toHuman` alone is only a notification (no reply needed) and stays out
+ * of the inbox; `awaitingHuman` is kept for messages stored by older hubs.
+ */
 export function isHumanDecision(message: TeamMessage): boolean {
     if (message.fromKind !== 'session') return false
     return message.kind === 'decision'
         || message.meta?.awaitingHuman === true
-        || message.meta?.toHuman === true
 }
 
 /** Pending / replied / dismissed state for the "待你确认" inbox. */

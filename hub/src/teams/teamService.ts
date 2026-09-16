@@ -332,10 +332,10 @@ export class TeamService {
         this.enforceMessageRate(team.id, budget)
         const replyDepth = this.resolveReplyDepth(team.id, input.inReplyTo, budget)
         const kind = input.kind ?? 'chat'
-        // Decisions / explicit `to: human` asks are the messages that need a
-        // human answer; flag them so the web can show a "待你确认" inbox.
-        const awaitingHuman = input.fromKind === 'session'
-            && (target.toHuman === true || kind === 'decision')
+        // Only explicit decisions need a human answer and enter the "待你确认"
+        // inbox. `to: human` alone is just an out-of-band notification (ping /
+        // toast) and must not clutter the inbox with status reports.
+        const awaitingHuman = input.fromKind === 'session' && kind === 'decision'
 
         const message = this.store.appendMessage({
             teamId: team.id,
@@ -1233,7 +1233,7 @@ function buildLeadBrief(team: TeamRecord): string {
         '可用工具：team_status（成员/任务/预算）、team_read（拉取团队消息，广播不会主动推送）、team_send（汇报/分派/通知人类）、team_task（任务列表/更新状态/交付物/依赖）、spawn_peer（派生成员，需用户批准）。',
         '派生成员默认继承你的工具/模型/思考等级/权限，不需要手动指定；只有人类明确要求不同配置时才传覆盖参数。',
         '需要直接调用 hub API 时用团队级凭证 $HAPI_TEAM_TOKEN（只能访问本团队的消息/任务/状态），不要读取 ~/.hapi/settings.json 的凭证。',
-        '需要人类决策时用 team_send 的 to="human" 或 kind="decision"；人类也会在群聊里发言、加成员或调整任务。',
+        '需要人类决策时用 kind="decision"（会通知人类并进"待确认"收件箱）；只是汇报进展/结论用普通广播，不要用 to="human"——那会打扰人类；人类也会在群聊里发言、加成员或调整任务。',
         '回复人类刚发来的消息会自动同步到群聊；如果这一轮由其他事件触发（成员消息/任务/定时），而你有面向人类的结论或需要拍板，必须用 team_send（to="human" 或 kind="decision"）显式发出——这类内容不会自动同步。'
     ].join('\n')
 }
@@ -1260,7 +1260,7 @@ function buildAssignmentBrief(
         '- 任务状态用 team_task 更新：开工标 doing、卡住标 blocked、完成标 done 并附交付物（分支/文件/测试结果）；有依赖的任务需依赖先完成。',
         '- 需要 hub API 时用团队级凭证 $HAPI_TEAM_TOKEN 调 $HAPI_API_URL（只能访问本团队），不要读取 ~/.hapi/settings.json。',
         '- 不要用 team_send 闲聊或找人类对话；批量汇报，避免来回对话。',
-        '- 需要人类决策时，用 team_send 的 to="human" 或 kind="decision"（会直接通知人类）。',
+        '- 需要人类决策时，用 team_send 的 kind="decision"（会通知人类并进"待确认"）；只是汇报进展用普通广播，不要用 to="human"。',
         '- 回复人类刚发来的消息会自动同步到群聊；由其他事件（成员消息/任务/定时）触发的轮次里若有面向人类的结论或决策需求，必须用 team_send（to="human" 或 kind="decision"）显式发送——不会自动同步。'
     ].join('\n')
 }

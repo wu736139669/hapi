@@ -479,7 +479,7 @@ function createHapiMcpServer(
         });
 
         mcp.registerTool<any, any>('team_send', {
-            description: 'Agent Team: send a message to teammates. to="all" (default) writes to the shared log only; to="<role or session id prefix>" or to="lead" wakes that member; to="human" notifies the human out-of-band (use it or kind="decision" when you need a human decision). Use inReplyTo=<seq> when answering a peer message so the hub can stop runaway back-and-forth. Do NOT use this for routine replies to the human.',
+            description: 'Agent Team: send a message to teammates. to="all" (default) writes to the shared log only; to="<role or session id prefix>" or to="lead" wakes that member; to="human" notifies the human out-of-band (no inbox item); use kind="decision" when you need the human to decide something. Use inReplyTo=<seq> when answering a peer message so the hub can stop runaway back-and-forth. Do NOT use this for routine replies to the human.',
             title: 'Send Team Message',
             inputSchema: z.object({
                 text: z.string().min(1).describe('Message text'),
