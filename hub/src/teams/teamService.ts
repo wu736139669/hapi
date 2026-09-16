@@ -163,7 +163,7 @@ export class TeamService {
     listTeamsWithMembers(namespace: string): Array<TeamRecord & { members: TeamMemberRecord[] }> {
         return this.store.listTeams(namespace).map((team) => ({
             ...team,
-            members: this.store.listMembers(team.id)
+            members: this.store.listMembers(team.id).map((member) => this.deriveMemberStatus(member))
         }))
     }
 
@@ -172,7 +172,7 @@ export class TeamService {
         if (!team) return null
         return {
             team,
-            members: this.store.listMembers(team.id),
+            members: this.store.listMembers(team.id).map((member) => this.deriveMemberStatus(member)),
             tasks: this.store.listTasks(team.id)
         }
     }

@@ -487,7 +487,7 @@ describe('TeamService web task management', () => {
             inWorktree: false
         })
         delivered.length = 0
-        return { service, store, team, delivered }
+        return { service, store, team, delivered, sessions }
     }
 
     it('creates tasks from the web, pushes the brief to the assignee', async () => {
@@ -842,9 +842,12 @@ describe('TeamService member down handling', () => {
     }
 
     it('marks the member offline, logs it and wakes the lead', async () => {
-        const { service, store, team, delivered } = setup()
+        const { service, store, team, delivered, sessions } = setup()
         try {
             await service.handleSessionDown('sess-builder', 'alpha', 'completed')
+            // The live session is gone: the derived status must be offline even
+            // if the stored member row was left behind by the down handler.
+            sessions.delete('sess-builder')
 
             const member = service.getTeamDetail(team.id, 'alpha')?.members.find((m) => m.sessionId === 'sess-builder')
             expect(member?.status).toBe('offline')
@@ -1006,6 +1009,37 @@ describe('TeamService settings', () => {
                 template: 'refactor',
                 budget: { maxMessagesPerMinute: 10, maxMembers: 12 }
             })
+        } finally {
+            service.close()
+        }
+    })
+})
+
+describe('TeamService live member status', () => {
+    it('derives member status from the live session in team detail', () => {
+        const { runtime, sessions } = createRuntime()
+        const store = new TeamStore(':memory:')
+        const service = new TeamService(store, () => {}, runtime)
+        try {
+            const team = service.createTeam('alpha', { name: 'Refactor auth' })
+            // Stored rows can be stale ('working' set at spawn time).
+            store.addMember(team.id, 'sess-builder', 'builder', 'working')
+            sessions.set('sess-builder', {
+                id: 'sess-builder',
+                active: true,
+                thinking: false,
+                machineId: 'machine-1',
+                directory: '/repo',
+                flavor: 'codex',
+                inWorktree: false
+            })
+            expect(service.getTeamDetail(team.id, 'alpha')?.members[0]?.status).toBe('idle')
+
+            sessions.set('sess-builder', { ...sessions.get('sess-builder')!, thinking: true })
+            expect(service.getTeamDetail(team.id, 'alpha')?.members[0]?.status).toBe('working')
+
+            sessions.delete('sess-builder')
+            expect(service.getTeamDetail(team.id, 'alpha')?.members[0]?.status).toBe('offline')
         } finally {
             service.close()
         }
