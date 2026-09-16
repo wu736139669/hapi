@@ -323,7 +323,7 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       {
         name: 'team_send',
         title: 'Send Team Message',
-        description: 'Agent Team: send a message to teammates. to="all" (default) writes to the shared log only; to="<role or session id prefix>" or to="lead" wakes that member; to="human" notifies the human out-of-band (use it or kind="decision" when you need a human decision). Use inReplyTo=<seq> when answering a peer message.',
+        description: 'Agent Team: send a message to teammates. to="all" (default) writes to the shared log only; to="<role or session id prefix>" or to="lead" wakes that member; to="human" notifies the human out-of-band (no inbox item); use kind="decision" when you need the human to decide something. Use inReplyTo=<seq> when answering a peer message.',
         inputSchema: z.object({
           text: z.string().min(1).describe('Message text'),
           to: z.string().min(1).optional().describe('"all" (default), "lead", "human", or a member session id/prefix'),
