@@ -72,7 +72,8 @@ pre { overflow: auto; background: #f0f1f4; border-radius: 10px; padding: 14px; }
 .error { color: #b42318; }
 .token { word-break: break-all; user-select: all; background: #eef8f1; border: 1px solid #b8e1c4; border-radius: 10px; padding: 12px; }
 a.button { display: inline-block; background: #1769e0; color: white; padding: 10px 15px; border-radius: 9px; text-decoration: none; }
-@media (prefers-color-scheme: dark) { body { background: #111315; color: #f1f2f4; } section { background: #1b1e22; } pre { background: #252930; } .muted { color: #a5abb5; } .token { background: #15271b; border-color: #285a39; } }
+img.shot { display: block; max-width: 100%; height: auto; margin: 10px 0; border-radius: 10px; border: 1px solid #e2e4e9; }
+@media (prefers-color-scheme: dark) { body { background: #111315; color: #f1f2f4; } section { background: #1b1e22; } pre { background: #252930; } .muted { color: #a5abb5; } .token { background: #15271b; border-color: #285a39; } img.shot { border-color: #2a2f36; } }
 </style>
 </head>
 <body>
@@ -118,8 +119,11 @@ Team HAPI 地址：${safeOrigin}
 <h2>使用教程</h2>
 <h3>界面语言</h3>
 <p>进入「设置 → 通用 → 语言」，可切换 English / 简体中文。</p>
+<img class="shot" src="/team-guide/settings-language.png" alt="设置 → 通用 → 语言">
 <h3>手机上添加到桌面（推荐）</h3>
 <p>iPhone：先用 Safari 打开本页，点底部「分享」按钮 → 「添加到主屏幕」→ 「添加」。页面顶部的 Install 提示里也有一键步骤引导。<br>Android：用 Chrome 打开，菜单里选「添加到主屏幕」。</p>
+<img class="shot" src="/team-guide/ios-install-banner.jpg" alt="Safari 顶部 Install 提示">
+<img class="shot" src="/team-guide/ios-install-steps.jpg" alt="添加到主屏幕步骤">
 <p class="muted">加到桌面后会像 App 一样打开，随时查看和继续会话。</p>
 <h3>让电脑在线</h3>
 <p>会话跑在你自己的电脑上。先在电脑终端运行 <code>hapi codex</code>（或 <code>hapi claude</code>）并保持开启，Team HAPI 里就会出现你的机器；想让电脑一直在线，可以运行 <code>hapi runner start</code>。</p>
@@ -133,6 +137,7 @@ Team HAPI 地址：${safeOrigin}
 <li><b>模型 / 推理强度</b>：默认即可，推理强度可选 High。</li>
 <li><b>权限模式</b>：建议选 Yolo，Agent 干活不再逐条等待审批。</li>
 </ol>
+<img class="shot" src="/team-guide/new-session.png" alt="创建会话页面">
 <h3>导入电脑上的 Codex 历史会话</h3>
 <p>在「创建会话」页面找到「导入 Codex 历史」，点「选择…」挑一个本机已有的 Codex 会话，再选好模型 / 推理强度，点「创建」时就会导入这段历史，可以接着聊。</p>
 </section>

@@ -49,10 +49,16 @@ Token 会经过 Codex 聊天记录；不放心的话，可以之后让管理员�
 
 进入「设置 → 通用 → 语言」，可切换 English / 简体中文。
 
+![设置 → 通用 → 语言](/team-guide/settings-language.png)
+
 ### 手机上添加到桌面（推荐）
 
 - iPhone：先用 Safari 打开本页，点底部「分享」按钮 → 「添加到主屏幕」→ 「添加」。页面顶部的 Install 提示里也有一键步骤引导。
 - Android：用 Chrome 打开，菜单里选「添加到主屏幕」。
+
+![Safari Install 提示](/team-guide/ios-install-banner.jpg)
+
+![添加到主屏幕步骤](/team-guide/ios-install-steps.jpg)
 
 加到桌面后会像 App 一样打开，随时查看和继续会话。
 
@@ -70,6 +76,8 @@ Token 会经过 Codex 聊天记录；不放心的话，可以之后让管理员�
 4. **代理**：选 Codex（或电脑上已装好的其他 Agent）。
 5. **模型 / 推理强度**：默认即可，推理强度可选 High。
 6. **权限模式**：建议选 Yolo，Agent 干活不再逐条等待审批。
+
+![创建会话页面](/team-guide/new-session.png)
 
 ### 导入电脑上的 Codex 历史会话
 
