@@ -78,8 +78,8 @@ cd android && ./gradlew :core:protocol:test  # Android protocol conformance
 
 Deploy with `scripts/deploy-local.sh [tag]` after `bun run build:single-exe`.
 The script signs with a pinned codesigning identity, copies to a new versioned
-filename, repoints the `~/.hapi/bin/hapi` symlink, restarts the hub, and rolls
-back if `/health` fails.
+filename, repoints the `~/.hapi/bin/hapi` symlink, restarts the hub, refreshes
+a running runner, and rolls back if `/health` fails.
 
 Two macOS rules the script enforces:
 
@@ -96,6 +96,12 @@ Two macOS rules the script enforces:
    each protected permission (Documents, Downloads, media library, ...). Pin
    one Apple Development identity instead: SHA-1 in `~/.hapi/signing-identity`,
    override via `HAPI_SIGN_IDENTITY`, signed identifier `run.hapi.cli`.
+
+The runner must be refreshed on every deploy (`hapi runner start` replaces the
+stale one; running sessions survive). Compiled binaries never self-update: the
+runner heartbeat compares the mtime of its own resolved exec path, which is
+fixed for the life of the process. A stale runner keeps old machine RPCs and
+capability flags, so hub features can fail with "restart the runner" errors.
 
 Agent sessions must not run recursive `$HOME` sweeps (`find ~`, `du -sh ~`)
 without pruning TCC-protected folders (`~/Music`, `~/Pictures`, `~/Movies`,

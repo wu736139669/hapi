@@ -46,8 +46,8 @@ bun run build:single-exe
 scripts/deploy-local.sh [tag]
 ```
 
-The script implements the sequence below; read on to understand the two macOS
-constraints it works around.
+The script implements the sequence below, including the runner refresh; read
+on to understand the macOS constraints it works around.
 
 ### Code-signature cache (never overwrite the stable path)
 
@@ -86,6 +86,22 @@ Agent sessions should also avoid recursive `$HOME` sweeps (`find ~`,
 `~/Music/Music/Media.localized` raises a spurious Apple Music prompt
 attributed to the hapi binary.
 
+### Refresh the runner
+
+The runner is a long-lived detached process. New sessions it spawns resolve
+`~/.hapi/bin/hapi` and therefore pick up the new binary automatically, but the
+runner's own code stays old until the process restarts:
+
+- compiled binaries never self-update: the heartbeat compares the mtime of the
+  runner's own resolved exec path, which is fixed for the life of the process
+- a stale runner keeps old machine RPC handlers and capability flags, so hub
+  features fail with "restart the runner" errors
+
+`scripts/deploy-local.sh` runs `hapi runner start` when a runner is already
+running; the CLI stops the stale runner and starts a fresh one with
+`HAPI_CLI_EXECUTABLE` pinned to the stable symlink. Running sessions are
+detached and survive the restart.
+
 ### Manual sequence
 
 ```bash
@@ -121,6 +137,10 @@ launchctl kickstart -k "gui/$(id -u)/com.hapi.hub"
 sleep 2
 curl -fsS http://127.0.0.1:3006/health >/dev/null
 "$stable" --version
+
+# Refresh a running runner; new sessions already use the new binary via the
+# symlink, but the runner's own machine RPCs/capabilities stay stale.
+HAPI_CLI_EXECUTABLE="$stable" "$stable" runner start
 ```
 
 If the health check fails, immediately restore the prior link and restart the

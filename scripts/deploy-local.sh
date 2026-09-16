@@ -81,3 +81,20 @@ if ! curl -fsS http://127.0.0.1:3006/health >/dev/null; then
 fi
 echo "health ok"
 "$stable" --version
+
+# Refresh the runner so its machine RPCs/capabilities match the new binary.
+# Compiled binaries never self-update after a deploy: the heartbeat mtime check
+# compares against the runner's own resolved exec path, which never changes.
+# `runner start` stops the stale runner first; running sessions are unaffected.
+runner_state="$HOME/.hapi/runner.state.json"
+runner_pid=$(sed -n 's/.*"pid": *\([0-9][0-9]*\).*/\1/p' "$runner_state" 2>/dev/null | head -n 1 || true)
+if [ -n "${runner_pid:-}" ] && kill -0 "$runner_pid" 2>/dev/null; then
+    if HAPI_CLI_EXECUTABLE="$stable" "$stable" runner start; then
+        echo "runner refreshed"
+    else
+        echo "warning: runner refresh failed; run '$stable runner start' manually" >&2
+        exit 1
+    fi
+else
+    echo "runner not running; skipped refresh"
+fi
