@@ -2,28 +2,9 @@
 
 Team HAPI 是团队共用的 Hub。每位成员使用独立的 Namespace 和 Token，只能看到自己 Namespace 下的会话、机器和文件。
 
-## 成员第一次使用
-
-1. 打开管理员发来的邀请链接，点页面上的「领取我的账号」（打开链接不会消耗邀请，只有点领取才会，且只能领一次）。
-2. 页面显示你的 Namespace 和个人 Token。
-3. 立即把 Token 保存到密码管理器；管理员不会看到 Token，链接也只能领取一次。
-4. 点击页面上的 **打开 Team HAPI**，即可使用网页端。
-
-如需在终端使用：
-
-```bash
-npm install -g @twsxtd/hapi
-export HAPI_API_URL=https://team-hapi.aichickenfarm.cn
-hapi auth login
-# 粘贴邀请页显示的个人 Token
-hapi codex
-```
-
-也可以在 `hapi auth login` 后使用 `hapi claude`、`hapi gemini` 等本机已安装的 Agent。
-
 ## 让 Codex 自动初始化 HAPI
 
-如果电脑还没有安装 HAPI，把下面整段复制给 Codex，并把【你的个人 Token】换成邀请页显示的个人 Token（在邀请页直接复制会自动填入）。它会帮你安装、配置并检查连接。
+如果电脑还没有安装 HAPI，把下面整段复制给 Codex（邀请页有「复制提示词」按钮，领取账号后 Token 会自动填入），让 Codex 执行并检查连接。
 
 ```text
 请帮我把这台电脑接入 Team HAPI，并完成本地 HAPI 初始化。

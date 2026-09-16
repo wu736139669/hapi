@@ -54,6 +54,8 @@ describe('Team onboarding', () => {
             expect(html).toContain('每条链接只能用一次')
             expect(html).toContain('领取我的账号')
             expect(html).toContain('打开链接不会消耗邀请')
+            expect(html).toContain('复制提示词')
+            expect(html).not.toContain('第一次使用')
         } finally {
             store.close()
         }

@@ -73,6 +73,7 @@ pre { overflow: auto; background: #f0f1f4; border-radius: 10px; padding: 14px; }
 .token { word-break: break-all; user-select: all; background: #eef8f1; border: 1px solid #b8e1c4; border-radius: 10px; padding: 12px; }
 a.button, button.button { display: inline-block; background: #1769e0; color: white; padding: 10px 15px; border-radius: 9px; border: none; text-decoration: none; font-size: 15px; font-family: inherit; cursor: pointer; }
 button.button[disabled] { opacity: 0.6; cursor: default; }
+.copy-row { display: flex; justify-content: flex-end; margin: 12px 0 6px; }
 img.shot { display: block; max-width: 100%; height: auto; margin: 10px 0; border-radius: 10px; border: 1px solid #e2e4e9; }
 @media (prefers-color-scheme: dark) { body { background: #111315; color: #f1f2f4; } section { background: #1b1e22; } pre { background: #252930; } .muted { color: #a5abb5; } .token { background: #15271b; border-color: #285a39; } img.shot { border-color: #2a2f36; } }
 </style>
@@ -86,21 +87,9 @@ img.shot { display: block; max-width: 100%; height: auto; margin: 10px 0; border
 <div id="claim-result"></div>
 </section>
 <section>
-<h2>第一次使用</h2>
-<ol>
-<li>打开管理员发给你的邀请链接。链接只能使用一次，过期后请联系管理员重新生成。</li>
-<li>页面显示 Token 后，请复制保存到自己的密码管理器；管理员看不到你的 Token。</li>
-<li>点击“打开 Team HAPI”进入网页，或者在电脑终端配置 CLI。</li>
-</ol>
-<pre>npm install -g @twsxtd/hapi
-export HAPI_API_URL=${safeOrigin}
-hapi auth login
-# 粘贴页面上显示的个人 Token
-hapi codex</pre>
-</section>
-<section>
 <h2>让 Codex 自动初始化 HAPI</h2>
-<p>如果电脑还没有安装 HAPI，把下面整段复制给 Codex（领取账号后 Token 会自动填入）。它会帮你安装、配置并检查连接。</p>
+<p>点下面的「复制提示词」，粘贴到 Codex 对话框发送，让它执行就好（领取账号后 Token 会自动填入）。Codex 会帮你安装、配置并检查连接。</p>
+<p class="copy-row"><button id="copy-prompt" class="button" type="button">复制提示词</button></p>
 <pre id="codex-prompt">请帮我把这台电脑接入 Team HAPI，并完成本地 HAPI 初始化。
 
 Team HAPI 地址：${safeOrigin}
@@ -157,6 +146,35 @@ Team HAPI 地址：${safeOrigin}
   const storageKey = 'hapi_access_token::' + location.origin;
   let storedToken = null;
   try { storedToken = localStorage.getItem(storageKey); } catch {}
+  const promptBlock = document.getElementById('codex-prompt');
+  const fillPrompt = (token) => {
+    if (promptBlock && token) {
+      promptBlock.textContent = promptBlock.textContent.split('【你的个人 Token】').join(token);
+    }
+  };
+  if (storedToken) fillPrompt(storedToken);
+  const copyButton = document.getElementById('copy-prompt');
+  if (copyButton && promptBlock) {
+    copyButton.addEventListener('click', async () => {
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(promptBlock.textContent);
+        copied = true;
+      } catch {}
+      if (!copied) {
+        const range = document.createRange();
+        range.selectNodeContents(promptBlock);
+        const selection = window.getSelection();
+        if (selection) {
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
+        try { copied = document.execCommand('copy'); } catch {}
+      }
+      copyButton.textContent = copied ? '已复制 ✓' : '复制失败，请长按选择';
+      setTimeout(() => { copyButton.textContent = '复制提示词'; }, 2000);
+    });
+  }
   const showSavedToken = (message) => {
     status.className = 'muted';
     status.textContent = message;
@@ -207,10 +225,7 @@ Team HAPI 地址：${safeOrigin}
         throw error;
       }
       try { localStorage.setItem(storageKey, body.accessToken); } catch {}
-      const promptBlock = document.getElementById('codex-prompt');
-      if (promptBlock) {
-        promptBlock.textContent = promptBlock.textContent.split('【你的个人 Token】').join(body.accessToken);
-      }
+      fillPrompt(body.accessToken);
       status.className = 'muted';
       status.textContent = '账号已创建，请保存下面的 Token（刷新本页仍可看到）。';
       result.innerHTML = '<p class="success">Namespace：<strong>' + body.namespace + '</strong></p>'
