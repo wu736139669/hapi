@@ -52,6 +52,8 @@ describe('Team onboarding', () => {
             expect(html).toContain('hapi runner start')
             expect(html).toContain('这台设备已经领取过账号')
             expect(html).toContain('每条链接只能用一次')
+            expect(html).toContain('领取我的账号')
+            expect(html).toContain('打开链接不会消耗邀请')
         } finally {
             store.close()
         }

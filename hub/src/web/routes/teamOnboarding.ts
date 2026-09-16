@@ -39,8 +39,8 @@ function publicOrigin(request: Request): string {
     return new URL(request.url).origin
 }
 
-function guideUrl(request: Request, invite: string): string {
-    return `${publicOrigin(request)}/team-guide#invite=${encodeURIComponent(invite)}`
+function guideUrl(request: Request, invite: string, namespace: string): string {
+    return `${publicOrigin(request)}/team-guide#invite=${encodeURIComponent(invite)}&ns=${encodeURIComponent(namespace)}`
 }
 
 function isAdminRequest(request: Request): boolean {
@@ -71,7 +71,8 @@ pre { overflow: auto; background: #f0f1f4; border-radius: 10px; padding: 14px; }
 .success { color: #087443; }
 .error { color: #b42318; }
 .token { word-break: break-all; user-select: all; background: #eef8f1; border: 1px solid #b8e1c4; border-radius: 10px; padding: 12px; }
-a.button { display: inline-block; background: #1769e0; color: white; padding: 10px 15px; border-radius: 9px; text-decoration: none; }
+a.button, button.button { display: inline-block; background: #1769e0; color: white; padding: 10px 15px; border-radius: 9px; border: none; text-decoration: none; font-size: 15px; font-family: inherit; cursor: pointer; }
+button.button[disabled] { opacity: 0.6; cursor: default; }
 img.shot { display: block; max-width: 100%; height: auto; margin: 10px 0; border-radius: 10px; border: 1px solid #e2e4e9; }
 @media (prefers-color-scheme: dark) { body { background: #111315; color: #f1f2f4; } section { background: #1b1e22; } pre { background: #252930; } .muted { color: #a5abb5; } .token { background: #15271b; border-color: #285a39; } img.shot { border-color: #2a2f36; } }
 </style>
@@ -81,7 +82,7 @@ img.shot { display: block; max-width: 100%; height: auto; margin: 10px 0; border
 <section>
 <h1>Team HAPI</h1>
 <p class="muted">团队共享 Hub。每个人只能看到自己的会话和机器。</p>
-<div id="claim-status" class="muted">如果你是通过邀请链接打开的，页面会自动领取账号（链接是一次性的，打开即领取）。已经领取过的设备刷新本页仍会显示 Token。</div>
+<div id="claim-status" class="muted">如果你是通过邀请链接打开的，点「领取我的账号」即可。打开链接不会消耗邀请；已领取过的设备刷新本页仍会显示 Token。</div>
 <div id="claim-result"></div>
 </section>
 <section>
@@ -169,42 +170,69 @@ Team HAPI 地址：${safeOrigin}
   };
   const params = new URLSearchParams(location.hash.startsWith('#') ? location.hash.slice(1) : '');
   const invite = params.get('invite');
+  const inviteNamespace = params.get('ns');
+  const showClaimError = () => {
+    status.className = 'error';
+    result.innerHTML = '';
+    const line = document.createElement('p');
+    line.textContent = '这个链接已经用过或过期了（每条链接只能用一次）。';
+    result.append(line);
+    if (inviteNamespace) {
+      const detail = document.createElement('p');
+      detail.className = 'muted';
+      detail.textContent = '它对应的账号是 ' + inviteNamespace + '。把这段发给管理员，请管理员为该账号生成恢复链接，或直接发一条新的邀请链接。';
+      result.append(detail);
+    }
+  };
   if (!invite) {
     if (storedToken) showSavedToken('这台设备已经领取过账号，Token 如下（请保存好）：');
     return;
   }
-  status.textContent = '正在领取你的 Team HAPI 账号…';
-  fetch('/api/team/onboarding/claim', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ invite })
-  }).then(async response => {
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok || !body.accessToken) {
-      const error = new Error(body.error || '邀请链接无效或已使用');
-      error.status = response.status;
-      throw error;
-    }
-    try { localStorage.setItem(storageKey, body.accessToken); } catch {}
-    const promptBlock = document.getElementById('codex-prompt');
-    if (promptBlock) {
-      promptBlock.textContent = promptBlock.textContent.split('【你的个人 Token】').join(body.accessToken);
-    }
-    status.textContent = '账号已创建，请保存下面的 Token。';
-    result.innerHTML = '<p class="success">Namespace：<strong>' + body.namespace + '</strong></p>'
-      + '<p class="token">' + body.accessToken + '</p>'
-      + '<p><a class="button" href="/">打开 Team HAPI</a></p>';
-    history.replaceState(null, '', location.pathname);
-  }).catch(error => {
-    if (storedToken) {
-      showSavedToken('这个链接已经用过或过期了，但你在这台设备上已经领取过（Token 如下）：');
-      return;
-    }
-    status.className = 'error';
-    status.textContent = error && error.status === 410
-      ? '这个邀请链接已经用过或过期了。请联系管理员重新发一个（每条链接只能用一次）。'
-      : '领取失败，请检查网络后重试，或联系管理员。';
+  status.textContent = '欢迎加入 Team HAPI！打开链接不会消耗邀请，点下面的按钮领取你的账号。';
+  const claimButton = document.createElement('button');
+  claimButton.className = 'button';
+  claimButton.textContent = '领取我的账号';
+  claimButton.addEventListener('click', () => {
+    claimButton.disabled = true;
+    claimButton.textContent = '领取中…';
+    fetch('/api/team/onboarding/claim', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ invite })
+    }).then(async response => {
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body.accessToken) {
+        const error = new Error(body.error || '邀请链接无效或已使用');
+        error.status = response.status;
+        throw error;
+      }
+      try { localStorage.setItem(storageKey, body.accessToken); } catch {}
+      const promptBlock = document.getElementById('codex-prompt');
+      if (promptBlock) {
+        promptBlock.textContent = promptBlock.textContent.split('【你的个人 Token】').join(body.accessToken);
+      }
+      status.className = 'muted';
+      status.textContent = '账号已创建，请保存下面的 Token（刷新本页仍可看到）。';
+      result.innerHTML = '<p class="success">Namespace：<strong>' + body.namespace + '</strong></p>'
+        + '<p class="token">' + body.accessToken + '</p>'
+        + '<p><a class="button" href="/">打开 Team HAPI</a></p>';
+      history.replaceState(null, '', location.pathname);
+    }).catch(error => {
+      if (storedToken) {
+        showSavedToken('这个链接已经用过或过期了，但你在这台设备上已经领取过（Token 如下）：');
+        return;
+      }
+      if (error && error.status === 410) {
+        showClaimError();
+        return;
+      }
+      status.className = 'error';
+      status.textContent = '领取失败：网络异常，请重试；如果一直失败，请联系管理员。';
+      claimButton.disabled = false;
+      claimButton.textContent = '领取我的账号';
+    });
   });
+  result.append(claimButton);
 })();
 </script>
 </body>
@@ -234,7 +262,7 @@ export function createTeamOnboardingRoutes(store: Store): Hono {
                 kind: 'enroll',
                 namespace: created.namespace,
                 expiresAt: created.expiresAt,
-                inviteUrl: guideUrl(c.req.raw, created.invite)
+                inviteUrl: guideUrl(c.req.raw, created.invite, created.namespace)
             })
         } catch (error) {
             return c.json({ error: error instanceof Error ? error.message : 'Failed to create invite' }, 400)
@@ -257,7 +285,7 @@ export function createTeamOnboardingRoutes(store: Store): Hono {
                 kind: 'recovery',
                 namespace: created.namespace,
                 expiresAt: created.expiresAt,
-                inviteUrl: guideUrl(c.req.raw, created.invite)
+                inviteUrl: guideUrl(c.req.raw, created.invite, created.namespace)
             })
         } catch (error) {
             return c.json({ error: error instanceof Error ? error.message : 'Failed to create recovery link' }, 400)
