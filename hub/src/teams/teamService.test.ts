@@ -1069,3 +1069,48 @@ describe('TeamService live member status', () => {
         }
     })
 })
+
+describe('TeamService requirements', () => {
+    it('opens a requirement for a fresh human ask and files the follow-up work under it', async () => {
+        const { runtime, sessions } = createRuntime()
+        const store = new TeamStore(':memory:')
+        const service = new TeamService(store, () => {}, runtime)
+        addCallerSession(sessions)
+        try {
+            const team = service.createTeam('alpha', { name: 'Refactor auth', leadSessionId: 'sess-lead' })
+            const human = await service.sendHumanMessage('alpha', team.id, { text: '把搜索修好\n更多细节' })
+            const requirementId = human.meta?.requirementId
+            expect(typeof requirementId).toBe('string')
+            expect(store.listRequirements(team.id)).toHaveLength(1)
+            expect(store.listRequirements(team.id)[0]?.title).toBe('把搜索修好')
+
+            // A human reply inherits the requirement instead of opening a new one.
+            const reply = await service.sendHumanMessage('alpha', team.id, { text: '补充一句', inReplyTo: human.seq })
+            expect(reply.meta?.requirementId).toBe(requirementId)
+            expect(store.listRequirements(team.id)).toHaveLength(1)
+
+            // Member work started from that requirement inherits it via the task.
+            const spawned = await service.spawnMember('sess-lead', 'alpha', {
+                role: 'builder',
+                task: 'do it',
+                requirementId: requirementId as string
+            })
+            const status = await service.sendMessage('sess-builder', 'alpha', {
+                text: 'working',
+                kind: 'status',
+                taskId: spawned.taskId!
+            })
+            expect(status.meta?.requirementId).toBe(requirementId)
+
+            // The lead closes the requirement with a conclusion.
+            const updated = await service.updateRequirement('sess-lead', 'alpha', requirementId as string, {
+                status: 'done',
+                conclusion: 'done via tests'
+            })
+            expect(updated.status).toBe('done')
+            expect(service.getTeamDetail(team.id, 'alpha')?.requirements[0]?.conclusion).toBe('done via tests')
+        } finally {
+            service.close()
+        }
+    })
+})

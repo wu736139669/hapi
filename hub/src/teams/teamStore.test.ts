@@ -89,6 +89,21 @@ describe('TeamStore agent tokens', () => {
     })
 })
 
+describe('TeamStore requirements', () => {
+    it('creates, lists and updates requirements', () => {
+        withStore((store) => {
+            const team = store.createTeam({ namespace: 'default', name: 'Growth' })
+            const requirement = store.createRequirement({ teamId: team.id, title: 'Ship SEO fixes', body: 'full text' })
+            expect(store.listRequirements(team.id)).toHaveLength(1)
+
+            const updated = store.updateRequirement(requirement.id, { status: 'done', conclusion: 'shipped' })
+            expect(updated?.status).toBe('done')
+            expect(store.getRequirement(requirement.id)?.conclusion).toBe('shipped')
+            expect(store.updateRequirement('missing', { status: 'done' })).toBeNull()
+        })
+    })
+})
+
 describe('TeamStore schema', () => {
     it('creates the v1 schema in a dedicated file', () => {
         withStore((store, dbPath) => {
@@ -108,6 +123,7 @@ describe('TeamStore schema', () => {
             expect(names).toContain('team_messages')
             expect(names).toContain('team_pending_pings')
             expect(names).toContain('team_agent_tokens')
+            expect(names).toContain('team_requirements')
         })
     })
 

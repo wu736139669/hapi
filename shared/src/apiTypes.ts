@@ -462,10 +462,26 @@ export const TeamSendMessageRequestSchema = z.object({
     to: z.string().min(1).max(200).optional(),
     kind: z.enum(['chat', 'status', 'question', 'task-update', 'decision']).optional(),
     /** Team message seq this message replies to (budget chain-depth tracking). */
-    inReplyTo: z.number().int().positive().optional()
+    inReplyTo: z.number().int().positive().optional(),
+    /** Task this message reports on; the hub files it under the task's requirement. */
+    taskId: z.string().min(1).optional(),
+    /** Explicit requirement to file this message under. */
+    requirementId: z.string().min(1).optional()
 })
 
 export type TeamSendMessageRequest = z.infer<typeof TeamSendMessageRequestSchema>
+
+/** Update a requirement (status / conclusion) from the web or the lead. */
+export const TeamRequirementUpdateRequestSchema = z.object({
+    /** Session caller (CLI/MCP). Absent = human web caller. */
+    fromSessionId: z.string().min(1).optional(),
+    status: z.enum(['open', 'doing', 'done', 'blocked']).optional(),
+    conclusion: z.string().max(4000).nullable().optional()
+}).refine((value) => value.status !== undefined || value.conclusion !== undefined, {
+    message: 'status or conclusion is required'
+})
+
+export type TeamRequirementUpdateRequest = z.infer<typeof TeamRequirementUpdateRequestSchema>
 
 export const TeamSpawnMemberRequestSchema = z.object({
     fromSessionId: z.string().min(1),
@@ -477,6 +493,8 @@ export const TeamSpawnMemberRequestSchema = z.object({
     modelReasoningEffort: z.string().min(1).max(50).optional(),
     /** Inherited from the calling session when omitted. */
     permissionMode: PermissionModeSchema.optional(),
+    /** File the new member's task under this requirement. */
+    requirementId: z.string().min(1).optional(),
     sessionType: z.enum(['simple', 'worktree']).optional(),
     worktreeName: z.string().min(1).max(80).optional(),
     /** Run the member with bypassed permission prompts (autonomous work). */
@@ -488,7 +506,9 @@ export type TeamSpawnMemberRequest = z.infer<typeof TeamSpawnMemberRequestSchema
 export const AddTeamMemberRequestSchema = z.object({
     sessionId: z.string().min(1),
     role: z.string().min(1).max(80),
-    task: z.string().min(1).max(20000).optional()
+    task: z.string().min(1).max(20000).optional(),
+    /** File the new member's task under this requirement. */
+    requirementId: z.string().min(1).optional()
 })
 
 export type AddTeamMemberRequest = z.infer<typeof AddTeamMemberRequestSchema>
@@ -520,7 +540,8 @@ export type TeamTaskUpdateRequest = z.infer<typeof TeamTaskUpdateRequestSchema>
 export const CreateTeamTaskRequestSchema = z.object({
     title: z.string().min(1).max(200),
     assigneeSessionId: z.string().min(1).nullable().optional(),
-    dependsOn: z.array(z.string().min(1)).max(20).optional()
+    dependsOn: z.array(z.string().min(1)).max(20).optional(),
+    requirementId: z.string().min(1).optional()
 })
 
 export type CreateTeamTaskRequest = z.infer<typeof CreateTeamTaskRequestSchema>

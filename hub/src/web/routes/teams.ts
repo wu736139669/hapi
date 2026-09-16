@@ -6,6 +6,7 @@ import {
     CreateTeamTaskRequestSchema,
     IssueTeamAgentTokenRequestSchema,
     TeamHumanMessageRequestSchema,
+    TeamRequirementUpdateRequestSchema,
     TeamSendMessageRequestSchema,
     TeamSpawnMemberRequestSchema,
     TeamTaskUpdateRequestSchema,
@@ -88,7 +89,9 @@ export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
                 text: parsed.data.text,
                 to: parsed.data.to,
                 kind: parsed.data.kind,
-                inReplyTo: parsed.data.inReplyTo
+                inReplyTo: parsed.data.inReplyTo,
+                taskId: parsed.data.taskId,
+                requirementId: parsed.data.requirementId
             })
             c.header('Cache-Control', 'no-store')
             return c.json({ message }, 201)
@@ -121,7 +124,8 @@ export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
                 permissionMode: parsed.data.permissionMode,
                 sessionType: parsed.data.sessionType,
                 worktreeName: parsed.data.worktreeName,
-                yolo: parsed.data.yolo
+                yolo: parsed.data.yolo,
+                requirementId: parsed.data.requirementId
             })
             c.header('Cache-Control', 'no-store')
             return c.json(result, 201)
@@ -140,7 +144,8 @@ export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
             const result = await teams.addMemberFromSession(c.get('namespace'), c.req.param('id'), {
                 sessionId: parsed.data.sessionId,
                 role: parsed.data.role,
-                task: parsed.data.task
+                task: parsed.data.task,
+                requirementId: parsed.data.requirementId
             })
             c.header('Cache-Control', 'no-store')
             return c.json(result, 201)
@@ -159,7 +164,8 @@ export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
             const task = await teams.createTaskForHuman(c.get('namespace'), c.req.param('id'), {
                 title: parsed.data.title,
                 assigneeSessionId: parsed.data.assigneeSessionId ?? null,
-                dependsOn: parsed.data.dependsOn
+                dependsOn: parsed.data.dependsOn,
+                requirementId: parsed.data.requirementId
             })
             c.header('Cache-Control', 'no-store')
             return c.json({ task }, 201)
@@ -174,6 +180,36 @@ export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
             await teams.removeMember(c.get('namespace'), c.req.param('id'), c.req.param('sessionId'), { stopSession })
             c.header('Cache-Control', 'no-store')
             return c.json({ ok: true })
+        } catch (error) {
+            return teamErrorResponse(c, error)
+        }
+    })
+
+    app.patch('/teams/:id/requirements/:requirementId', async (c) => {
+        const json = await c.req.json().catch(() => null)
+        const parsed = TeamRequirementUpdateRequestSchema.safeParse(json)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+        const fromSessionId = parsed.data.fromSessionId ?? null
+        if (fromSessionId) {
+            const membership = teams.resolveMembership(fromSessionId, c.get('namespace'))
+            if (!membership || membership.team.id !== c.req.param('id')) {
+                return c.json({ error: 'Session is not a member of this team' }, 404)
+            }
+        }
+        try {
+            const requirement = await teams.updateRequirement(
+                fromSessionId,
+                c.get('namespace'),
+                c.req.param('requirementId'),
+                {
+                    ...(parsed.data.status !== undefined ? { status: parsed.data.status } : {}),
+                    ...(parsed.data.conclusion !== undefined ? { conclusion: parsed.data.conclusion } : {})
+                }
+            )
+            c.header('Cache-Control', 'no-store')
+            return c.json({ requirement })
         } catch (error) {
             return teamErrorResponse(c, error)
         }

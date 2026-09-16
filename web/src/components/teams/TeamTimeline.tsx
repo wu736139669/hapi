@@ -5,16 +5,23 @@ import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { humanReplyState } from '@/lib/teamMessageState'
 import { statusDotClass } from './teamStatus'
 
-const THREAD_MIN_MESSAGES = 3
+const THREAD_MIN_MESSAGES = 2
 
 type TimelineItem =
     | { type: 'message'; message: TeamMessage }
     | { type: 'thread'; key: string; messages: TeamMessage[] }
 
-function isFoldablePeerMessage(message: TeamMessage): boolean {
-    return message.fromKind === 'session'
-        && message.toSessionId !== null
-        && (message.kind === 'chat' || message.kind === 'status' || message.kind === 'question')
+/**
+ * AI-to-AI chatter (broadcasts, status updates, peer questions) folds into a
+ * one-line summary by default. Human-facing content stays expanded: decisions,
+ * explicit notifications to the human and everything a human wrote.
+ */
+function isFoldableAiMessage(message: TeamMessage): boolean {
+    if (message.fromKind !== 'session') return false
+    if (message.kind === 'decision') return false
+    if (message.meta?.awaitingHuman === true || message.meta?.toHuman === true) return false
+    return message.kind === 'chat' || message.kind === 'status'
+        || message.kind === 'question' || message.kind === 'task-update'
 }
 
 export function buildTimelineItems(messages: TeamMessage[], foldThreads: boolean): TimelineItem[] {
@@ -32,7 +39,7 @@ export function buildTimelineItems(messages: TeamMessage[], foldThreads: boolean
         run = []
     }
     for (const message of messages) {
-        if (isFoldablePeerMessage(message)) {
+        if (isFoldableAiMessage(message)) {
             run.push(message)
             continue
         }
@@ -78,8 +85,11 @@ function ThreadRow(props: {
     const first = messages[0]!
     const last = messages[messages.length - 1]!
     const fromRole = roleOf(members, first.fromSessionId) ?? '?'
-    const toRole = roleOf(members, first.toSessionId) ?? '?'
     const topics = first.text.replace(/\s+/g, ' ').slice(0, 28)
+    const participants = Array.from(new Set(messages.map((message) => roleOf(members, message.fromSessionId) ?? '?')))
+    const participantLabel = participants.length > 2
+        ? `${participants.slice(0, 2).join(' · ')} +${participants.length - 2}`
+        : participants.join(' · ')
 
     return (
         <div className="my-1">
@@ -89,10 +99,8 @@ function ThreadRow(props: {
                 className="flex w-full min-w-0 items-center gap-2 rounded-lg border border-dashed border-[var(--app-border)] bg-[var(--app-subtle-bg)]/40 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-[var(--app-subtle-bg)]"
             >
                 <MemberAvatar role={fromRole} />
-                <span className="shrink-0 text-[var(--app-hint)]">↔</span>
-                <MemberAvatar role={toRole} />
                 <span className="hidden min-w-0 truncate font-medium text-[var(--app-fg)] split:inline">
-                    {fromRole} ↔ {toRole}
+                    {participantLabel}
                 </span>
                 <span className="shrink-0 text-[var(--app-hint)]">
                     {t('team.thread.count', { n: messages.length })}

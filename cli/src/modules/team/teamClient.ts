@@ -46,12 +46,20 @@ export interface TeamTaskView {
     meta?: Record<string, unknown> | null
 }
 
+export interface TeamRequirementView {
+    id: string
+    title: string
+    status: string
+    conclusion: string | null
+}
+
 export interface TeamStatusView {
     team: { id: string; name: string; status: string; leadSessionId: string | null }
     me: { sessionId: string; role: string; status: string }
     members: TeamMemberView[]
     tasks: TeamTaskView[]
     pendingTasks: TeamTaskView[]
+    requirements: TeamRequirementView[]
     budget: { maxMembers: number; maxMessagesPerMinute: number; maxChainDepth: number }
 }
 
@@ -185,6 +193,8 @@ export async function sendTeamMessage(
         to?: string
         kind?: string
         inReplyTo?: number
+        taskId?: string
+        requirementId?: string
     }
 ): Promise<TeamMessageView> {
     const context = await openSession(options)
@@ -197,10 +207,35 @@ export async function sendTeamMessage(
             text: options.text,
             to: options.to,
             kind: options.kind,
-            inReplyTo: options.inReplyTo
+            inReplyTo: options.inReplyTo,
+            ...(options.taskId ? { taskId: options.taskId } : {}),
+            ...(options.requirementId ? { requirementId: options.requirementId } : {})
         }
     )
     return response.message
+}
+
+/** Update a requirement's status / conclusion (lead or human). */
+export async function updateTeamRequirement(
+    options: TeamClientOptions & {
+        teamId: string
+        requirementId: string
+        status?: 'open' | 'doing' | 'done' | 'blocked'
+        conclusion?: string | null
+    }
+): Promise<TeamRequirementView | null> {
+    const context = await openSession(options)
+    const response = await request<{ requirement: TeamRequirementView }>(
+        context,
+        'patch',
+        `/api/teams/${encodeURIComponent(options.teamId)}/requirements/${encodeURIComponent(options.requirementId)}`,
+        {
+            fromSessionId: options.sessionId,
+            ...(options.status !== undefined ? { status: options.status } : {}),
+            ...(options.conclusion !== undefined ? { conclusion: options.conclusion } : {})
+        }
+    )
+    return response.requirement ?? null
 }
 
 export async function readTeamMessages(
@@ -229,6 +264,7 @@ export async function spawnTeamMember(
         permissionMode?: string
         sessionType?: 'simple' | 'worktree'
         worktreeName?: string
+        requirementId?: string
     }
 ): Promise<{ teamId: string; sessionId: string; role: string; taskId: string | null }> {
     const context = await openSession(options)
@@ -245,7 +281,8 @@ export async function spawnTeamMember(
             modelReasoningEffort: options.modelReasoningEffort,
             permissionMode: options.permissionMode,
             sessionType: options.sessionType,
-            worktreeName: options.worktreeName
+            worktreeName: options.worktreeName,
+            ...(options.requirementId ? { requirementId: options.requirementId } : {})
         }
     )
 }
@@ -295,6 +332,14 @@ export function formatTeamStatus(status: TeamStatusView): string {
     } else {
         lines.push('')
         lines.push('你的待办任务：无')
+    }
+    const openRequirements = (status.requirements ?? []).filter((requirement) => requirement.status !== 'done')
+    if (openRequirements.length > 0) {
+        lines.push('')
+        lines.push('需求（未完成）：')
+        for (const requirement of openRequirements) {
+            lines.push(`- [${requirement.status}] ${requirement.title} id=${requirement.id}${requirement.conclusion ? ` · 结论: ${requirement.conclusion.slice(0, 60)}` : ''}`)
+        }
     }
     lines.push('')
     lines.push(`限额：消息 ${status.budget.maxMessagesPerMinute}/分钟 · 链深 ${status.budget.maxChainDepth}`)

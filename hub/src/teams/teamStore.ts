@@ -18,7 +18,7 @@ import { dirname } from 'node:path'
 
 export const TEAM_SCHEMA_VERSION: number = 1
 
-const REQUIRED_TABLES = ['teams', 'team_members', 'team_tasks', 'team_messages', 'team_pending_pings', 'team_agent_tokens'] as const
+const REQUIRED_TABLES = ['teams', 'team_members', 'team_tasks', 'team_messages', 'team_pending_pings', 'team_agent_tokens', 'team_requirements'] as const
 
 export type TeamStatus = 'active' | 'archived'
 export type TeamMemberStatus = 'idle' | 'working' | 'blocked' | 'offline'
@@ -52,6 +52,25 @@ export interface TeamTaskRecord {
     status: TeamTaskStatus
     assigneeSessionId: string | null
     meta: Record<string, unknown> | null
+    createdAt: number
+    updatedAt: number
+}
+
+export type TeamRequirementStatus = 'open' | 'doing' | 'done' | 'blocked'
+
+/**
+ * A human ask, the parent of the tasks/messages that work on it. Every
+ * non-reply human message starts one, so a team's history reads as
+ * "requirement -> process -> conclusion" instead of a flat stream.
+ */
+export interface TeamRequirementRecord {
+    id: string
+    teamId: string
+    title: string
+    body: string | null
+    status: TeamRequirementStatus
+    conclusion: string | null
+    createdBySessionId: string | null
     createdAt: number
     updatedAt: number
 }
@@ -541,6 +560,77 @@ export class TeamStore {
         return result.changes
     }
 
+    // -------------------------------------------------------- requirements
+
+    createRequirement(input: {
+        teamId: string
+        title: string
+        body?: string | null
+        createdBySessionId?: string | null
+        id?: string
+    }): TeamRequirementRecord {
+        const now = Date.now()
+        const record: TeamRequirementRecord = {
+            id: input.id ?? crypto.randomUUID(),
+            teamId: input.teamId,
+            title: input.title,
+            body: input.body ?? null,
+            status: 'open',
+            conclusion: null,
+            createdBySessionId: input.createdBySessionId ?? null,
+            createdAt: now,
+            updatedAt: now
+        }
+        this.db.prepare(
+            `INSERT INTO team_requirements (id, team_id, title, body, status, conclusion, created_by_session_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(
+            record.id,
+            record.teamId,
+            record.title,
+            record.body,
+            record.status,
+            record.conclusion,
+            record.createdBySessionId,
+            record.createdAt,
+            record.updatedAt
+        )
+        return record
+    }
+
+    getRequirement(id: string): TeamRequirementRecord | null {
+        const row = this.db.prepare(
+            'SELECT id, team_id, title, body, status, conclusion, created_by_session_id, created_at, updated_at FROM team_requirements WHERE id = ?'
+        ).get(id) as TeamRequirementRow | undefined
+        return row ? mapRequirementRow(row) : null
+    }
+
+    listRequirements(teamId: string): TeamRequirementRecord[] {
+        const rows = this.db.prepare(
+            'SELECT id, team_id, title, body, status, conclusion, created_by_session_id, created_at, updated_at FROM team_requirements WHERE team_id = ? ORDER BY created_at ASC'
+        ).all(teamId) as TeamRequirementRow[]
+        return rows.map(mapRequirementRow)
+    }
+
+    updateRequirement(
+        id: string,
+        patch: { title?: string; status?: TeamRequirementStatus; conclusion?: string | null }
+    ): TeamRequirementRecord | null {
+        const current = this.getRequirement(id)
+        if (!current) return null
+        const next: TeamRequirementRecord = {
+            ...current,
+            title: patch.title ?? current.title,
+            status: patch.status ?? current.status,
+            conclusion: patch.conclusion !== undefined ? patch.conclusion : current.conclusion,
+            updatedAt: Date.now()
+        }
+        this.db.prepare(
+            'UPDATE team_requirements SET title = ?, status = ?, conclusion = ?, updated_at = ? WHERE id = ?'
+        ).run(next.title, next.status, next.conclusion, next.updatedAt, id)
+        return next
+    }
+
     // -------------------------------------------------------------- schema
 
     private initSchema(): void {
@@ -584,6 +674,20 @@ export class TeamStore {
                 FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_team_agent_tokens_team ON team_agent_tokens(team_id, expires_at);
+
+            CREATE TABLE IF NOT EXISTS team_requirements (
+                id TEXT PRIMARY KEY,
+                team_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                body TEXT,
+                status TEXT NOT NULL DEFAULT 'open',
+                conclusion TEXT,
+                created_by_session_id TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_team_requirements_team ON team_requirements(team_id, created_at);
         `)
     }
 
@@ -725,6 +829,18 @@ interface TeamAgentTokenRow {
     expires_at: number
 }
 
+interface TeamRequirementRow {
+    id: string
+    team_id: string
+    title: string
+    body: string | null
+    status: string
+    conclusion: string | null
+    created_by_session_id: string | null
+    created_at: number
+    updated_at: number
+}
+
 interface TeamJoinRow {
     team_id: string
     team_namespace: string
@@ -749,6 +865,23 @@ function mapAgentTokenRow(row: TeamAgentTokenRow): TeamAgentTokenRecord {
         label: row.label,
         createdAt: row.created_at,
         expiresAt: row.expires_at
+    }
+}
+
+function mapRequirementRow(row: TeamRequirementRow): TeamRequirementRecord {
+    const status: TeamRequirementStatus = row.status === 'doing' || row.status === 'done' || row.status === 'blocked'
+        ? row.status
+        : 'open'
+    return {
+        id: row.id,
+        teamId: row.team_id,
+        title: row.title,
+        body: row.body,
+        status,
+        conclusion: row.conclusion,
+        createdBySessionId: row.created_by_session_id,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
     }
 }
 

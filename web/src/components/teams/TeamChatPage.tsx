@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQueryClient, useMutation } from '@tanstack/react-query'
 import { useAppContext } from '@/lib/app-context'
@@ -13,6 +13,8 @@ import type { TeamMessage } from '@/types/team'
 import { pendingHumanDecisions } from '@/lib/teamMessageState'
 import { TeamTimeline } from './TeamTimeline'
 import { TeamSidePanel } from './TeamSidePanel'
+import { TeamRequirementCard } from './TeamRequirementCard'
+import { groupMessagesByRequirement } from '@/lib/teamRequirementGroups'
 import { TeamMemoryDialog } from './TeamMemoryDialog'
 import { TeamSettingsDialog } from './TeamSettingsDialog'
 import { TeamTaskDialog } from './TeamTaskDialog'
@@ -55,6 +57,19 @@ export function TeamChatPage() {
     const members = detail?.members ?? []
     const tasks = detail?.tasks ?? []
     const leadSessionId = detail?.team.leadSessionId ?? null
+
+    // Smart scroll: stay pinned to the newest message while the human is at the
+    // bottom; otherwise offer a jump button instead of yanking them away.
+    const scrollRef = useRef<HTMLDivElement | null>(null)
+    const pinnedToBottomRef = useRef(true)
+    const [showJumpToLatest, setShowJumpToLatest] = useState(false)
+    const scrollToLatest = (behavior: ScrollBehavior = 'auto') => {
+        const element = scrollRef.current
+        if (!element) return
+        element.scrollTo({ top: element.scrollHeight, behavior })
+        pinnedToBottomRef.current = true
+        setShowJumpToLatest(false)
+    }
 
     // Humans talk to the lead by default; the lead routes the work.
     useEffect(() => {
@@ -102,6 +117,27 @@ export function TeamChatPage() {
     }, [filter, messages, taskId, tasks, leadSessionId])
 
     const completedTasks = tasks.filter((task) => task.status === 'done').length
+
+    const requirementGroups = useMemo(
+        () => groupMessagesByRequirement(detail?.requirements ?? [], visibleMessages),
+        [detail?.requirements, visibleMessages]
+    )
+
+    // Open (or switch) a team at its newest message.
+    useEffect(() => {
+        scrollToLatest()
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [teamId])
+
+    // Follow new messages only while the human is already at the bottom.
+    useEffect(() => {
+        if (pinnedToBottomRef.current) {
+            scrollToLatest()
+        } else {
+            setShowJumpToLatest(true)
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [visibleMessages.length])
 
     const createTask = useMutation({
         mutationFn: async (input: { title: string; assigneeSessionId: string | null }) => {
@@ -355,13 +391,33 @@ export function TeamChatPage() {
                     ) : null}
                 </div>
 
-                <div className="app-scroll-y min-h-0 flex-1 px-3">
+                <div
+                    ref={scrollRef}
+                    onScroll={(event) => {
+                        const element = event.currentTarget
+                        const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 80
+                        pinnedToBottomRef.current = nearBottom
+                        if (nearBottom) setShowJumpToLatest(false)
+                    }}
+                    className="app-scroll-y min-h-0 flex-1 px-3"
+                >
                     {error || messagesError ? (
                         <div className="py-6 text-center text-sm text-red-600">{error ?? messagesError}</div>
                     ) : isLoading ? (
                         <div className="py-6 text-center text-sm text-[var(--app-hint)]">{t('team.loading')}</div>
                     ) : visibleMessages.length === 0 ? (
                         <div className="py-6 text-center text-sm text-[var(--app-hint)]">{t('team.empty')}</div>
+                    ) : filter === 'all' ? (
+                        <div className="flex flex-col pb-2">
+                            {requirementGroups.map((group) => (
+                                <TeamRequirementCard
+                                    key={group.requirement?.id ?? 'unassigned'}
+                                    group={group}
+                                    members={members}
+                                    onReply={handleReply}
+                                />
+                            ))}
+                        </div>
                     ) : (
                         <TeamTimeline
                             messages={visibleMessages}
@@ -371,6 +427,18 @@ export function TeamChatPage() {
                         />
                     )}
                 </div>
+
+                {showJumpToLatest ? (
+                    <div className="flex justify-end px-3 pb-1">
+                        <button
+                            type="button"
+                            onClick={() => scrollToLatest('smooth')}
+                            className="rounded-full bg-[var(--app-fg)] px-3 py-1 text-[11px] font-medium text-[var(--app-bg)] shadow"
+                        >
+                            {t('team.jumpToLatest')}
+                        </button>
+                    </div>
+                ) : null}
 
                 {archived ? (
                     <div className="border-t border-[var(--app-divider)] px-3 py-3 text-center text-xs text-[var(--app-hint)]">
