@@ -114,6 +114,8 @@ curl -fsS -X POST https://team-hapi.aichickenfarm.cn/api/team/admin/recovery \
 
 响应里的 `inviteUrl` 就是要发给成员的一次性链接。邀请默认 24 小时有效，最长 7 天；链接本身包含秘密信息，请通过私聊发送。
 
+注意：链接是一次性的，**打开的瞬间即自动领取并作废**。不要自己先点开测试，也不要把同一条链接发给两个人；作废后只能重新生成。成员领取后如果 Token 没保存下来，用恢复链接（`/api/team/admin/recovery`，按 Namespace）重新签发。
+
 ## 安全边界
 
 - 成员 Token 只对应一个 Namespace，不能通过修改 Token 后缀访问其他 Namespace。

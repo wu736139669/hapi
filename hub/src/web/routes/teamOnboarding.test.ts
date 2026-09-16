@@ -50,6 +50,8 @@ describe('Team onboarding', () => {
             expect(html).toContain('Yolo')
             expect(html).toContain('/team-guide/new-session.png')
             expect(html).toContain('hapi runner start')
+            expect(html).toContain('这台设备已经领取过账号')
+            expect(html).toContain('每条链接只能用一次')
         } finally {
             store.close()
         }

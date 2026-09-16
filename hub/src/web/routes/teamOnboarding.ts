@@ -81,7 +81,7 @@ img.shot { display: block; max-width: 100%; height: auto; margin: 10px 0; border
 <section>
 <h1>Team HAPI</h1>
 <p class="muted">团队共享 Hub。每个人只能看到自己的会话和机器。</p>
-<div id="claim-status" class="muted">如果你是通过邀请链接打开的，页面会自动领取账号。</div>
+<div id="claim-status" class="muted">如果你是通过邀请链接打开的，页面会自动领取账号（链接是一次性的，打开即领取）。已经领取过的设备刷新本页仍会显示 Token。</div>
 <div id="claim-result"></div>
 </section>
 <section>
@@ -153,9 +153,26 @@ Team HAPI 地址：${safeOrigin}
 (() => {
   const status = document.getElementById('claim-status');
   const result = document.getElementById('claim-result');
+  const storageKey = 'hapi_access_token::' + location.origin;
+  let storedToken = null;
+  try { storedToken = localStorage.getItem(storageKey); } catch {}
+  const showSavedToken = (message) => {
+    status.className = 'muted';
+    status.textContent = message;
+    result.innerHTML = '';
+    const tokenLine = document.createElement('p');
+    tokenLine.className = 'token';
+    tokenLine.textContent = storedToken;
+    const openLine = document.createElement('p');
+    openLine.innerHTML = '<a class="button" href="/">打开 Team HAPI</a>';
+    result.append(tokenLine, openLine);
+  };
   const params = new URLSearchParams(location.hash.startsWith('#') ? location.hash.slice(1) : '');
   const invite = params.get('invite');
-  if (!invite) return;
+  if (!invite) {
+    if (storedToken) showSavedToken('这台设备已经领取过账号，Token 如下（请保存好）：');
+    return;
+  }
   status.textContent = '正在领取你的 Team HAPI 账号…';
   fetch('/api/team/onboarding/claim', {
     method: 'POST',
@@ -163,8 +180,12 @@ Team HAPI 地址：${safeOrigin}
     body: JSON.stringify({ invite })
   }).then(async response => {
     const body = await response.json().catch(() => ({}));
-    if (!response.ok || !body.accessToken) throw new Error(body.error || '邀请链接无效或已使用');
-    localStorage.setItem('hapi_access_token::' + location.origin, body.accessToken);
+    if (!response.ok || !body.accessToken) {
+      const error = new Error(body.error || '邀请链接无效或已使用');
+      error.status = response.status;
+      throw error;
+    }
+    try { localStorage.setItem(storageKey, body.accessToken); } catch {}
     const promptBlock = document.getElementById('codex-prompt');
     if (promptBlock) {
       promptBlock.textContent = promptBlock.textContent.split('【你的个人 Token】').join(body.accessToken);
@@ -175,8 +196,14 @@ Team HAPI 地址：${safeOrigin}
       + '<p><a class="button" href="/">打开 Team HAPI</a></p>';
     history.replaceState(null, '', location.pathname);
   }).catch(error => {
+    if (storedToken) {
+      showSavedToken('这个链接已经用过或过期了，但你在这台设备上已经领取过（Token 如下）：');
+      return;
+    }
     status.className = 'error';
-    status.textContent = error instanceof Error ? error.message : '邀请链接无效或已使用';
+    status.textContent = error && error.status === 410
+      ? '这个邀请链接已经用过或过期了。请联系管理员重新发一个（每条链接只能用一次）。'
+      : '领取失败，请检查网络后重试，或联系管理员。';
   });
 })();
 </script>
