@@ -1114,3 +1114,40 @@ describe('TeamService requirements', () => {
         }
     })
 })
+
+describe('TeamService requirement targets', () => {
+    it('honours explicit targets, forces new requirements and notifies on close', async () => {
+        const { runtime, sessions } = createRuntime()
+        const store = new TeamStore(':memory:')
+        const events: SyncEvent[] = []
+        const service = new TeamService(store, (event) => events.push(event), runtime)
+        addCallerSession(sessions)
+        try {
+            const team = service.createTeam('alpha', { name: 'Refactor auth', leadSessionId: 'sess-lead' })
+            const first = await service.sendHumanMessage('alpha', team.id, { text: '第一个需求' })
+            const firstId = first.meta?.requirementId as string
+            expect(typeof firstId).toBe('string')
+
+            // Explicit target attaches instead of opening a new requirement.
+            const second = await service.sendHumanMessage('alpha', team.id, { text: '补充到第一个', requirementId: firstId })
+            expect(second.meta?.requirementId).toBe(firstId)
+            expect(store.listRequirements(team.id)).toHaveLength(1)
+
+            // newRequirement forces a fresh one even when replying.
+            const third = await service.sendHumanMessage('alpha', team.id, {
+                text: '另起一个需求',
+                inReplyTo: first.seq,
+                newRequirement: true
+            })
+            expect(third.meta?.requirementId).not.toBe(firstId)
+            expect(store.listRequirements(team.id)).toHaveLength(2)
+
+            // Closing a requirement notifies the human out-of-band.
+            events.length = 0
+            await service.updateRequirement('sess-lead', 'alpha', firstId, { status: 'done', conclusion: 'done' })
+            expect(events.some((event) => event.type === 'team-attention')).toBe(true)
+        } finally {
+            service.close()
+        }
+    })
+})

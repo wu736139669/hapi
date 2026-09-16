@@ -9,7 +9,7 @@ import { useTeam } from '@/hooks/queries/useTeam'
 import { useTeamMessages } from '@/hooks/queries/useTeamMessages'
 import { useSession } from '@/hooks/queries/useSession'
 import { useSessionDirectory } from '@/hooks/queries/useSessionDirectory'
-import type { TeamMessage } from '@/types/team'
+import type { TeamMessage, TeamRequirement } from '@/types/team'
 import { pendingHumanDecisions } from '@/lib/teamMessageState'
 import { TeamTimeline } from './TeamTimeline'
 import { TeamSidePanel } from './TeamSidePanel'
@@ -52,6 +52,8 @@ export function TeamChatPage() {
     const [panelOpen, setPanelOpen] = useState(() => isWideViewport())
     const [memoryFilePath, setMemoryFilePath] = useState<string | null>(null)
     const [taskDialogId, setTaskDialogId] = useState<string | null>(null)
+    const [requirementTarget, setRequirementTarget] = useState<string>('auto')
+    const composerRef = useRef<HTMLTextAreaElement | null>(null)
     const [settingsOpen, setSettingsOpen] = useState(false)
 
     const members = detail?.members ?? []
@@ -173,6 +175,8 @@ export function TeamChatPage() {
                 to: to || undefined,
                 kind: 'chat',
                 ...(replyTo ? { inReplyTo: replyTo.seq } : {}),
+                ...(requirementTarget !== 'auto' && requirementTarget !== 'new' ? { requirementId: requirementTarget } : {}),
+                ...(requirementTarget === 'new' ? { newRequirement: true } : {}),
             })
             setDraft('')
             setReplyTo(null)
@@ -193,6 +197,19 @@ export function TeamChatPage() {
         if (message.fromSessionId) {
             setTo(message.fromSessionId)
         }
+    }
+
+    /** "补充说明": thread the next message under the requirement's first message. */
+    const handleAddNote = (requirement: TeamRequirement) => {
+        const first = requirementGroups.find((group) => group.requirement?.id === requirement.id)?.messages[0]
+        if (first) {
+            setReplyTo(first)
+        }
+        setRequirementTarget(requirement.id)
+        if (leadSessionId) {
+            setTo(leadSessionId)
+        }
+        composerRef.current?.focus()
     }
 
     const dismissDecision = useMutation({
@@ -414,7 +431,12 @@ export function TeamChatPage() {
                                     key={group.requirement?.id ?? 'unassigned'}
                                     group={group}
                                     members={members}
+                                    tasks={tasks.filter((task) => {
+                                        const metaRequirementId = task.meta && typeof task.meta.requirementId === 'string' ? task.meta.requirementId : null
+                                        return group.requirement ? metaRequirementId === group.requirement.id : metaRequirementId === null
+                                    })}
                                     onReply={handleReply}
+                                    onAddNote={handleAddNote}
                                 />
                             ))}
                         </div>
@@ -482,10 +504,25 @@ export function TeamChatPage() {
                                     </option>
                                 ))}
                         </select>
+                        <select
+                            value={requirementTarget}
+                            onChange={(event) => setRequirementTarget(event.target.value)}
+                            title={t('team.send.requirement')}
+                            className="max-w-[40%] rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-0.5 text-[11px] text-[var(--app-fg)]"
+                        >
+                            <option value="auto">{t('team.send.requirementAuto')}</option>
+                            <option value="new">{t('team.send.requirementNew')}</option>
+                            {(detail?.requirements ?? []).map((requirement) => (
+                                <option key={requirement.id} value={requirement.id}>
+                                    {requirement.title.slice(0, 24)}
+                                </option>
+                            ))}
+                        </select>
                         <span className="text-[11px] text-[var(--app-hint)]">{t('team.send.hint')}</span>
                     </div>
                     <div className="flex items-end gap-2">
                         <textarea
+                            ref={composerRef}
                             value={draft}
                             onChange={(event) => setDraft(event.target.value)}
                             onKeyDown={(event) => {

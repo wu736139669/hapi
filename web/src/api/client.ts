@@ -429,7 +429,14 @@ export class ApiClient {
 
     async sendHumanTeamMessage(
         teamId: string,
-        body: { text: string; to?: string; kind?: string; inReplyTo?: number }
+        body: {
+            text: string
+            to?: string
+            kind?: string
+            inReplyTo?: number
+            requirementId?: string
+            newRequirement?: boolean
+        }
     ): Promise<{ message: TeamMessage }> {
         return await this.request<{ message: TeamMessage }>(
             `/api/teams/${encodeURIComponent(teamId)}/human-messages`,

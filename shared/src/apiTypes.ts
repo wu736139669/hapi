@@ -576,7 +576,11 @@ export const TeamHumanMessageRequestSchema = z.object({
     to: z.string().min(1).max(200).optional(),
     kind: z.enum(['chat', 'status', 'question', 'task-update', 'decision']).optional(),
     /** Team message seq this human message answers (clears the decision inbox item). */
-    inReplyTo: z.number().int().positive().optional()
+    inReplyTo: z.number().int().positive().optional(),
+    /** File this message under an existing requirement. */
+    requirementId: z.string().min(1).optional(),
+    /** Force a new requirement even when a parent message could be inherited. */
+    newRequirement: z.boolean().optional()
 })
 
 export type TeamHumanMessageRequest = z.infer<typeof TeamHumanMessageRequestSchema>
