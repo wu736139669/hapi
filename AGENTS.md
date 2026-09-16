@@ -103,6 +103,11 @@ runner heartbeat compares the mtime of its own resolved exec path, which is
 fixed for the life of the process. A stale runner keeps old machine RPCs and
 capability flags, so hub features can fail with "restart the runner" errors.
 
+Remote Macs with the same layout: `scripts/deploy-remote.sh <ssh-target> [tag]`
+(signs locally, copies to a new versioned file, swaps the symlink, restarts the
+launchd job; label defaults to `com.hapi.runner`, override with
+`HAPI_REMOTE_LAUNCHD_LABEL`).
+
 Agent sessions must not run recursive `$HOME` sweeps (`find ~`, `du -sh ~`)
 without pruning TCC-protected folders (`~/Music`, `~/Pictures`, `~/Movies`,
 `~/Library`): a walk into `~/Music/Music/Media.localized` raises a spurious

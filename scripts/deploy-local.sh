@@ -11,7 +11,6 @@ stable="$bin_dir/hapi"
 stamp=$(date +%Y%m%d-%H%M%S)
 tag=${1:-}
 release="$bin_dir/hapi.$stamp${tag:+-$tag}"
-identity_file="$HOME/.hapi/signing-identity"
 
 if [ ! -x "$build" ]; then
     echo "error: build missing at $build; run 'bun run build:single-exe' first" >&2
@@ -20,35 +19,7 @@ fi
 
 mkdir -p "$bin_dir"
 
-# Stable identity keeps TCC grants across rebuilds. Ad-hoc signatures have no
-# identity, so macOS re-asks every protected permission after each build.
-# Resolution order: HAPI_SIGN_IDENTITY > stored SHA-1 > first Apple Development.
-identity=${HAPI_SIGN_IDENTITY:-}
-if [ -z "$identity" ]; then
-    if [ -s "$identity_file" ]; then
-        identity=$(cat "$identity_file")
-    fi
-    if [ -n "$identity" ] && ! security find-identity -v -p codesigning 2>/dev/null | grep -qF "$identity"; then
-        echo "warning: stored signing identity is gone; re-detecting" >&2
-        identity=""
-    fi
-    if [ -z "$identity" ]; then
-        identity=$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development/ { print $2; exit }')
-    fi
-    if [ -z "$identity" ]; then
-        echo "warning: no Apple Development identity found; ad-hoc signing will re-prompt TCC on every build" >&2
-        identity=-
-    else
-        printf '%s\n' "$identity" > "$identity_file"
-    fi
-fi
-echo "signing identity: $identity"
-
-# Bun's linker signature is not suitable after installation; re-sign once.
-codesign --remove-signature "$build" 2>/dev/null || true
-codesign --force --sign "$identity" --identifier run.hapi.cli "$build"
-codesign --verify --deep --strict "$build"
-echo "signed build ok"
+bash scripts/sign-build.sh "$build"
 
 # -p preserves the mtime covered by the code-signature cache.
 cp -p "$build" "$release"

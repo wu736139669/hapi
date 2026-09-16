@@ -154,3 +154,19 @@ launchctl kickstart -k "gui/$(id -u)/com.hapi.hub"
 Never use `cp`, `mv`, or `codesign` on the stable symlink target after the
 launch agent has been started. Keep versioned binaries until the replacement
 has been running and verified.
+
+### Remote machines
+
+Macs that run the same layout (versioned binary + `~/.hapi/bin/hapi` symlink +
+a supervised runner) are updated from here over SSH:
+
+```bash
+scripts/deploy-remote.sh <ssh-target> [tag]     # e.g. scripts/deploy-remote.sh k2lab stable-signing
+```
+
+The script signs the build with the same pinned identity, copies it to a new
+versioned file, swaps the symlink, restarts the launchd job (`com.hapi.runner`
+by default; override with `HAPI_REMOTE_LAUNCHD_LABEL`), and verifies the runner
+executes the new file. Running sessions survive; roll back by restoring the
+previous symlink and kicking the job again. The remote host needs no build
+toolchain — it only receives the signed binary.
