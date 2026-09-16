@@ -481,11 +481,24 @@ export class ApiClient {
 
     async updateTeam(
         teamId: string,
-        body: { name?: string; status?: 'active' | 'archived'; leadSessionId?: string | null }
+        body: {
+            name?: string
+            status?: 'active' | 'archived'
+            leadSessionId?: string | null
+            config?: { budget?: { maxMembers?: number; maxMessagesPerMinute?: number; maxChainDepth?: number } }
+        }
     ): Promise<{ team: TeamSummary }> {
         return await this.request<{ team: TeamSummary }>(
             `/api/teams/${encodeURIComponent(teamId)}`,
             { method: 'PATCH', body: JSON.stringify(body) }
+        )
+    }
+
+    async removeTeamMember(teamId: string, sessionId: string, stopSession: boolean): Promise<{ ok: boolean }> {
+        const query = stopSession ? '?stopSession=1' : ''
+        return await this.request<{ ok: boolean }>(
+            `/api/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(sessionId)}${query}`,
+            { method: 'DELETE' }
         )
     }
 

@@ -992,3 +992,22 @@ describe('TeamService agent tokens', () => {
         }
     })
 })
+
+describe('TeamService settings', () => {
+    it('merges budget updates into the team config', () => {
+        const service = new TeamService(new TeamStore(':memory:'), () => {}, createRuntime().runtime)
+        try {
+            const team = service.createTeam('alpha', {
+                name: 'Refactor auth',
+                config: { template: 'refactor', budget: { maxMessagesPerMinute: 10 } }
+            })
+            const updated = service.updateTeamMeta('alpha', team.id, { budget: { maxMembers: 12 } })
+            expect(updated.config).toMatchObject({
+                template: 'refactor',
+                budget: { maxMessagesPerMinute: 10, maxMembers: 12 }
+            })
+        } finally {
+            service.close()
+        }
+    })
+})

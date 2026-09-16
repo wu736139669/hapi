@@ -525,14 +525,26 @@ export const CreateTeamTaskRequestSchema = z.object({
 
 export type CreateTeamTaskRequest = z.infer<typeof CreateTeamTaskRequestSchema>
 
+/** Adjustable per-team budget (all fields optional, merged on update). */
+export const TeamBudgetUpdateSchema = z.object({
+    maxMembers: z.number().int().min(2).max(64).optional(),
+    maxMessagesPerMinute: z.number().int().min(1).max(600).optional(),
+    maxChainDepth: z.number().int().min(1).max(50).optional()
+})
+
+export type TeamBudgetUpdate = z.infer<typeof TeamBudgetUpdateSchema>
+
 export const UpdateTeamRequestSchema = z.object({
     name: z.string().min(1).max(200).optional(),
     status: z.enum(['active', 'archived']).optional(),
     /** Set (or clear) the lead session. */
-    leadSessionId: z.string().min(1).nullable().optional()
+    leadSessionId: z.string().min(1).nullable().optional(),
+    /** Merge into the team config (currently only `budget` is supported). */
+    config: z.object({ budget: TeamBudgetUpdateSchema.optional() }).optional()
 }).refine(
-    (value) => value.name !== undefined || value.status !== undefined || value.leadSessionId !== undefined,
-    { message: 'name, status or leadSessionId is required' }
+    (value) => value.name !== undefined || value.status !== undefined
+        || value.leadSessionId !== undefined || value.config !== undefined,
+    { message: 'name, status, leadSessionId or config is required' }
 )
 
 export type UpdateTeamRequest = z.infer<typeof UpdateTeamRequestSchema>

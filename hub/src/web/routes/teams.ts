@@ -168,6 +168,17 @@ export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
         }
     })
 
+    app.delete('/teams/:id/members/:sessionId', async (c) => {
+        const stopSession = c.req.query('stopSession') === '1'
+        try {
+            await teams.removeMember(c.get('namespace'), c.req.param('id'), c.req.param('sessionId'), { stopSession })
+            c.header('Cache-Control', 'no-store')
+            return c.json({ ok: true })
+        } catch (error) {
+            return teamErrorResponse(c, error)
+        }
+    })
+
     app.post('/teams/:id/agent-tokens', async (c) => {
         const json = await c.req.json().catch(() => ({}))
         const parsed = IssueTeamAgentTokenRequestSchema.safeParse(json ?? {})
@@ -229,7 +240,8 @@ export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
             const team = teams.updateTeamMeta(c.get('namespace'), c.req.param('id'), {
                 ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
                 ...(parsed.data.status !== undefined ? { status: parsed.data.status } : {}),
-                ...(parsed.data.leadSessionId !== undefined ? { leadSessionId: parsed.data.leadSessionId } : {})
+                ...(parsed.data.leadSessionId !== undefined ? { leadSessionId: parsed.data.leadSessionId } : {}),
+                ...(parsed.data.config?.budget !== undefined ? { budget: parsed.data.config.budget } : {})
             })
             c.header('Cache-Control', 'no-store')
             return c.json({ team })

@@ -291,6 +291,12 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
             }
             await syncEngine.sendMessage(sessionId, { text, sentFrom: 'team' })
         },
+        archiveSession: async (sessionId) => {
+            if (!syncEngine) {
+                return
+            }
+            await syncEngine.archiveSession(sessionId)
+        },
         sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms))
     }
     teamService = config.teamsEnabled
