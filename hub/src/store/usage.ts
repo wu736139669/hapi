@@ -25,6 +25,24 @@ export type UsageScanState = {
     lastSeq: number
 }
 
+/**
+ * Absolute per-(day, model) usage snapshot for a session, produced by the
+ * offline reconciliation job (see sync/usageReconciliation.ts) rather than by
+ * the live message pipeline. Values are totals, never deltas: replacing a
+ * session's rows is idempotent, so the job can re-run at any cadence.
+ */
+export type ReconciledUsageRow = {
+    sessionId: string
+    day: string
+    model: string
+    agent: string
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens: number
+    cacheCreationTokens: number
+    requests: number
+}
+
 type UsageEventRow = {
     namespace: string
     session_id: string
@@ -301,5 +319,135 @@ export function transferUsageSession(db: Database, fromSessionId: string, toSess
         `).run(toSessionId, toSessionId, fromSessionId)
         db.prepare('DELETE FROM usage_events WHERE session_id = ?').run(fromSessionId)
         db.prepare('DELETE FROM usage_scan_state WHERE session_id IN (?, ?)').run(fromSessionId, toSessionId)
+        db.prepare(`
+            INSERT OR REPLACE INTO usage_reconciliation (
+                namespace,
+                session_id,
+                day,
+                model,
+                agent,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_creation_tokens,
+                requests,
+                updated_at
+            )
+            SELECT
+                ?,
+                ?,
+                day,
+                model,
+                agent,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_creation_tokens,
+                requests,
+                updated_at
+            FROM usage_reconciliation
+            WHERE session_id = ?
+        `).run(
+            (db.prepare('SELECT namespace FROM sessions WHERE id = ?').get(toSessionId) as { namespace: string } | undefined)?.namespace ?? 'default',
+            toSessionId,
+            fromSessionId
+        )
+        db.prepare('DELETE FROM usage_reconciliation WHERE session_id = ?').run(fromSessionId)
     })()
+}
+
+/** Replace a session's reconciliation snapshot, deleting any previous rows. */
+export function replaceReconciledUsage(
+    db: Database,
+    namespace: string,
+    sessionId: string,
+    rows: ReconciledUsageRow[],
+    updatedAt: number
+): void {
+    db.transaction(() => {
+        db.prepare('DELETE FROM usage_reconciliation WHERE session_id = ?').run(sessionId)
+        if (rows.length === 0) return
+        const statement = db.prepare(`
+            INSERT INTO usage_reconciliation (
+                namespace,
+                session_id,
+                day,
+                model,
+                agent,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_creation_tokens,
+                requests,
+                updated_at
+            ) VALUES (
+                @namespace,
+                @session_id,
+                @day,
+                @model,
+                @agent,
+                @input_tokens,
+                @output_tokens,
+                @cache_read_tokens,
+                @cache_creation_tokens,
+                @requests,
+                @updated_at
+            )
+        `)
+        for (const row of rows) {
+            statement.run({
+                namespace,
+                session_id: row.sessionId,
+                day: row.day,
+                model: row.model,
+                agent: row.agent,
+                input_tokens: row.inputTokens,
+                output_tokens: row.outputTokens,
+                cache_read_tokens: row.cacheReadTokens,
+                cache_creation_tokens: row.cacheCreationTokens,
+                requests: row.requests,
+                updated_at: updatedAt
+            })
+        }
+    })()
+}
+
+export function getReconciledUsageByNamespace(db: Database, namespace: string): ReconciledUsageRow[] {
+    const rows = db.prepare(`
+        SELECT
+            session_id,
+            day,
+            model,
+            agent,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            requests
+        FROM usage_reconciliation
+        WHERE namespace = ?
+        ORDER BY day ASC, session_id ASC, model ASC
+    `).all(namespace) as Array<{
+        session_id: string
+        day: string
+        model: string
+        agent: string
+        input_tokens: number
+        output_tokens: number
+        cache_read_tokens: number
+        cache_creation_tokens: number
+        requests: number
+    }>
+
+    return rows.map((row) => ({
+        sessionId: row.session_id,
+        day: row.day,
+        model: row.model,
+        agent: row.agent,
+        inputTokens: row.input_tokens,
+        outputTokens: row.output_tokens,
+        cacheReadTokens: row.cache_read_tokens,
+        cacheCreationTokens: row.cache_creation_tokens,
+        requests: row.requests
+    }))
 }

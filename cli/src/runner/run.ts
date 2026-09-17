@@ -19,6 +19,7 @@ import { PERMISSION_MODES } from '@hapi/protocol/modes';
 import { RUNNER_CAPABILITIES } from '@hapi/protocol';
 import { withRetry } from '@/utils/time';
 import { isRetryableConnectionError } from '@/utils/errorUtils';
+import { startOpencodeUsageScanner } from './opencodeUsageScanner';
 
 import { cleanupRunnerState, getInstalledCliMtimeMs, isRunnerRunningCurrentlyInstalledHappyVersion, stopRunner, waitForRunnerHandoff } from './controlClient';
 import { startRunnerControlServer } from './controlServer';
@@ -1164,6 +1165,12 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
     // Connect to server
     apiMachine.connect();
+    // Report this machine's OpenCode usage snapshots so the hub's token
+    // dashboard does not under-count tool-loop turns on non-hub machines.
+    // The scan reads the local OpenCode store; best-effort, never blocks.
+    const opencodeUsageScanner = startOpencodeUsageScanner({
+      report: (sessions) => apiMachine.reportOpencodeUsage(sessions)
+    });
     scheduleCursorModelsPrewarm();
 
     // Visible startup banner. Use console.log so it always appears on stdout,
@@ -1429,6 +1436,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         clearInterval(restartOnStaleVersionAndHeartbeat);
         logger.debug('[RUNNER RUN] Health check interval cleared');
       }
+      opencodeUsageScanner.stop();
 
       // Update runner state before shutting down
       await apiMachine.updateRunnerState((state: RunnerState | null) => ({

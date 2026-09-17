@@ -9,6 +9,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath }
 import { logger } from '@/ui/logger'
 import { configuration } from '@/configuration'
 import type { ClientToServerEvents, ServerToClientEvents, Update, UpdateMachineBody } from '@hapi/protocol'
+import type { OpencodeUsageSessionReport } from '@hapi/protocol/usage'
 import {
     ArchiveCodexSessionRpcRequestSchema,
     ListClaudeSessionsRpcRequestSchema,
@@ -647,6 +648,14 @@ export class ApiMachineClient {
                 versionMismatchMessage: 'Runner state version mismatch'
             })
         })
+    }
+
+    /**
+     * Report this machine's OpenCode usage snapshots to the hub. Best-effort:
+     * a dropped report is re-sent by the next scan interval.
+     */
+    reportOpencodeUsage(sessions: OpencodeUsageSessionReport[]): void {
+        this.socket.emit('opencode-usage-report', { machineId: this.machine.id, sessions })
     }
 
     connect(): void {

@@ -124,6 +124,7 @@ export class Store {
         this.db.exec('PRAGMA busy_timeout = 5000')
         this.initSchema()
         this.ensureSessionShareSchema()
+        this.ensureUsageReconciliationSchema()
 
         if (dbPath !== ':memory:' && !dbPath.startsWith('file::memory:')) {
             for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
@@ -1245,6 +1246,36 @@ export class Store {
                 ON session_shares(session_id, namespace, updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_session_shares_namespace
                 ON session_shares(namespace, updated_at DESC);
+        `)
+    }
+
+    /**
+     * Additive table for the offline usage reconciliation snapshots. Created
+     * outside the migration ladder on purpose: it is derived data (like
+     * session_shares) and an older hub build must keep opening this database
+     * untouched, so the schema version is not bumped. The live pipeline keeps
+     * its own `usage_events` ledger; the summary prefers reconciliation rows
+     * for reconciled sessions and never mixes both sources. See
+     * sync/usageReconciliation.ts.
+     */
+    private ensureUsageReconciliationSchema(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS usage_reconciliation (
+                namespace TEXT NOT NULL DEFAULT 'default',
+                session_id TEXT NOT NULL,
+                day TEXT NOT NULL,
+                model TEXT NOT NULL,
+                agent TEXT NOT NULL,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                requests INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (session_id, day, model)
+            );
+            CREATE INDEX IF NOT EXISTS idx_usage_reconciliation_namespace_day
+                ON usage_reconciliation(namespace, day);
         `)
     }
 

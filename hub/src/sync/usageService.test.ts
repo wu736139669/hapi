@@ -866,4 +866,62 @@ describe('usage service', () => {
         expect(store.usage.getEvents([target.id])).toHaveLength(1)
         store.close()
     })
+
+    it('prefers reconciliation snapshots over live events for the same session', () => {
+        const store = new Store(':memory:')
+        const reconciled = store.sessions.getOrCreateSession(
+            'opencode-reconciled-session',
+            { path: '/tmp', host: 'test', flavor: 'opencode', opencodeSessionId: 'ses_reconciled' },
+            null,
+            'default',
+            'opencode-go/deepseek-v4.1-flash'
+        )
+        const liveOnly = store.sessions.getOrCreateSession(
+            'opencode-live-session',
+            { path: '/tmp', host: 'test', flavor: 'opencode' },
+            null,
+            'default',
+            'opencode-go/deepseek-v4.1-flash'
+        )
+
+        const liveUsage = {
+            type: 'codex',
+            data: {
+                type: 'token_count',
+                usageSchema: 'hapi.usage.v1',
+                inputTokenSemantics: 'includes-cache',
+                info: { total: { inputTokens: 180, outputTokens: 5, cachedInputTokens: 80 } }
+            }
+        }
+        addAgentMessage(store, reconciled.id, liveUsage)
+        addAgentMessage(store, liveOnly.id, liveUsage)
+
+        store.usage.replaceReconciled(reconciled.id, 'default', [{
+            sessionId: reconciled.id,
+            day: '2026-09-17',
+            model: 'opencode-go/deepseek-v4.1-flash',
+            agent: 'opencode',
+            inputTokens: 5_000,
+            outputTokens: 200,
+            cacheReadTokens: 4_700,
+            cacheCreationTokens: 0,
+            requests: 42
+        }], Date.now())
+
+        const result = getUsageSummary(store, 'default', 'all')
+        // Reconciled session contributes its snapshot only; the live-only
+        // session keeps the message-derived totals.
+        expect(result.totals.inputTokens).toBe(5_000 + 180)
+        expect(result.totals.outputTokens).toBe(200 + 5)
+        expect(result.totals.cacheReadTokens).toBe(4_700 + 80)
+        expect(result.totals.requests).toBe(42 + 1)
+        expect(result.totals.totalTokens).toBe(5_200 + 185)
+        expect(result.totals.uncachedTokens).toBe(300 + 200 + 100 + 5)
+        expect(result.byModel.find((row) => row.key === 'opencode-go/deepseek-v4.1-flash')).toMatchObject({
+            inputTokens: 5_180,
+            requests: 43
+        })
+        expect(result.totals.sessions).toBe(2)
+        store.close()
+    })
 })

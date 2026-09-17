@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { CodexCollaborationMode, PermissionMode } from './modes'
 import type { CopilotAgentMode } from './copilotModes'
 import type { SessionEndReason } from './schemas'
+import type { OpencodeUsageMachineReportPayload } from './usage'
 export { SessionEndReasonSchema, type SessionEndReason } from './schemas'
 
 export type SocketErrorReason = 'namespace-missing' | 'access-denied' | 'not-found'
@@ -296,5 +297,10 @@ export interface ClientToServerEvents {
     // spawned, e.g. after archive→restart, so old output must not replay).
     'agent-terminal:reset': (data: { sessionId: string }) => void
     ping: (callback: () => void) => void
-    'usage-report': (data: unknown) => void
+    /**
+     * Absolute OpenCode usage snapshots read from this machine's own OpenCode
+     * store. The hub stores them as reconciliation rows; they never flow
+     * through the chat pipeline.
+     */
+    'opencode-usage-report': (data: OpencodeUsageMachineReportPayload) => void
 }

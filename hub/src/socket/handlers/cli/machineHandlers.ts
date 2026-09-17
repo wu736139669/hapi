@@ -35,6 +35,29 @@ const machineUpdateStateSchema = z.object({
     runnerState: z.unknown().nullable()
 })
 
+/**
+ * Absolute OpenCode usage snapshots read from the reporting machine's own
+ * store (the hub cannot read another machine's OpenCode store). Each entry
+ * replaces the matching HAPI session's reconciliation snapshot; entries are
+ * matched by the OpenCode session id recorded in the session metadata.
+ * Reports never flow through the chat pipeline.
+ */
+const opencodeUsageReportSchema = z.object({
+    machineId: z.string().min(1),
+    sessions: z.array(z.object({
+        opencodeSessionId: z.string().min(1),
+        rows: z.array(z.object({
+            day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+            model: z.string().min(1).max(200),
+            inputTokens: z.number().int().nonnegative(),
+            outputTokens: z.number().int().nonnegative(),
+            cacheReadTokens: z.number().int().nonnegative(),
+            cacheCreationTokens: z.number().int().nonnegative(),
+            requests: z.number().int().nonnegative()
+        })).max(1000)
+    })).max(500)
+})
+
 export type MachineHandlersDeps = {
     store: Store
     resolveMachineAccess: ResolveMachineAccess
@@ -159,4 +182,43 @@ export function registerMachineHandlers(socket: CliSocketWithData, deps: Machine
 
     socket.on('machine-update-metadata', handleMachineMetadataUpdate)
     socket.on('machine-update-state', handleMachineStateUpdate)
+
+    socket.on('opencode-usage-report', (data) => {
+        const parsed = opencodeUsageReportSchema.safeParse(data)
+        if (!parsed.success) return
+        const { machineId, sessions } = parsed.data
+        const machineAccess = resolveMachineAccess(machineId)
+        if (!machineAccess.ok) {
+            emitAccessError('machine', machineId, machineAccess.reason)
+            return
+        }
+        const namespace = machineAccess.value.namespace
+
+        // Map the machine's OpenCode session ids onto HAPI sessions once per
+        // report; the runner reports every session in its store, including
+        // ones whose process already exited.
+        const sessionIdByOpencodeId = new Map<string, string>()
+        for (const session of store.sessions.getSessionsByNamespace(namespace)) {
+            const metadata = session.metadata !== null && typeof session.metadata === 'object' && !Array.isArray(session.metadata)
+                ? session.metadata as Record<string, unknown>
+                : null
+            const opencodeSessionId = metadata && typeof metadata.opencodeSessionId === 'string'
+                ? metadata.opencodeSessionId
+                : null
+            if (opencodeSessionId) sessionIdByOpencodeId.set(opencodeSessionId, session.id)
+        }
+
+        const now = Date.now()
+        for (const entry of sessions) {
+            if (entry.rows.length === 0) continue
+            const sessionId = sessionIdByOpencodeId.get(entry.opencodeSessionId)
+            if (!sessionId) continue
+            store.usage.replaceReconciled(
+                sessionId,
+                namespace,
+                entry.rows.map((row) => ({ ...row, sessionId, agent: 'opencode' as const })),
+                now
+            )
+        }
+    })
 }

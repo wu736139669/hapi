@@ -1,11 +1,14 @@
 import type { Database } from 'bun:sqlite'
 
 import {
+    getReconciledUsageByNamespace,
     getUsageEvents,
     getUsageEventsByNamespace,
     getUsageScanStates,
     recordUsageScan,
+    replaceReconciledUsage,
     transferUsageSession,
+    type ReconciledUsageRow,
     type UsageEvent,
     type UsageScanState
 } from './usage'
@@ -38,5 +41,13 @@ export class UsageStore {
 
     transferSession(fromSessionId: string, toSessionId: string): void {
         transferUsageSession(this.db, fromSessionId, toSessionId)
+    }
+
+    replaceReconciled(sessionId: string, namespace: string, rows: ReconciledUsageRow[], updatedAt: number): void {
+        replaceReconciledUsage(this.db, namespace, sessionId, rows, updatedAt)
+    }
+
+    getReconciledByNamespace(namespace: string): ReconciledUsageRow[] {
+        return getReconciledUsageByNamespace(this.db, namespace)
     }
 }

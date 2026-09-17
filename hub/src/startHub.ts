@@ -22,6 +22,7 @@ import { IosPushService } from './push-ios/iosPushService'
 import { IosPushNotificationChannel } from './push-ios/iosPushChannel'
 import { resolveIosPushConfig } from './push-ios/iosPushConfig'
 import { VisibilityTracker } from './visibility/visibilityTracker'
+import { startOpencodeUsageReconciliation, type UsageReconciliationJob } from './sync/usageReconciliation'
 import { TunnelManager } from './tunnel'
 import { refreshRejectedRelayAuthKey, resolveRelayAuthKey } from './tunnel/relayAuth'
 import { waitForTunnelTlsReady } from './tunnel/tlsGate'
@@ -122,6 +123,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     let visibilityTracker: VisibilityTracker | null = null
     let notificationHub: NotificationHub | null = null
     let tunnelManager: TunnelManager | null = null
+    let usageReconciliation: UsageReconciliationJob | null = null
 
     // Load configuration (async - loads from env/file with persistence)
     const relayApiDomain = process.env.HAPI_RELAY_API || 'relay.hapi.run'
@@ -183,6 +185,9 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     }
 
     const store = new Store(config.dbPath)
+    // Periodic offline usage reconciliation (OpenCode reports only the final
+    // step of a turn through the live pipeline; see usageReconciliation.ts).
+    usageReconciliation = startOpencodeUsageReconciliation(store)
     const jwtSecret = await getOrCreateJwtSecret()
     const vapidKeys = await getOrCreateVapidKeys(config.dataDir)
     const vapidSubject = process.env.VAPID_SUBJECT ?? 'mailto:admin@hapi.run'
@@ -511,6 +516,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
 
     return {
         stop: async () => {
+            usageReconciliation?.stop()
             await tunnelManager?.stop()
             await happyBot?.stop()
             notificationHub?.stop()

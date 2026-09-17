@@ -279,7 +279,14 @@ function emptyTotals(): Totals {
     }
 }
 
-function addTotals(target: Totals, inputTokens: number, outputTokens: number, cacheReadTokens: number, cacheCreationTokens: number): void {
+function addTotals(
+    target: Totals,
+    inputTokens: number,
+    outputTokens: number,
+    cacheReadTokens: number,
+    cacheCreationTokens: number,
+    requests: number = 1
+): void {
     target.inputTokens += inputTokens
     target.outputTokens += outputTokens
     target.cacheReadTokens += cacheReadTokens
@@ -288,7 +295,7 @@ function addTotals(target: Totals, inputTokens: number, outputTokens: number, ca
     // input_tokens excludes cache fields and is normalized before this call.
     target.totalTokens += inputTokens + outputTokens
     target.uncachedTokens += Math.max(0, inputTokens - cacheReadTokens) + outputTokens
-    target.requests += 1
+    target.requests += requests
 }
 
 type UsageSnapshot = [number, number, number, number]
@@ -348,6 +355,12 @@ export function getUsageSummary(
     // Read the durable namespace ledger rather than only live session ids;
     // usage rows intentionally survive session deletion.
     const events = store.usage.getEventsByNamespace(namespace)
+    // OpenCode snapshot rows below replace the live OpenCode events of the
+    // same session: the live pipeline under-counts turns that report usage
+    // only for their final step, and mixing both sources would double count
+    // the steps it did see. See usageReconciliation.ts.
+    const reconciledRows = store.usage.getReconciledByNamespace(namespace)
+    const reconciledSessionIds = new Set(reconciledRows.map((row) => row.sessionId))
     const isInRange = (event: UsageEvent) => (from === null || event.createdAt >= from) && event.createdAt <= now
 
     const totals = emptyTotals()
@@ -413,6 +426,10 @@ export function getUsageSummary(
             }
         }
         if (duplicateCumulativeEvent || !isInRange(event) || inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens <= 0) continue
+        // Skip only the live OpenCode rows of a reconciled session: the
+        // snapshot replaces them. Other agents' events on the same session
+        // (e.g. after a flavor switch) still count.
+        if (event.agent === 'opencode' && reconciledSessionIds.has(event.sessionId)) continue
         // Cache reads and writes partition processed input. Preserve the
         // request and its primary token counts when a provider emits an
         // impossible partition, but conservatively decline to credit either
@@ -434,6 +451,28 @@ export function getUsageSummary(
         addTotals(modelTotals, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens)
         byModel.set(modelKey, modelTotals)
         sessionsWithUsage.add(event.sessionId)
+    }
+
+    // Reconciliation rows are absolute per-day totals, so range filtering
+    // compares day keys rather than event timestamps. Snapshot days are keyed
+    // in the hub's local timezone; when the request asks for another timezone
+    // the daily bucket boundary can drift by at most one day.
+    const fromDayKey = from === null ? null : dayKey(from, dayFormatter)
+    const nowDayKey = dayKey(now, dayFormatter)
+    for (const row of reconciledRows) {
+        if (fromDayKey !== null && row.day < fromDayKey) continue
+        if (row.day > nowDayKey) continue
+        addTotals(totals, row.inputTokens, row.outputTokens, row.cacheReadTokens, row.cacheCreationTokens, row.requests)
+        const dailyTotals = daily.get(row.day) ?? emptyTotals()
+        addTotals(dailyTotals, row.inputTokens, row.outputTokens, row.cacheReadTokens, row.cacheCreationTokens, row.requests)
+        daily.set(row.day, dailyTotals)
+        const agentTotals = byAgent.get(row.agent) ?? emptyTotals()
+        addTotals(agentTotals, row.inputTokens, row.outputTokens, row.cacheReadTokens, row.cacheCreationTokens, row.requests)
+        byAgent.set(row.agent, agentTotals)
+        const modelTotals = byModel.get(row.model) ?? emptyTotals()
+        addTotals(modelTotals, row.inputTokens, row.outputTokens, row.cacheReadTokens, row.cacheCreationTokens, row.requests)
+        byModel.set(row.model, modelTotals)
+        sessionsWithUsage.add(row.sessionId)
     }
 
     const sortBuckets = (values: Map<string, Totals>): UsageSummaryBucket[] => Array.from(values.entries())
