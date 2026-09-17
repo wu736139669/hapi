@@ -20,7 +20,7 @@ import { TeamSettingsDialog } from './TeamSettingsDialog'
 import { TeamTaskDialog } from './TeamTaskDialog'
 import { memberStatusLabel, statusDotClass } from './teamStatus'
 
-type Filter = 'all' | 'key' | 'task'
+type Filter = 'timeline' | 'requirements' | 'key' | 'task'
 
 function isKeyMessage(message: TeamMessage, leadSessionId: string | null): boolean {
     if (message.fromKind === 'human') return true
@@ -43,7 +43,7 @@ export function TeamChatPage() {
     const { detail, isLoading, error } = useTeam(api, teamId)
     const { messages, error: messagesError } = useTeamMessages(api, teamId)
 
-    const [filter, setFilter] = useState<Filter>('all')
+    const [filter, setFilter] = useState<Filter>('timeline')
     const [taskId, setTaskId] = useState<string>('')
     const [draft, setDraft] = useState('')
     const [to, setTo] = useState<string>('')
@@ -380,7 +380,7 @@ export function TeamChatPage() {
                 </div>
 
                 <div className="flex items-center gap-2 border-b border-[var(--app-divider)] px-3 py-1.5">
-                    {(['all', 'key', 'task'] as const).map((value) => (
+                    {(['timeline', 'requirements', 'key', 'task'] as const).map((value) => (
                         <button
                             key={value}
                             type="button"
@@ -391,7 +391,7 @@ export function TeamChatPage() {
                                     : 'bg-[var(--app-subtle-bg)] text-[var(--app-hint)] hover:text-[var(--app-fg)]'
                             }`}
                         >
-                            {value === 'all' ? t('team.filter.all') : value === 'key' ? t('team.filter.key') : t('team.filter.task')}
+                            {t(`team.filter.${value}`)}
                         </button>
                     ))}
                     {filter === 'task' ? (
@@ -424,7 +424,7 @@ export function TeamChatPage() {
                         <div className="py-6 text-center text-sm text-[var(--app-hint)]">{t('team.loading')}</div>
                     ) : visibleMessages.length === 0 ? (
                         <div className="py-6 text-center text-sm text-[var(--app-hint)]">{t('team.empty')}</div>
-                    ) : filter === 'all' ? (
+                    ) : filter === 'requirements' ? (
                         <div className="flex flex-col pb-2">
                             {requirementGroups.map((group) => (
                                 <TeamRequirementCard
