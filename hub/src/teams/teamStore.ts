@@ -560,6 +560,14 @@ export class TeamStore {
         return result.changes
     }
 
+    /** Every team across namespaces (startup backfill). */
+    listAllTeams(): TeamRecord[] {
+        const rows = this.db.prepare(
+            'SELECT id, namespace, name, status, lead_session_id, config, created_at, updated_at FROM teams ORDER BY created_at ASC'
+        ).all() as TeamRow[]
+        return rows.map(mapTeamRow)
+    }
+
     // -------------------------------------------------------- requirements
 
     createRequirement(input: {
@@ -568,8 +576,10 @@ export class TeamStore {
         body?: string | null
         createdBySessionId?: string | null
         id?: string
+        /** Backfill uses the original ask time so ordering stays truthful. */
+        createdAt?: number
     }): TeamRequirementRecord {
-        const now = Date.now()
+        const now = input.createdAt ?? Date.now()
         const record: TeamRequirementRecord = {
             id: input.id ?? crypto.randomUUID(),
             teamId: input.teamId,

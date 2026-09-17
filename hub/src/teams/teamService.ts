@@ -357,7 +357,7 @@ export class TeamService {
         // ask opens a new requirement so the timeline can group the work that
         // follows under "requirement -> process -> conclusion".
         let requirementId = input.newRequirement ? null : this.resolveRequirementId(team.id, input)
-        if (!requirementId && input.fromKind === 'human') {
+        if (!requirementId && input.fromKind === 'human' && !isAcknowledgement(input.text)) {
             requirementId = this.store.createRequirement({
                 teamId: team.id,
                 title: requirementTitle(input.text),
@@ -655,7 +655,7 @@ export class TeamService {
             toKind: 'broadcast',
             kind: 'task-update',
             text: `任务「${updated.title}」${changes.join('，')}（${fromRole}）${deliverable ? `｜交付物：${deliverable.slice(0, 200)}` : ''}`,
-            meta: { taskId: updated.id, fromRole, ...(deliverable ? { deliverable } : {}) }
+            meta: { taskId: updated.id, fromRole, status: updated.status, ...(deliverable ? { deliverable } : {}) }
         })
         this.publishUpdate(team)
 
@@ -779,6 +779,71 @@ export class TeamService {
             })
         }
         return updated
+    }
+
+    /**
+     * One-time, idempotent backfill for teams whose history predates the
+     * requirement layer: each fresh human ask becomes a requirement and the
+     * messages/tasks that follow are filed under it (by time window). Messages
+     * that already carry a requirementId are never touched.
+     */
+    backfillRequirements(): { teams: number; requirements: number; messages: number; tasks: number } {
+        const result = { teams: 0, requirements: 0, messages: 0, tasks: 0 }
+        for (const team of this.store.listAllTeams()) {
+            const messages = this.store.listMessages(team.id, { limit: 5000 })
+            if (messages.length === 0) {
+                continue
+            }
+            let current: { id: string; at: number } | null = null
+            const anchors: Array<{ id: string; at: number }> = []
+            for (const message of messages) {
+                const existing = message.meta && typeof message.meta.requirementId === 'string' ? message.meta.requirementId : null
+                if (existing) {
+                    current = { id: existing, at: message.createdAt }
+                    continue
+                }
+                const isFreshAsk = message.fromKind === 'human'
+                    && !(message.meta && typeof message.meta.inReplyTo === 'number')
+                    && !isAcknowledgement(message.text)
+                if (isFreshAsk) {
+                    const requirement = this.store.createRequirement({
+                        teamId: team.id,
+                        title: requirementTitle(message.text),
+                        body: message.text,
+                        createdAt: message.createdAt
+                    })
+                    current = { id: requirement.id, at: message.createdAt }
+                    anchors.push(current)
+                    this.store.updateMessageMeta(team.id, message.seq, { requirementId: requirement.id })
+                    result.requirements += 1
+                    result.messages += 1
+                    continue
+                }
+                if (current) {
+                    this.store.updateMessageMeta(team.id, message.seq, { requirementId: current.id })
+                    result.messages += 1
+                }
+            }
+            if (anchors.length > 0) {
+                result.teams += 1
+                for (const task of this.store.listTasks(team.id)) {
+                    const meta = task.meta ?? {}
+                    if (typeof meta.requirementId === 'string') {
+                        continue
+                    }
+                    const anchor = [...anchors].reverse().find((candidate) => candidate.at <= task.createdAt)
+                    if (!anchor) {
+                        continue
+                    }
+                    this.store.updateTask(task.id, { meta: { ...meta, requirementId: anchor.id } })
+                    result.tasks += 1
+                }
+            }
+        }
+        if (result.requirements > 0 || result.tasks > 0) {
+            console.log(`[Hub] Team requirement backfill: ${result.teams} teams, ${result.requirements} requirements, ${result.messages} messages, ${result.tasks} tasks`)
+        }
+        return result
     }
 
     /**
@@ -1406,6 +1471,15 @@ function slug(value: string): string {
         .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
         .replace(/^-+|-+$/g, '')
         .slice(0, 40)
+}
+
+/**
+ * Short acknowledgements ("ok", "收到", "好") are not new requirements; they
+ * stay unfiled instead of cluttering the requirement list.
+ */
+function isAcknowledgement(text: string): boolean {
+    const compact = text.trim().replace(/[\s!！。.，,~～]+$/g, '')
+    return /^(ok|okay|okey|收到|好|好的|好嘞|行|嗯+|谢谢|多谢|辛苦了|thx|thanks|👍)$/i.test(compact)
 }
 
 /** Human ask -> requirement title: first non-empty line, capped. */
