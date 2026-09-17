@@ -106,6 +106,19 @@ every build as a new app and re-asks each protected permission. Pin one Apple
 Development identity instead: SHA-1 in `~/.hapi/signing-identity`, override
 via `HAPI_SIGN_IDENTITY`, signed identifier `run.hapi.cli`.
 
+Pinning the identity is necessary but not sufficient: each TCC grant stores a
+code requirement, and a grant created while the binary was ad-hoc signed stays
+pinned to that build's **cdhash**. Replacing the binary at the fixed path then
+matches nothing - and since a record exists, macOS never prompts again, it
+denies silently. Long-running processes started before the swap keep their
+cached allow until macOS re-evaluates them, then lose `~/Documents` access
+mid-life (symptom: sessions started hours ago stop answering with `OpenCode
+service failure` / `getcwd: Operation not permitted`, while new sessions on the
+same machine work). Check `csreq` for the hapi row in the user TCC database
+(want `identifier "run.hapi.cli" and anchor apple generic ...`; `cdhash H"..."`
+means re-grant) and re-grant once per machine after changing the signing
+identity - full procedure and fallback in `docs/local-deployment.md`.
+
 The runner must be refreshed on every deploy (`hapi runner start` replaces the
 stale one; running sessions survive). Compiled binaries never self-update: the
 runner heartbeat compares the mtime of its own resolved exec path, which is

@@ -64,6 +64,55 @@ unanswered every process touching a protected folder (model probes, session
 startup) blocked - which showed up as slow/timeout requests in the app. Do not
 reintroduce versioned filenames.
 
+### TCC grants are pinned to a code requirement (the cdhash trap)
+
+A fixed path plus a pinned signing identity is necessary but not sufficient.
+Every TCC grant stores a *code requirement* (`csreq`), and a grant created while
+the binary was ad-hoc signed (or signed by a different identity) is pinned to
+that one build's **cdhash**. Replacing the binary at the fixed path then matches
+nothing - and because a record exists, macOS never prompts again, it denies
+silently. Processes already running keep TCC's cached "allow" until macOS
+re-evaluates them (hours later; a `runningboardd` cleanup was the trigger we
+saw), then lose access to `~/Documents` mid-life, while every process started
+after the swap is fine. The symptom is confusing: sessions started hours ago
+stop answering (`OpenCode service failure`, `getcwd: Operation not permitted`
+for spawned children) while brand-new sessions on the same machine work, with
+`(Sandbox) System Policy: ... deny(1) file-read-data /Users/.../Documents/...`
+in the kernel log and no TCC prompt anywhere.
+
+Inspect what is stored (needs Full Disk Access for the calling app):
+
+```bash
+sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" \
+  "select writefile('/tmp/hapi.csreq',csreq) from access \
+   where service='kTCCServiceSystemPolicyDocumentsFolder' and client='$HOME/.hapi/bin/hapi'"
+csreq -r /tmp/hapi.csreq -t
+```
+
+- `identifier "run.hapi.cli" and anchor apple generic and certificate leaf[subject.CN] = "Apple Development: ..."` - identity-based, survives every later rebuild.
+- `cdhash H"..."` - pinned to one build; it must be recreated.
+
+Recreate it (the normal way): System Settings -> Privacy & Security -> Files and
+Folders -> hapi, remove the entry (toggling alone may only flip `auth_value` and
+leave the old `csreq`), then let any session touch a project under `~/Documents`
+and click Allow. Re-check with the commands above - the recreated record is
+identity-based.
+
+Fallback when the prompt never appears (macOS still honoring its cached allow,
+and `tccutil reset` cannot help because it wants a bundle id): back up the
+database, delete the stale row, restart `tccd` (`killall tccd`; launchd brings it
+back), and - if the prompt still does not come - insert a record copied from a
+machine that already holds an identity-based grant for the *same* signing
+certificate (k2lab had one; mini's three rows were rebuilt this way on
+2026-09-17). Keep the row shape identical: `client_type=1`, `auth_value=2`,
+`auth_reason=2`, `auth_version=1`, `indirect_object_identifier='UNUSED'`,
+`flags=0`, and re-verify with `csreq -r`. Do the same for
+`kTCCServiceSystemPolicyDownloadsFolder` and
+`kTCCServiceSystemPolicyNetworkVolumes` - they are granted at the same time and
+rot together.
+
+Do the re-grant once per machine right after changing the signing identity.
+
 ### Code-signature cache (why deploys verify, and roll back)
 
 The fixed path has one hazard: the kernel caches the Mach-O signature per
