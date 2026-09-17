@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { TeamMessage, TeamRequirement, TeamTask } from '@/types/team'
-import { requirementOutcome, selectMilestones } from './requirementSummary'
+import { requirementDisplayStatus, requirementOutcome, selectMilestones } from './requirementSummary'
 
 function requirement(conclusion: string | null): TeamRequirement {
     return {
@@ -74,5 +74,26 @@ describe('selectMilestones', () => {
             message(7)
         ])
         expect(milestones.map((entry) => entry.seq)).toEqual([1, 2, 4, 5, 6])
+    })
+})
+
+describe('requirementDisplayStatus', () => {
+    const openRequirement = { ...requirement(null), status: 'open' as const }
+
+    it('keeps an explicit status', () => {
+        const explicit = { ...requirement(null), status: 'blocked' as const }
+        expect(requirementDisplayStatus(explicit, [], [])).toBe('blocked')
+    })
+
+    it('derives done / doing / blocked from the tasks', () => {
+        expect(requirementDisplayStatus(openRequirement, [task('done'), task('done')], [])).toBe('done')
+        expect(requirementDisplayStatus(openRequirement, [task('done'), task('doing')], [])).toBe('doing')
+        expect(requirementDisplayStatus(openRequirement, [task('blocked')], [])).toBe('blocked')
+        expect(requirementDisplayStatus(openRequirement, [task('todo')], [])).toBe('open')
+    })
+
+    it('treats teammate activity without tasks as in progress', () => {
+        expect(requirementDisplayStatus(openRequirement, [], [message(1)])).toBe('open')
+        expect(requirementDisplayStatus(openRequirement, [], [message(1), message(2)])).toBe('doing')
     })
 })

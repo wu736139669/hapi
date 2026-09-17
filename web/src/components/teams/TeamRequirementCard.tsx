@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import type { TeamMember, TeamMessage, TeamRequirement, TeamTask } from '@/types/team'
 import { useTranslation } from '@/lib/use-translation'
 import { humanReplyState } from '@/lib/teamMessageState'
-import { requirementOutcome, selectMilestones } from '@/lib/requirementSummary'
+import { requirementDisplayStatus, requirementOutcome, selectMilestones } from '@/lib/requirementSummary'
 import type { RequirementGroup } from '@/lib/teamRequirementGroups'
 import { TeamTimeline } from './TeamTimeline'
 
@@ -48,6 +48,7 @@ export function TeamRequirementCard(props: {
     const milestones = useMemo(() => selectMilestones(timelineMessages), [timelineMessages])
     const hiddenCount = timelineMessages.length - milestones.length
     const outcome = requirementOutcome(requirement, tasks, messages)
+    const displayStatus = requirementDisplayStatus(requirement, tasks, messages)
     const askText = requirement?.body?.trim() || requirement?.title || null
     const title = requirement ? requirement.title : t('team.requirement.other')
     const assignees = Array.from(new Set(tasks
@@ -69,8 +70,8 @@ export function TeamRequirementCard(props: {
                 >
                     <div className="flex flex-wrap items-center gap-1.5">
                         {requirement ? (
-                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${statusChipClass(requirement.status)}`}>
-                                {t(`team.requirement.status.${requirement.status}`)}
+                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${statusChipClass(displayStatus)}`}>
+                                {t(`team.requirement.status.${displayStatus}`)}
                             </span>
                         ) : null}
                         {askText ? null : (

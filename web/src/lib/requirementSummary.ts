@@ -1,4 +1,4 @@
-import type { TeamMessage, TeamRequirement, TeamTask } from '@/types/team'
+import type { TeamMessage, TeamRequirement, TeamRequirementStatus, TeamTask } from '@/types/team'
 
 export interface RequirementOutcome {
     /** 'conclusion' = the lead wrote one; 'tasks' = derived from task states. */
@@ -40,6 +40,38 @@ export function requirementOutcome(
         return { kind: 'tasks', doneTasks, totalTasks, deliverable, latestText }
     }
     return { kind: 'none', doneTasks, totalTasks, deliverable, latestText }
+}
+
+/**
+ * Status shown on the card. An explicit status (set by the lead via
+ * team_requirement) always wins; otherwise it is derived from the work: blocked
+ * tasks, finished tasks or any teammate activity after the ask.
+ */
+export function requirementDisplayStatus(
+    requirement: TeamRequirement | null,
+    tasks: TeamTask[],
+    messages: TeamMessage[]
+): TeamRequirementStatus {
+    if (!requirement) {
+        return 'open'
+    }
+    if (requirement.status !== 'open') {
+        return requirement.status
+    }
+    if (tasks.some((task) => task.status === 'blocked')) {
+        return 'blocked'
+    }
+    if (tasks.length > 0) {
+        if (tasks.every((task) => task.status === 'done')) {
+            return 'done'
+        }
+        if (tasks.some((task) => task.status === 'doing' || task.status === 'done')) {
+            return 'doing'
+        }
+        return 'open'
+    }
+    // No tasks: any activity after the ask means someone picked it up.
+    return messages.length > 1 ? 'doing' : 'open'
 }
 
 /**
