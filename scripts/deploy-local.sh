@@ -63,9 +63,16 @@ codesign --verify --deep --strict "$stable"
 echo "installed: $stable"
 
 launchctl kickstart -k "gui/$(id -u)/com.hapi.hub"
-sleep 2
-if ! curl -fsS http://127.0.0.1:3006/health >/dev/null; then
-    echo "health check failed" >&2
+health_ok=0
+for _ in $(seq 1 20); do
+    if curl -fsS --max-time 3 http://127.0.0.1:3006/health >/dev/null 2>&1; then
+        health_ok=1
+        break
+    fi
+    sleep 1
+done
+if [ "$health_ok" != 1 ]; then
+    echo "health check failed after 20s" >&2
     restore_backup || true
     launchctl kickstart -k "gui/$(id -u)/com.hapi.hub"
     exit 1
