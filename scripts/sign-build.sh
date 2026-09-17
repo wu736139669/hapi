@@ -39,19 +39,30 @@ if [ -z "$identity" ]; then
 fi
 echo "signing identity: $identity"
 
-# codesign reads the private key from the login keychain, and only a GUI
-# (Aqua) session can reach it: processes started by launchd/agents live in
-# the Background domain and fail with errSecInternalComponent even while
-# Keychain Access shows the keychain unlocked. Warn early with the fix
-# instead of surfacing a bare codesign error. Ad-hoc signing needs no key.
-if [ "$identity" != "-" ] && [ "$(launchctl managername 2>/dev/null || true)" != "Aqua" ]; then
-    echo "warning: not running in a GUI (Aqua) session; codesign cannot reach the login keychain." >&2
-    echo "warning: run the deploy from a Terminal window on this machine," >&2
-    echo "warning: or run 'security unlock-keychain' first. (errSecInternalComponent)" >&2
-fi
-
 # Bun's linker signature is not suitable after installation; re-sign once.
 codesign --remove-signature "$build" 2>/dev/null || true
-codesign --force --sign "$identity" --identifier run.hapi.cli "$build"
+
+if ! sign_error=$(codesign --force --sign "$identity" --identifier run.hapi.cli "$build" 2>&1); then
+    printf '%s\n' "$sign_error" >&2
+    # codesign reads the private key from the login keychain, and that key is
+    # reachable only from a GUI (Aqua) session: an agent or daemon shell runs in
+    # launchd's Background domain and gets errSecInternalComponent even while
+    # Keychain Access shows the keychain unlocked. 'security unlock-keychain' is
+    # no fix there either - it cannot prompt for the passphrase from that
+    # domain. Do not guess the session up front (an SSH deploy that unlocked
+    # first signs fine); explain only what actually failed.
+    if [ "$identity" != "-" ]; then
+        case "$sign_error" in
+            *errSecInternalComponent*|*"User interaction is not allowed"*)
+                echo "error: codesign cannot read the private key for $identity from the login keychain." >&2
+                echo "error: run the deploy from a Terminal window on this machine, or allow that key" >&2
+                echo "error: for all applications: Keychain Access -> the 'Apple Development: ...' key" >&2
+                echo "error: -> Access Control -> 'Allow all applications to access this item'." >&2
+                ;;
+        esac
+    fi
+    exit 1
+fi
+
 codesign --verify --deep --strict "$build"
 echo "signed build ok"

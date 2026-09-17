@@ -82,3 +82,6 @@ android/app/google-services.json
 
 # HAPI team memory (local)
 .hapi/
+
+# OpenCode's per-project scratch dir (local; can hold ~60MB of node_modules)
+.opencode/
