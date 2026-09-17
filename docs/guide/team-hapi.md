@@ -14,11 +14,12 @@ Team HAPI 地址：https://team-hapi.aichickenfarm.cn
 
 请按以下步骤操作：
 1. 检查 Node.js 和 npm 是否可用。如果缺少，请先告诉我安装 Node.js LTS；不要使用来源不明的安装脚本。
-2. 执行 npm install -g @twsxtd/hapi；如果已经安装 hapi，检查并更新到最新稳定版。
-3. 在 ~/.hapi/settings.json 中合并写入两项配置（保留文件里已有的其他字段）：apiUrl = https://team-hapi.aichickenfarm.cn，cliApiToken = 我的个人 Token。不要启动本地 Hub。
-4. 运行 hapi auth status，确认 HAPI_API_URL 正确、CLI_API_TOKEN 显示 set；不要把 Token 输出到聊天或日志里。
-5. 运行 hapi runner start 启动后台服务，然后运行 hapi runner status 确认正常。这样这台电脑会出现在 Team HAPI 的机器列表里，我就能从手机或网页直接新建会话。
-6. 完成后告诉我：已经可以从 Team HAPI 新建会话了。除非我明确要求，不要替我启动新的 Codex 会话。
+2. 运行 codex --version 检查 Codex CLI 版本，必须不低于 0.145.0（hapi codex 的硬性要求）。版本过低就先升级再继续：npm install -g @openai/codex；如果是 Homebrew 安装的用 brew upgrade codex。
+3. 执行 npm install -g @twsxtd/hapi；如果已经安装 hapi，检查并更新到最新稳定版。
+4. 在 ~/.hapi/settings.json 中合并写入两项配置（保留文件里已有的其他字段）：apiUrl = https://team-hapi.aichickenfarm.cn，cliApiToken = 我的个人 Token。不要启动本地 Hub。
+5. 运行 hapi auth status，确认 HAPI_API_URL 正确、CLI_API_TOKEN 显示 set；不要把 Token 输出到聊天或日志里。
+6. 运行 hapi runner start 启动后台服务，然后运行 hapi runner status 确认正常。这样这台电脑会出现在 Team HAPI 的机器列表里，我就能从手机或网页直接新建会话。
+7. 完成后告诉我：已经可以从 Team HAPI 新建会话了。除非我明确要求，不要替我启动新的 Codex 会话。
 
 整个过程只操作当前用户的 HAPI 配置，不读取或修改其他用户、其他 Namespace 或无关项目。
 ```
