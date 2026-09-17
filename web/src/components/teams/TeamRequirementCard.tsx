@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { TeamMember, TeamMessage, TeamRequirement, TeamTask } from '@/types/team'
 import { useTranslation } from '@/lib/use-translation'
 import { humanReplyState } from '@/lib/teamMessageState'
+import { requirementOutcome, selectMilestones } from '@/lib/requirementSummary'
 import type { RequirementGroup } from '@/lib/teamRequirementGroups'
 import { TeamTimeline } from './TeamTimeline'
 
@@ -19,9 +20,9 @@ function statusChipClass(status: string): string {
 }
 
 /**
- * One requirement (a human ask) as a collapsible card: the conclusion (result)
- * and task progress stay visible while collapsed; the original ask and the full
- * process are one click away. A card with a pending decision opens by itself.
+ * One requirement as a question/answer card: your ask plus the result stay
+ * visible while collapsed; the process opens to key milestones first and the
+ * full message stream only on request.
  */
 export function TeamRequirementCard(props: {
     group: RequirementGroup
@@ -36,13 +37,17 @@ export function TeamRequirementCard(props: {
     const tasks = props.tasks
     const hasPendingDecision = messages.some((message) => humanReplyState(message) === 'pending')
     const [expanded, setExpanded] = useState(hasPendingDecision)
-    const last = messages[messages.length - 1]
-    const status = requirement?.status ?? 'open'
+    const [showAll, setShowAll] = useState(false)
+
+    const milestones = useMemo(() => selectMilestones(messages), [messages])
+    const hiddenCount = messages.length - milestones.length
+    const outcome = requirementOutcome(requirement, tasks, messages)
+    const askText = requirement?.body?.trim() || requirement?.title || null
     const title = requirement ? requirement.title : t('team.requirement.other')
-    const doneTasks = tasks.filter((task) => task.status === 'done').length
     const assignees = Array.from(new Set(tasks
         .map((task) => props.members.find((member) => member.sessionId === task.assigneeSessionId)?.role)
         .filter((role): role is string => Boolean(role))))
+    const shown = showAll ? messages : milestones
 
     return (
         <div
@@ -58,8 +63,8 @@ export function TeamRequirementCard(props: {
                 >
                     <div className="flex flex-wrap items-center gap-1.5">
                         {requirement ? (
-                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${statusChipClass(status)}`}>
-                                {t(`team.requirement.status.${status}`)}
+                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${statusChipClass(requirement.status)}`}>
+                                {t(`team.requirement.status.${requirement.status}`)}
                             </span>
                         ) : null}
                         <span className="min-w-0 truncate text-xs font-semibold text-[var(--app-fg)]">{title}</span>
@@ -69,22 +74,45 @@ export function TeamRequirementCard(props: {
                             </span>
                         ) : null}
                     </div>
-                    {requirement?.conclusion ? (
-                        <div className="mt-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5">
-                            <div className="text-[10px] font-semibold text-emerald-700">{t('team.requirement.conclusion')}</div>
-                            <div className="mt-0.5 line-clamp-3 whitespace-pre-wrap text-[11px] text-[var(--app-fg)]">
-                                {requirement.conclusion}
-                            </div>
-                        </div>
-                    ) : last ? (
-                        <div className="mt-1 truncate text-[11px] text-[var(--app-hint)]">
-                            {last.text.replace(/\s+/g, ' ').slice(0, 80)}
+
+                    {askText ? (
+                        <div className="mt-1.5 rounded-lg bg-[var(--app-subtle-bg)]/60 px-2 py-1.5">
+                            <div className="text-[10px] font-semibold text-[var(--app-hint)]">{t('team.requirement.yourAsk')}</div>
+                            <div className="mt-0.5 line-clamp-3 whitespace-pre-wrap text-[11px] text-[var(--app-fg)]">{askText}</div>
                         </div>
                     ) : null}
+
+                    {outcome.kind === 'conclusion' ? (
+                        <div className="mt-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5">
+                            <div className="text-[10px] font-semibold text-emerald-700">{t('team.requirement.result')}</div>
+                            <div className="mt-0.5 line-clamp-4 whitespace-pre-wrap text-[11px] text-[var(--app-fg)]">
+                                {requirement?.conclusion}
+                            </div>
+                        </div>
+                    ) : outcome.kind === 'tasks' ? (
+                        <div className="mt-1.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-subtle-bg)]/40 px-2 py-1.5">
+                            <div className="text-[10px] font-semibold text-[var(--app-hint)]">{t('team.requirement.result')}</div>
+                            <div className="mt-0.5 text-[11px] text-[var(--app-fg)]">
+                                {outcome.doneTasks === outcome.totalTasks
+                                    ? t('team.requirement.resultTasks', { done: outcome.doneTasks, total: outcome.totalTasks })
+                                    : t('team.requirement.resultProgress', { done: outcome.doneTasks, total: outcome.totalTasks })}
+                            </div>
+                            {outcome.deliverable ? (
+                                <div className="mt-0.5 line-clamp-2 text-[10px] text-[var(--app-hint)]">
+                                    {t('team.requirement.deliverable')}：{outcome.deliverable}
+                                </div>
+                            ) : outcome.latestText ? (
+                                <div className="mt-0.5 truncate text-[10px] text-[var(--app-hint)]">{outcome.latestText}</div>
+                            ) : null}
+                        </div>
+                    ) : outcome.latestText ? (
+                        <div className="mt-1 truncate text-[11px] text-[var(--app-hint)]">{outcome.latestText}</div>
+                    ) : null}
+
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-[var(--app-hint)]">
                         <span>{t('team.requirement.messages', { n: messages.length })}</span>
                         {tasks.length > 0 ? (
-                            <span>{t('team.requirement.tasks', { done: doneTasks, total: tasks.length })}</span>
+                            <span>{t('team.requirement.tasks', { done: outcome.doneTasks, total: outcome.totalTasks })}</span>
                         ) : null}
                         {assignees.length > 0 ? <span className="truncate">{assignees.join(' · ')}</span> : null}
                     </div>
@@ -118,7 +146,19 @@ export function TeamRequirementCard(props: {
                             </div>
                         </div>
                     ) : null}
-                    <TeamTimeline messages={messages} members={props.members} foldThreads onReply={props.onReply} />
+                    <div className="mx-1 mt-2 flex items-center gap-2 text-[10px] text-[var(--app-hint)]">
+                        <span>{showAll ? t('team.requirement.allProcess') : t('team.requirement.milestones')}</span>
+                        {hiddenCount > 0 || showAll ? (
+                            <button
+                                type="button"
+                                onClick={() => setShowAll((current) => !current)}
+                                className="text-[var(--app-link)]"
+                            >
+                                {showAll ? t('team.requirement.showMilestones') : t('team.requirement.showAll', { n: hiddenCount })}
+                            </button>
+                        ) : null}
+                    </div>
+                    <TeamTimeline messages={shown} members={props.members} foldThreads={showAll} onReply={props.onReply} />
                 </div>
             ) : null}
         </div>

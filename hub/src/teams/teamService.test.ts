@@ -1151,3 +1151,47 @@ describe('TeamService requirement targets', () => {
         }
     })
 })
+
+describe('TeamService requirement backfill', () => {
+    it('files pre-requirement history and is idempotent', async () => {
+        const { runtime, sessions } = createRuntime()
+        const store = new TeamStore(':memory:')
+        const service = new TeamService(store, () => {}, runtime)
+        addCallerSession(sessions)
+        try {
+            const team = service.createTeam('alpha', { name: 'Refactor auth', leadSessionId: 'sess-lead' })
+            // History written before the requirement layer existed.
+            store.appendMessage({ teamId: team.id, fromKind: 'human', toKind: 'broadcast', kind: 'chat', text: '把搜索修好' })
+            store.appendMessage({ teamId: team.id, fromKind: 'session', fromSessionId: 'sess-builder', toKind: 'broadcast', kind: 'status', text: '开工' })
+            // Created inside the first requirement's window.
+            const task = store.createTask({ teamId: team.id, title: '旧任务', status: 'todo' })
+            store.appendMessage({ teamId: team.id, fromKind: 'session', fromSessionId: 'sess-builder', toKind: 'broadcast', kind: 'status', text: '完成' })
+            store.appendMessage({ teamId: team.id, fromKind: 'human', toKind: 'broadcast', kind: 'chat', text: '再帮我加个报表' })
+            store.appendMessage({ teamId: team.id, fromKind: 'session', fromSessionId: 'sess-builder', toKind: 'broadcast', kind: 'status', text: '收到' })
+            store.appendMessage({ teamId: team.id, fromKind: 'human', toKind: 'broadcast', kind: 'chat', text: '好的' })
+
+            const first = service.backfillRequirements()
+            expect(first.requirements).toBe(2)
+            const requirements = store.listRequirements(team.id)
+            expect(requirements.map((requirement) => requirement.title)).toEqual(['把搜索修好', '再帮我加个报表'])
+            const messages = store.listMessages(team.id, { limit: 100 })
+            expect(messages[0]?.meta?.requirementId).toBe(requirements[0]?.id)
+            expect(messages[2]?.meta?.requirementId).toBe(requirements[0]?.id)
+            expect(messages[3]?.meta?.requirementId).toBe(requirements[1]?.id)
+            // Acknowledgements do not open a requirement; they stay in the window.
+            expect(messages[5]?.meta?.requirementId).toBe(requirements[1]?.id)
+            // Tasks are filed under the most recent ask at their creation time
+            // (same-millisecond timestamps in tests make the exact anchor
+            // ambiguous, so only require that it is filed).
+            const taskRequirementId = store.getTask(task.id)?.meta?.requirementId
+            expect(requirements.some((requirement) => requirement.id === taskRequirementId)).toBe(true)
+
+            // Second run changes nothing.
+            const second = service.backfillRequirements()
+            expect(second.requirements).toBe(0)
+            expect(store.listRequirements(team.id)).toHaveLength(2)
+        } finally {
+            service.close()
+        }
+    })
+})

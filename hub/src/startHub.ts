@@ -308,6 +308,12 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         : null
     if (teamService) {
         console.log(`[Hub] Agent Team: enabled (${config.teamsDbPath})`)
+        // One-time, idempotent: file pre-requirement history under requirements.
+        try {
+            teamService.backfillRequirements()
+        } catch (error) {
+            console.error('[Hub] Team requirement backfill failed:', error)
+        }
         // Member session ended -> announce in the team log and wake the lead
         // (or notify the human when the lead itself went down).
         syncEngine.subscribe((event) => {
