@@ -107,4 +107,7 @@ case "$runner_exe" in
 esac
 REMOTE
 
+# Keep disk usage bounded on the remote host: current + previous version.
+ssh "${ssh_opts[@]}" "$target" "HAPI_KEEP_VERSIONS='${HAPI_KEEP_VERSIONS:-2}' bash -s" < scripts/prune-versions.sh
+
 echo "rollback: ssh $target \"ln -sfn <old target> ~/.hapi/bin/hapi && launchctl kickstart -k gui/\\\$(id -u)/$label\""

@@ -69,3 +69,6 @@ if [ -n "${runner_pid:-}" ] && kill -0 "$runner_pid" 2>/dev/null; then
 else
     echo "runner not running; skipped refresh"
 fi
+
+# Keep disk usage bounded: current + previous version (override HAPI_KEEP_VERSIONS).
+bash scripts/prune-versions.sh "${HAPI_KEEP_VERSIONS:-2}" "$bin_dir"
