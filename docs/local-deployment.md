@@ -153,13 +153,24 @@ permission:
 codesign reads the private key from the login keychain, and that key is
 reachable only from a GUI (Aqua) session: an agent or daemon shell runs in
 launchd's Background domain, where codesign fails with `errSecInternalComponent`
-(and `security` reports `User interaction is not allowed`) even while Keychain
-Access shows the keychain unlocked. `security unlock-keychain` does not help
-there - from that domain it cannot prompt for the passphrase either. Two ways
-out: run the deploy from a Terminal window on the machine, or allow the key for
-all applications (Keychain Access -> the `Apple Development: ...` key -> Access
-Control -> "Allow all applications to access this item", which asks for the
-password once). `sign-build.sh` prints exactly this when codesign fails.
+even while Keychain Access shows the keychain unlocked. Measured on macOS 15.6:
+in a Background session (even a plain `ssh localhost`) `security
+show-keychain-info` already fails with `SecKeychainCopySettings ...: User
+interaction is not allowed` (exit 36), while the same command in Aqua reports
+the keychain unlocked - the failure is session-scoped keychain access, not an
+app allow-list on the key.
+
+Two ways out:
+
+- run the deploy from a Terminal window on the machine (the normal path), or
+- if it must run from a Background session, unlock the keychain inside that
+  session with the password - the interactive form cannot prompt there, so use
+  `security unlock-keychain -p '<login password>' ~/Library/Keychains/login.keychain-db`
+  (the CI-style recipe; verify it with the sign probe before relying on it).
+
+Granting the key "allow all applications" in Keychain Access does not address
+this: the key's ACL is only consulted once the session can reach the keychain at
+all.
 
 Agent sessions should also avoid recursive `$HOME` sweeps (`find ~`,
 `du -sh ~`, ...) unless they prune TCC-protected folders (`~/Music`,

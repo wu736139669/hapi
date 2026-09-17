@@ -46,18 +46,18 @@ if ! sign_error=$(codesign --force --sign "$identity" --identifier run.hapi.cli 
     printf '%s\n' "$sign_error" >&2
     # codesign reads the private key from the login keychain, and that key is
     # reachable only from a GUI (Aqua) session: an agent or daemon shell runs in
-    # launchd's Background domain and gets errSecInternalComponent even while
-    # Keychain Access shows the keychain unlocked. 'security unlock-keychain' is
-    # no fix there either - it cannot prompt for the passphrase from that
-    # domain. Do not guess the session up front (an SSH deploy that unlocked
-    # first signs fine); explain only what actually failed.
+    # launchd's Background domain, where even `security show-keychain-info`
+    # fails with "User interaction is not allowed" while Aqua sees the keychain
+    # unlocked. Do not guess the session up front (an SSH deploy that unlocked
+    # the keychain with `security unlock-keychain -p` signs fine); explain only
+    # what actually failed.
     if [ "$identity" != "-" ]; then
         case "$sign_error" in
             *errSecInternalComponent*|*"User interaction is not allowed"*)
                 echo "error: codesign cannot read the private key for $identity from the login keychain." >&2
-                echo "error: run the deploy from a Terminal window on this machine, or allow that key" >&2
-                echo "error: for all applications: Keychain Access -> the 'Apple Development: ...' key" >&2
-                echo "error: -> Access Control -> 'Allow all applications to access this item'." >&2
+                echo "error: this shell is not in a GUI (Aqua) session - run the deploy from a" >&2
+                echo "error: Terminal window on this machine, or unlock the keychain here with" >&2
+                echo "error: 'security unlock-keychain -p <login password> ~/Library/Keychains/login.keychain-db'." >&2
                 ;;
         esac
     fi
