@@ -101,6 +101,14 @@ permission:
 - with no Apple Development identity the scripts fall back to ad-hoc; that
   still runs, but expect TCC prompts to reappear after every deploy
 
+Deploys must run in a GUI session (a Terminal window on the machine): codesign
+reads the private key from the login keychain, and only the Aqua session can
+reach it. Agents/daemons run in launchd's Background domain, where codesign
+fails with `errSecInternalComponent` even while Keychain Access shows the
+keychain unlocked (`launchctl managername` reports `Background` vs `Aqua`).
+`sign-build.sh` warns about this before failing; running the same script from
+Terminal (or `security unlock-keychain` first) fixes it.
+
 Agent sessions should also avoid recursive `$HOME` sweeps (`find ~`,
 `du -sh ~`, ...) unless they prune TCC-protected folders (`~/Music`,
 `~/Pictures`, `~/Movies`, `~/Library`): a walk into

@@ -39,6 +39,17 @@ if [ -z "$identity" ]; then
 fi
 echo "signing identity: $identity"
 
+# codesign reads the private key from the login keychain, and only a GUI
+# (Aqua) session can reach it: processes started by launchd/agents live in
+# the Background domain and fail with errSecInternalComponent even while
+# Keychain Access shows the keychain unlocked. Warn early with the fix
+# instead of surfacing a bare codesign error. Ad-hoc signing needs no key.
+if [ "$identity" != "-" ] && [ "$(launchctl managername 2>/dev/null || true)" != "Aqua" ]; then
+    echo "warning: not running in a GUI (Aqua) session; codesign cannot reach the login keychain." >&2
+    echo "warning: run the deploy from a Terminal window on this machine," >&2
+    echo "warning: or run 'security unlock-keychain' first. (errSecInternalComponent)" >&2
+fi
+
 # Bun's linker signature is not suitable after installation; re-sign once.
 codesign --remove-signature "$build" 2>/dev/null || true
 codesign --force --sign "$identity" --identifier run.hapi.cli "$build"
