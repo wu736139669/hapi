@@ -39,15 +39,21 @@ export function TeamRequirementCard(props: {
     const [expanded, setExpanded] = useState(hasPendingDecision)
     const [showAll, setShowAll] = useState(false)
 
-    const milestones = useMemo(() => selectMilestones(messages), [messages])
-    const hiddenCount = messages.length - milestones.length
+    // The opening human message IS the ask shown at the top; hide it here so the
+    // same sentence is not repeated inside the process.
+    const openingAskSeq = requirement ? (messages.find((message) => message.fromKind === 'human')?.seq ?? null) : null
+    const timelineMessages = openingAskSeq === null
+        ? messages
+        : messages.filter((message) => message.seq !== openingAskSeq)
+    const milestones = useMemo(() => selectMilestones(timelineMessages), [timelineMessages])
+    const hiddenCount = timelineMessages.length - milestones.length
     const outcome = requirementOutcome(requirement, tasks, messages)
     const askText = requirement?.body?.trim() || requirement?.title || null
     const title = requirement ? requirement.title : t('team.requirement.other')
     const assignees = Array.from(new Set(tasks
         .map((task) => props.members.find((member) => member.sessionId === task.assigneeSessionId)?.role)
         .filter((role): role is string => Boolean(role))))
-    const shown = showAll ? messages : milestones
+    const shown = showAll ? timelineMessages : milestones
 
     return (
         <div
@@ -67,7 +73,9 @@ export function TeamRequirementCard(props: {
                                 {t(`team.requirement.status.${requirement.status}`)}
                             </span>
                         ) : null}
-                        <span className="min-w-0 truncate text-xs font-semibold text-[var(--app-fg)]">{title}</span>
+                        {askText ? null : (
+                            <span className="min-w-0 truncate text-xs font-semibold text-[var(--app-fg)]">{title}</span>
+                        )}
                         {hasPendingDecision ? (
                             <span className="rounded bg-amber-500/15 px-1 text-[10px] font-semibold text-amber-600">
                                 {t('team.reply.pending')}
@@ -78,7 +86,9 @@ export function TeamRequirementCard(props: {
                     {askText ? (
                         <div className="mt-1.5 rounded-lg bg-[var(--app-subtle-bg)]/60 px-2 py-1.5">
                             <div className="text-[10px] font-semibold text-[var(--app-hint)]">{t('team.requirement.yourAsk')}</div>
-                            <div className="mt-0.5 line-clamp-3 whitespace-pre-wrap text-[11px] text-[var(--app-fg)]">{askText}</div>
+                            <div className={`mt-0.5 whitespace-pre-wrap text-[11px] text-[var(--app-fg)] ${expanded ? '' : 'line-clamp-3'}`}>
+                                {askText}
+                            </div>
                         </div>
                     ) : null}
 
@@ -138,14 +148,6 @@ export function TeamRequirementCard(props: {
             </div>
             {expanded ? (
                 <div className="border-t border-[var(--app-divider)] px-2 pb-2">
-                    {requirement?.body ? (
-                        <div className="mx-1 mt-2 rounded-lg bg-[var(--app-subtle-bg)]/50 px-2 py-1.5">
-                            <div className="text-[10px] font-semibold text-[var(--app-hint)]">{t('team.requirement.original')}</div>
-                            <div className="mt-0.5 max-h-40 overflow-y-auto whitespace-pre-wrap text-[11px] text-[var(--app-fg)]">
-                                {requirement.body}
-                            </div>
-                        </div>
-                    ) : null}
                     <div className="mx-1 mt-2 flex items-center gap-2 text-[10px] text-[var(--app-hint)]">
                         <span>{showAll ? t('team.requirement.allProcess') : t('team.requirement.milestones')}</span>
                         {hiddenCount > 0 || showAll ? (
