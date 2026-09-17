@@ -46,6 +46,20 @@ describe('agent executable resolution', () => {
         })).toEqual({ agent: 'copilot', available: true })
     })
 
+    it('prefers cursor-agent over a shadowing legacy agent CLI', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'hapi-cursor-path-'))
+        await makeExecutable(directory, 'agent')
+        expect(getAgentLaunchCommand('cursor', { PATH: directory })).toBe('agent')
+
+        await makeExecutable(directory, 'cursor-agent')
+        expect(getAgentLaunchCommand('cursor', { PATH: directory })).toBe('cursor-agent')
+
+        expect(getAgentLaunchCommand('cursor', {
+            PATH: directory,
+            HAPI_CURSOR_PATH: '/opt/custom/cursor',
+        })).toBe('/opt/custom/cursor')
+    })
+
     it('uses PATHEXT when resolving Windows commands', () => {
         expect(executableCandidates('agent', {
             platform: 'win32',

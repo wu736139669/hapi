@@ -88,4 +88,4 @@ export function createCursorAcpBackend(opts: CursorAcpBackendOptions): AcpSdkBac
 }
 
 export const CURSOR_ACP_REQUIRED_MESSAGE =
-    'Cursor ACP mode is required for new Cursor remote sessions. Run `agent update` and verify `agent help acp`.';
+    'Cursor ACP mode is required for new Cursor remote sessions. Run `cursor-agent update` and verify `cursor-agent help acp`.';

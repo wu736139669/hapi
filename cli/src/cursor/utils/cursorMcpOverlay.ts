@@ -22,6 +22,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { getAgentLaunchCommand } from '@/agent/agentLaunchCommand';
 import { logger } from '@/ui/logger';
 
 /** Historical fixed id — prefer {@link cursorHapiMcpServerId} so concurrent sessions do not share one key. */
@@ -80,7 +81,7 @@ const LOCK_RETRY_INTERVAL_MS = 50;
 const MAX_LOCK_ATTEMPTS = 100;
 
 function defaultEnableCursorMcp(cwd: string, id: string): EnableCursorMcpResult {
-    return spawnSync('agent', ['mcp', 'enable', id], {
+    return spawnSync(getAgentLaunchCommand('cursor'), ['mcp', 'enable', id], {
         cwd,
         encoding: 'utf-8',
         timeout: 30_000,
