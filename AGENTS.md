@@ -76,26 +76,35 @@ cd android && ./gradlew :core:protocol:test  # Android protocol conformance
 
 ## Local binary deployment
 
-Deploy with `scripts/deploy-local.sh [tag]` after `bun run build:single-exe`.
-The script signs with a pinned codesigning identity, copies to a new versioned
-filename, repoints the `~/.hapi/bin/hapi` symlink, restarts the hub, refreshes
-a running runner, and rolls back if `/health` fails.
+Deploy with `scripts/deploy-local.sh [tag]` after `bun run build:single-exe`;
+remote Macs: `scripts/deploy-remote.sh <ssh-target> [tag]`.
 
-Two macOS rules the script enforces:
+The binary always installs to the **fixed path** `~/.hapi/bin/hapi` (a real
+file, no versioned filenames). Fixed path is deliberate: macOS TCC keys
+permission grants (Documents, media library, ...) to the executable path, so
+one stable path means the user grants access once and macOS remembers it
+across deploys. Versioned filenames re-prompted for every build - do not
+reintroduce them.
 
-1. **Never overwrite `~/.hapi/bin/hapi` in place**, even with an atomic
-   rename. macOS caches the Mach-O code signature by executable path/mtime;
-   replacing that path can make the embedded signature disagree with the
-   cached signature and kill every new process with `OS_REASON_CODESIGNING` /
-   `embedded signature doesn't match attached signature` (often exit 137). A
-   plain `cp` also loses the signed mtime. Always copy to a new versioned
-   filename, keep the stable path as a symlink, and keep the previous
-   versioned file for rollback (do not delete it while sessions are running).
-2. **Never ship an ad-hoc signature** (`--sign -`). Ad-hoc signatures have no
-   stable identity, so macOS TCC treats every build as a new app and re-asks
-   each protected permission (Documents, Downloads, media library, ...). Pin
-   one Apple Development identity instead: SHA-1 in `~/.hapi/signing-identity`,
-   override via `HAPI_SIGN_IDENTITY`, signed identifier `run.hapi.cli`.
+The fixed path has one hazard: the kernel caches the Mach-O signature per
+path, so overwriting it can kill new processes with
+`OS_REASON_CODESIGNING` / `embedded signature doesn't match attached
+signature` (often exit 137). The deploy scripts handle it:
+
+1. back up the installed binary to `~/.hapi/bin/backups/` (newest
+   `HAPI_KEEP_BACKUPS` kept, default 2; never exec from the backup dir),
+2. install the new file with a fresh mtime so the path-keyed signature cache
+   re-reads it,
+3. prove it execs repeatedly (`hapi --version` x3) and `codesign --verify`,
+4. restart the hub (local) / kickstart the launchd job (remote) and verify
+   (`/health` locally; runner state + exec path on the remote),
+5. on any failure restore the backup onto the fixed path and restart.
+
+Never leave an unverified binary installed. Never ship an ad-hoc signature
+(`--sign -`): ad-hoc signatures have no stable identity, so macOS TCC treats
+every build as a new app and re-asks each protected permission. Pin one Apple
+Development identity instead: SHA-1 in `~/.hapi/signing-identity`, override
+via `HAPI_SIGN_IDENTITY`, signed identifier `run.hapi.cli`.
 
 The runner must be refreshed on every deploy (`hapi runner start` replaces the
 stale one; running sessions survive). Compiled binaries never self-update: the
@@ -104,9 +113,9 @@ fixed for the life of the process. A stale runner keeps old machine RPCs and
 capability flags, so hub features can fail with "restart the runner" errors.
 
 Remote Macs with the same layout: `scripts/deploy-remote.sh <ssh-target> [tag]`
-(signs locally, copies to a new versioned file, swaps the symlink, restarts the
-launchd job; label defaults to `com.hapi.runner`, override with
-`HAPI_REMOTE_LAUNCHD_LABEL`).
+(signs locally, uploads next to the fixed path, installs by move, verifies,
+then kickstarts the launchd job; label defaults to `com.hapi.runner`, override
+with `HAPI_REMOTE_LAUNCHD_LABEL`).
 
 Agent sessions must not run recursive `$HOME` sweeps (`find ~`, `du -sh ~`)
 without pruning TCC-protected folders (`~/Music`, `~/Pictures`, `~/Movies`,
@@ -114,8 +123,8 @@ without pruning TCC-protected folders (`~/Music`, `~/Pictures`, `~/Movies`,
 Apple Music prompt attributed to the hapi binary.
 
 After deploy: `curl -fsS http://127.0.0.1:3006/health`, `~/.hapi/bin/hapi
---version`, `hapi runner status`. If health fails, restore the previous
-symlink before doing anything else.
+--version`, `hapi runner status`. If health fails, restore the backup from
+`~/.hapi/bin/backups/` before doing anything else.
 
 `docs/local-deployment.md` contains the same rationale and rollback checklist.
 

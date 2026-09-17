@@ -46,39 +46,60 @@ bun run build:single-exe
 scripts/deploy-local.sh [tag]
 ```
 
-The script implements the sequence below, including the runner refresh; read
-on to understand the macOS constraints it works around.
+Remote Macs with the same layout:
 
-### Code-signature cache (never overwrite the stable path)
+```bash
+scripts/deploy-remote.sh <ssh-target> [tag]     # e.g. scripts/deploy-remote.sh k2lab card-dedupe
+```
 
-macOS caches the Mach-O signature against the executable pathname and
-modification time. Replacing `~/.hapi/bin/hapi` in place (including a
-temp-file + rename) or using a plain `cp` can leave a stale code-signature
-cache. The next launch then fails with:
+### Fixed install path (why)
+
+The binary always installs to the **fixed path** `~/.hapi/bin/hapi` (a real
+file). macOS TCC keys permission grants (Documents, Downloads, Apple
+Music/media library, ...) to the executable path, so one stable path means the
+user grants access **once** and macOS remembers it across deploys. The earlier
+"new versioned filename per build + symlink" scheme re-prompted for every
+build: each deploy looked like a brand-new app, and while the prompt was
+unanswered every process touching a protected folder (model probes, session
+startup) blocked - which showed up as slow/timeout requests in the app. Do not
+reintroduce versioned filenames.
+
+### Code-signature cache (why deploys verify, and roll back)
+
+The fixed path has one hazard: the kernel caches the Mach-O signature per
+path, so overwriting it can kill new processes with:
 
 ```text
 OS_REASON_CODESIGNING
 embedded signature doesn't match attached signature
 ```
 
-This is a deployment/install issue, not a HAPI application error. Use a fresh
-versioned path for every build and keep the stable command path as a symlink.
-Do not deploy by copying over the stable path.
+This is a deployment/install issue, not a HAPI application error. The deploy
+scripts handle it end to end:
 
-### Sign with a stable identity (TCC)
+1. back up the installed binary to `~/.hapi/bin/backups/` (newest
+   `HAPI_KEEP_BACKUPS` kept, default 2; never exec from the backup dir)
+2. install the new file with a fresh mtime so the path-keyed signature cache
+   re-reads it
+3. prove it execs repeatedly (`hapi --version` x3) and `codesign --verify`
+4. restart the hub (local) / kickstart the launchd job (remote) and verify
+   (`/health` locally; runner state + exec path on the remote)
+5. on any failure restore the backup onto the fixed path and restart
 
-macOS TCC records permission grants against the code-signing identity. An
-ad-hoc signature (`codesign --sign -`) has no stable identity, so each rebuild
-looks like a brand-new app and every protected permission (Documents,
-Downloads, Apple Music/media library, ...) is asked again. Sign every build
-with one pinned identity:
+Never leave an unverified binary installed.
 
-- `scripts/deploy-local.sh` stores the chosen Apple Development SHA-1 in
-  `~/.hapi/signing-identity` and reuses it. Override with
-  `HAPI_SIGN_IDENTITY` when rotating certificates.
-- All builds use the signed identifier `run.hapi.cli`.
-- With no Apple Development identity the script falls back to ad-hoc; that
-  still works, but expect TCC prompts to reappear after every deploy.
+### Signing
+
+Sign every build with one pinned identity; never ship an ad-hoc signature
+(`codesign --sign -`), which has no stable identity and makes TCC re-ask every
+permission:
+
+- `scripts/sign-build.sh` (called by both deploy scripts) stores the chosen
+  Apple Development SHA-1 in `~/.hapi/signing-identity` and reuses it; override
+  with `HAPI_SIGN_IDENTITY` when rotating certificates
+- all builds use the signed identifier `run.hapi.cli`
+- with no Apple Development identity the scripts fall back to ad-hoc; that
+  still runs, but expect TCC prompts to reappear after every deploy
 
 Agent sessions should also avoid recursive `$HOME` sweeps (`find ~`,
 `du -sh ~`, ...) unless they prune TCC-protected folders (`~/Music`,
@@ -99,74 +120,58 @@ runner's own code stays old until the process restarts:
 
 `scripts/deploy-local.sh` runs `hapi runner start` when a runner is already
 running; the CLI stops the stale runner and starts a fresh one with
-`HAPI_CLI_EXECUTABLE` pinned to the stable symlink. Running sessions are
-detached and survive the restart.
+`HAPI_CLI_EXECUTABLE` pinned to the fixed path. Running sessions are detached
+and survive the restart.
 
 ### Manual sequence
 
 ```bash
 set -euo pipefail
 build=cli/dist-exe/bun-darwin-arm64/hapi
+bin_dir="$HOME/.hapi/bin"
+stable="$bin_dir/hapi"
 stamp=$(date +%Y%m%d-%H%M%S)
-release="$HOME/.hapi/bin/hapi.$stamp"
 
-identity=$(cat "$HOME/.hapi/signing-identity")   # SHA-1, or a unique cert name
+# Sign with the pinned identity (see scripts/sign-build.sh).
+bash scripts/sign-build.sh "$build"
 
-# Bun's linker signature is not suitable after installation; re-sign once.
-codesign --remove-signature "$build" 2>/dev/null || true
-codesign --force --sign "$identity" --identifier run.hapi.cli "$build"
-codesign --verify --deep --strict "$build"
+# Back up the installed binary for rollback.
+mkdir -p "$bin_dir/backups"
+backup="$bin_dir/backups/hapi.$stamp"
+[ -f "$stable" ] && cp -p "$stable" "$backup"
 
-# -p preserves the mtime covered by the code-signature cache.
-cp -p "$build" "$release"
-codesign --verify --deep --strict "$release"
-"$release" --version
-
-# Keep the old target as a rollback point. If hapi is already a symlink,
-# replace only the link; otherwise move the legacy regular file aside first.
-stable="$HOME/.hapi/bin/hapi"
-if [ -L "$stable" ]; then
-    old_target=$(readlink "$stable")
-else
-    old_target="hapi.bak.$stamp"
-    mv "$stable" "$HOME/.hapi/bin/$old_target"
-fi
-ln -sfn "$(basename "$release")" "$stable"
+# Install to the fixed path with a fresh mtime, then prove it execs.
+rm -f "$stable"
+cp "$build" "$stable"
+chmod 755 "$stable"
+"$stable" --version && "$stable" --version && "$stable" --version
+codesign --verify --deep --strict "$stable"
 
 launchctl kickstart -k "gui/$(id -u)/com.hapi.hub"
 sleep 2
 curl -fsS http://127.0.0.1:3006/health >/dev/null
 "$stable" --version
 
-# Refresh a running runner; new sessions already use the new binary via the
-# symlink, but the runner's own machine RPCs/capabilities stay stale.
+# Refresh a running runner so its machine RPCs/capabilities match.
 HAPI_CLI_EXECUTABLE="$stable" "$stable" runner start
 ```
 
-If the health check fails, immediately restore the prior link and restart the
-agent:
+If the health check or a cold start fails, restore the backup and restart:
 
 ```bash
-ln -sfn "$old_target" "$HOME/.hapi/bin/hapi"
+rm -f "$stable"
+cp "$backup" "$stable"
+chmod 755 "$stable"
+"$stable" --version
 launchctl kickstart -k "gui/$(id -u)/com.hapi.hub"
 ```
 
-Never use `cp`, `mv`, or `codesign` on the stable symlink target after the
-launch agent has been started. Keep versioned binaries until the replacement
-has been running and verified.
-
 ### Remote machines
 
-Macs that run the same layout (versioned binary + `~/.hapi/bin/hapi` symlink +
-a supervised runner) are updated from here over SSH:
-
-```bash
-scripts/deploy-remote.sh <ssh-target> [tag]     # e.g. scripts/deploy-remote.sh k2lab stable-signing
-```
-
-The script signs the build with the same pinned identity, copies it to a new
-versioned file, swaps the symlink, restarts the launchd job (`com.hapi.runner`
-by default; override with `HAPI_REMOTE_LAUNCHD_LABEL`), and verifies the runner
-executes the new file. Running sessions survive; roll back by restoring the
-previous symlink and kicking the job again. The remote host needs no build
-toolchain — it only receives the signed binary.
+`scripts/deploy-remote.sh <ssh-target> [tag]` performs the same flow over
+SSH: signs locally, checks the remote arch matches, uploads next to the fixed
+path, installs by move (fresh inode + mtime), proves the binary execs, then
+kickstarts the launchd job (`com.hapi.runner` by default; override with
+`HAPI_REMOTE_LAUNCHD_LABEL`) and verifies the runner executes the fixed path.
+On any failure it restores the backup and kicks the job again. Running
+sessions survive; the remote host needs no build toolchain.

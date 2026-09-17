@@ -1,12 +1,16 @@
 #!/bin/bash
 # Deploy the built-and-signed all-in-one binary to a remote Mac over SSH.
 # Usage: scripts/deploy-remote.sh <ssh-target> [tag]
-#   e.g. scripts/deploy-remote.sh k2lab stable-signing
+#   e.g. scripts/deploy-remote.sh k2lab card-dedupe
 #
-# The remote host must use this repo's deployment layout: a versioned binary
-# under ~/.hapi/bin/ with the stable `hapi` symlink, supervised by a launchd
-# job (default com.hapi.runner; override with HAPI_REMOTE_LAUNCHD_LABEL).
-# Running sessions survive the restart; new sessions use the new binary.
+# The remote host uses the same fixed-path layout as this repo:
+# ~/.hapi/bin/hapi (real file) supervised by a launchd job
+# (default com.hapi.runner; override with HAPI_REMOTE_LAUNCHD_LABEL).
+#
+# Fixed path keeps macOS TCC grants stable (granted once, remembered across
+# deploys). To stay safe against the per-path code-signature cache the script
+# backs up the installed binary, installs with a fresh mtime, proves the new
+# binary execs repeatedly, and rolls back on any failure.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -21,7 +25,6 @@ fi
 label=${HAPI_REMOTE_LAUNCHD_LABEL:-com.hapi.runner}
 build=cli/dist-exe/bun-darwin-arm64/hapi
 stamp=$(date +%Y%m%d-%H%M%S)
-release="hapi.$stamp${tag:+-$tag}"
 ssh_opts=(-o BatchMode=yes -o ConnectTimeout=10)
 
 if [ ! -x "$build" ]; then
@@ -29,9 +32,7 @@ if [ ! -x "$build" ]; then
     exit 1
 fi
 
-# Sign locally with the pinned identity: the remote TCC database keys grants
-# to the signing identity, so shipping an ad-hoc build there re-triggers
-# permission prompts after every deploy.
+# Sign locally with the pinned identity so the remote keeps a stable signer.
 bash scripts/sign-build.sh "$build"
 
 local_arch=$(uname -m)
@@ -43,40 +44,59 @@ fi
 remote_home=$(ssh "${ssh_opts[@]}" "$target" 'printf %s "$HOME"')
 
 echo "target: $target ($remote_arch)"
-echo "release: $release"
+echo "release: $stamp${tag:+-$tag}"
 
-# Copy to a NEW versioned filename: macOS caches Mach-O signatures by path,
-# so never overwrite an existing executable path.
-ssh "${ssh_opts[@]}" "$target" "mkdir -p '$remote_home/.hapi/bin'"
-scp -q -C "${ssh_opts[@]}" "$build" "$target:$remote_home/.hapi/bin/$release"
+# Upload next to the fixed path, then install by move (fresh inode + mtime).
+ssh "${ssh_opts[@]}" "$target" "mkdir -p '$remote_home/.hapi/bin/backups'"
+scp -q -C "${ssh_opts[@]}" "$build" "$target:$remote_home/.hapi/bin/.hapi.incoming"
 
 ssh "${ssh_opts[@]}" "$target" "STAMP='$stamp' TAG='$tag' LABEL='$label' bash -s" <<'REMOTE'
 set -euo pipefail
 
 bin_dir="$HOME/.hapi/bin"
 stable="$bin_dir/hapi"
-new_name="hapi.$STAMP${TAG:+-$TAG}"
-new="$bin_dir/$new_name"
+backup_dir="$bin_dir/backups"
+incoming="$bin_dir/.hapi.incoming"
 
-if [ ! -x "$new" ]; then
-    echo "error: uploaded binary missing at $new" >&2
+if [ ! -x "$incoming" ]; then
+    echo "error: uploaded binary missing at $incoming" >&2
     exit 1
 fi
 
-codesign --verify --deep --strict "$new"
-"$new" --version
+backup=""
+if [ -f "$stable" ]; then
+    backup="$backup_dir/hapi.$STAMP${TAG:+-$TAG}"
+    cp -p "$stable" "$backup"
+    echo "backup: $backup"
+fi
+
+restore_backup() {
+    if [ -z "$backup" ]; then
+        echo "no backup to restore" >&2
+        return 1
+    fi
+    echo "restoring $backup" >&2
+    rm -f "$stable"
+    cp "$backup" "$stable"
+    chmod 755 "$stable"
+    "$stable" --version
+}
+
+rm -f "$stable"
+mv "$incoming" "$stable"
+chmod 755 "$stable"
+"$stable" --version
+"$stable" --version
+"$stable" --version
+codesign --verify --deep --strict "$stable"
+echo "installed: $stable"
 
 if ! launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
     echo "error: launchd job $LABEL is not loaded on this host" >&2
+    restore_backup || true
     exit 1
 fi
 
-old_target=""
-if [ -L "$stable" ]; then
-    old_target=$(readlink "$stable")
-fi
-
-ln -sfn "$new_name" "$stable"
 launchctl kickstart -k "gui/$(id -u)/$LABEL"
 
 runner_pid=""
@@ -93,21 +113,23 @@ for _ in $(seq 1 15); do
     runner_pid=""
 done
 
-echo "link: $(readlink "$stable")"
-echo "rollback target: ${old_target:-none}"
 if [ -z "$runner_pid" ]; then
-    echo "warning: runner not up yet; check 'launchctl print gui/$(id -u)/$LABEL'" >&2
+    echo "warning: runner did not come up" >&2
+    if restore_backup; then
+        launchctl kickstart -k "gui/$(id -u)/$LABEL"
+    fi
     exit 1
 fi
+
 echo "runner pid: $runner_pid"
 echo "runner exe: $runner_exe"
 case "$runner_exe" in
-    *"$new_name"*) echo "remote deploy ok" ;;
-    *) echo "warning: runner executable is not $new_name; it will switch on the next restart" >&2 ;;
+    "$stable") echo "remote deploy ok" ;;
+    *) echo "warning: runner executable is $runner_exe, expected $stable" >&2 ;;
 esac
 REMOTE
 
-# Keep disk usage bounded on the remote host: current + previous version.
-ssh "${ssh_opts[@]}" "$target" "HAPI_KEEP_VERSIONS='${HAPI_KEEP_VERSIONS:-2}' bash -s" < scripts/prune-versions.sh
+# Keep remote disk usage bounded: newest N backups, drop legacy versioned files.
+ssh "${ssh_opts[@]}" "$target" "HAPI_KEEP_BACKUPS='${HAPI_KEEP_BACKUPS:-2}' bash -s" < scripts/prune-backups.sh
 
-echo "rollback: ssh $target \"ln -sfn <old target> ~/.hapi/bin/hapi && launchctl kickstart -k gui/\\\$(id -u)/$label\""
+echo "rollback: ssh $target \"rm -f ~/.hapi/bin/hapi && cp <backup> ~/.hapi/bin/hapi && chmod 755 ~/.hapi/bin/hapi && launchctl kickstart -k gui/\\\$(id -u)/$label\""
