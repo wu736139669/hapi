@@ -3,6 +3,7 @@ import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQueryClient, useMutation } from '@tanstack/react-query'
 import { useAppContext } from '@/lib/app-context'
 import { useTranslation } from '@/lib/use-translation'
+import { useComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { useToast } from '@/lib/toast-context'
 import { queryKeys } from '@/lib/query-keys'
 import { useTeam } from '@/hooks/queries/useTeam'
@@ -37,6 +38,7 @@ export function TeamChatPage() {
     const navigate = useNavigate()
     const { api } = useAppContext()
     const { t } = useTranslation()
+    const { composerEnterBehavior } = useComposerEnterBehavior()
     const { addToast } = useToast()
     const queryClient = useQueryClient()
 
@@ -526,7 +528,22 @@ export function TeamChatPage() {
                             value={draft}
                             onChange={(event) => setDraft(event.target.value)}
                             onKeyDown={(event) => {
-                                if (event.key === 'Enter' && !event.shiftKey) {
+                                // Never send while an IME is composing (picking a
+                                // Chinese candidate with Enter must not send).
+                                if (event.nativeEvent.isComposing || event.keyCode === 229) {
+                                    return
+                                }
+                                if (event.key !== 'Enter') {
+                                    return
+                                }
+                                if (composerEnterBehavior === 'newline') {
+                                    if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+                                        event.preventDefault()
+                                        void handleSend()
+                                    }
+                                    return
+                                }
+                                if (!event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
                                     event.preventDefault()
                                     void handleSend()
                                 }
