@@ -766,18 +766,44 @@ export class ApiClient {
         )
     }
 
-    async uploadFile(sessionId: string, filename: string, content: string, mimeType: string): Promise<UploadFileResponse> {
+    async uploadFile(sessionId: string, filename: string, content: string, mimeType: string, attachmentId?: string): Promise<UploadFileResponse> {
         return await this.request<UploadFileResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/upload`, {
             method: 'POST',
-            body: JSON.stringify({ filename, content, mimeType })
+            body: JSON.stringify(attachmentId ? { filename, content, mimeType, attachmentId } : { filename, content, mimeType })
         })
     }
 
-    async deleteUploadFile(sessionId: string, path: string): Promise<DeleteUploadResponse> {
+    async deleteUploadFile(sessionId: string, path: string, attachmentId?: string): Promise<DeleteUploadResponse> {
         return await this.request<DeleteUploadResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/upload/delete`, {
             method: 'POST',
-            body: JSON.stringify({ path })
+            body: JSON.stringify(attachmentId ? { path, attachmentId } : { path })
         })
+    }
+
+    /** Hub-served original of a chat image attachment; immutable + ETag cached. */
+    async getSessionAttachmentBlob(sessionId: string, attachmentId: string, attempt: number = 0): Promise<Blob> {
+        const headers = new Headers()
+        const liveToken = this.getToken ? this.getToken() : null
+        const authToken = liveToken ?? this.token
+        if (authToken) {
+            headers.set('authorization', `Bearer ${authToken}`)
+        }
+        const url = this.buildUrl(`/api/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachmentId)}`)
+        let res = await fetch(url, { headers })
+        if (res.status === 304) {
+            res = await fetch(url, { headers, cache: 'force-cache' })
+        }
+        if (res.status === 401 && attempt === 0 && this.onUnauthorized) {
+            const refreshed = await this.onUnauthorized()
+            if (refreshed) {
+                this.token = refreshed
+                return await this.getSessionAttachmentBlob(sessionId, attachmentId, attempt + 1)
+            }
+        }
+        if (!res.ok) {
+            throw new ApiError(`HTTP ${res.status}`, res.status, undefined, await res.text().catch(() => undefined))
+        }
+        return await res.blob()
     }
 
     async resumeSession(sessionId: string, opts?: { permissionMode?: string }): Promise<string> {

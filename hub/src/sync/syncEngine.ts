@@ -4062,6 +4062,62 @@ export class SyncEngine {
         return await this.rpcGateway.uploadFile(sessionId, filename, content, mimeType)
     }
 
+    /**
+     * Keep a durable hub copy of an uploaded chat image. The message payload
+     * carries only a small thumbnail; this copy backs the session attachment
+     * URL used for zoom-to-original. Non-image uploads are not copied.
+     */
+    async saveChatAttachmentCopy(
+        sessionId: string,
+        attachmentId: string,
+        filename: string,
+        mimeType: string,
+        contentBase64: string
+    ): Promise<{ id: string; url: string } | null> {
+        if (!mimeType.startsWith('image/')) return null
+        const buffer = Buffer.from(contentBase64, 'base64')
+        if (buffer.length === 0) return null
+        const { writeChatAttachmentFile, getHapiHomeDir } = await import('../chatAttachments/storage')
+        const { storageKey, sha256, size } = await writeChatAttachmentFile(
+            getHapiHomeDir(),
+            sessionId,
+            attachmentId,
+            filename,
+            buffer
+        )
+        this.store.chatAttachments.upsert({
+            sessionId,
+            id: attachmentId,
+            filename,
+            mimeType,
+            size,
+            sha256,
+            storageKey,
+            createdAt: Date.now()
+        })
+        return { id: attachmentId, url: `/api/sessions/${sessionId}/attachments/${attachmentId}` }
+    }
+
+    async readChatAttachment(
+        sessionId: string,
+        attachmentId: string
+    ): Promise<{ buffer: Buffer; mimeType: string; filename: string; sha256: string } | null> {
+        const row = this.store.chatAttachments.get(sessionId, attachmentId)
+        if (!row) return null
+        const { readChatAttachmentFile, getHapiHomeDir } = await import('../chatAttachments/storage')
+        const buffer = await readChatAttachmentFile(getHapiHomeDir(), row.storageKey)
+        if (!buffer) return null
+        return { buffer, mimeType: row.mimeType, filename: row.filename, sha256: row.sha256 }
+    }
+
+    async deleteChatAttachment(sessionId: string, attachmentId: string): Promise<boolean> {
+        const row = this.store.chatAttachments.get(sessionId, attachmentId)
+        if (!row) return false
+        const { deleteChatAttachmentFile, getHapiHomeDir } = await import('../chatAttachments/storage')
+        await deleteChatAttachmentFile(getHapiHomeDir(), row.storageKey)
+        return this.store.chatAttachments.delete(sessionId, attachmentId)
+    }
+
     async deleteUploadFile(sessionId: string, path: string): Promise<RpcDeleteUploadResponse> {
         return await this.rpcGateway.deleteUploadFile(sessionId, path)
     }

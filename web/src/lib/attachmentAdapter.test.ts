@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const thumbnail = vi.hoisted(() => ({
+    createImageThumbnailDataUrl: vi.fn(async () => 'data:image/webp;base64,dGh1bWI=' as string | null)
+}))
+
+vi.mock('./imageThumbnail', () => ({
+    createImageThumbnailDataUrl: thumbnail.createImageThumbnailDataUrl
+}))
+
 async function collectAdditions(
     file: File,
     uploadFile = vi.fn(async () => ({ success: true, path: '/uploads/file' }))
@@ -19,6 +27,7 @@ async function collectAdditions(
 describe('attachmentAdapter', () => {
     beforeEach(() => {
         vi.stubGlobal('indexedDB', undefined)
+        thumbnail.createImageThumbnailDataUrl.mockClear()
         vi.resetModules()
     })
 
@@ -42,6 +51,7 @@ describe('attachmentAdapter', () => {
             file,
             path: '/uploads/ready.png',
             previewUrl: 'data:image/png;base64,aW1hZ2U=',
+            attachmentUrl: '/api/sessions/session-1/attachments/attachment-ready',
         }])
         const [restored] = await drafts.getDraftAttachments('session-1')
         expect(restored).toBeDefined()
@@ -59,34 +69,19 @@ describe('attachmentAdapter', () => {
             id: 'attachment-ready',
             path: '/uploads/ready.png',
             previewUrl: 'data:image/png;base64,aW1hZ2U=',
+            attachmentUrl: '/api/sessions/session-1/attachments/attachment-ready',
             status: { type: 'requires-action', reason: 'composer-send' },
         })])
     })
 
-    it('uploads an image when the initial preview read fails', async () => {
-        let readCount = 0
-        class FileReaderMock {
-            result: string | ArrayBuffer | null = null
-            onload: FileReader['onload'] = null
-            onerror: FileReader['onerror'] = null
-
-            readAsDataURL(): void {
-                readCount += 1
-                if (readCount === 1) {
-                    this.onerror?.call(this as unknown as FileReader, {} as ProgressEvent<FileReader>)
-                    return
-                }
-                this.result = 'data:image/png;base64,dXBsb2Fk'
-                this.onload?.call(this as unknown as FileReader, {} as ProgressEvent<FileReader>)
-            }
-        }
-        vi.stubGlobal('FileReader', FileReaderMock)
-
+    it('still uploads the original image when no thumbnail can be generated', async () => {
+        thumbnail.createImageThumbnailDataUrl.mockResolvedValueOnce(null)
         const file = new File(['proof'], 'proof.png', { type: 'image/png' })
         const { emitted, uploadFile } = await collectAdditions(file)
 
-        expect(readCount).toBe(2)
-        expect(uploadFile).toHaveBeenCalledWith('session-1', 'proof.png', 'dXBsb2Fk', 'image/png')
+        // The upload always sends the original bytes; a missing preview only
+        // downgrades the bubble to a file card.
+        expect(uploadFile).toHaveBeenCalledWith('session-1', 'proof.png', 'cHJvb2Y=', 'image/png', expect.any(String))
         expect(emitted.at(-1)).toMatchObject({
             status: { type: 'requires-action', reason: 'composer-send' },
             path: '/uploads/file'
@@ -96,31 +91,37 @@ describe('attachmentAdapter', () => {
 })
 
 describe('attachmentAdapter image previews', () => {
-    it('includes the preview URL in every image upload state', async () => {
-        const file = new File(['image'], 'photo.png', { type: 'image/png' })
-        const readSpy = vi.spyOn(FileReader.prototype, 'readAsDataURL')
-        const { emitted } = await collectAdditions(file)
+    beforeEach(() => {
+        thumbnail.createImageThumbnailDataUrl.mockClear()
+    })
 
+    it('includes the thumbnail preview URL in every image upload state', async () => {
+        const file = new File(['image'], 'photo.png', { type: 'image/png' })
+        const { emitted, uploadFile } = await collectAdditions(file)
+
+        expect(thumbnail.createImageThumbnailDataUrl).toHaveBeenCalledWith(file)
         expect(emitted).toHaveLength(3)
         expect(emitted[0]).toMatchObject({
-            previewUrl: 'data:image/png;base64,aW1hZ2U=',
+            previewUrl: 'data:image/webp;base64,dGh1bWI=',
             status: { type: 'running', progress: 0 }
         })
         expect(emitted[1]).toMatchObject({
-            previewUrl: 'data:image/png;base64,aW1hZ2U=',
+            previewUrl: 'data:image/webp;base64,dGh1bWI=',
             status: { type: 'running', progress: 50 }
         })
         expect(emitted[2]).toMatchObject({
-            previewUrl: 'data:image/png;base64,aW1hZ2U=',
+            previewUrl: 'data:image/webp;base64,dGh1bWI=',
             status: { type: 'requires-action' }
         })
-        expect(readSpy).toHaveBeenCalledTimes(1)
+        // The wire payload carries the original, never the thumbnail.
+        expect(uploadFile).toHaveBeenCalledWith('session-1', 'photo.png', 'aW1hZ2U=', 'image/png', expect.any(String))
     })
 
     it('does not generate previews for non-image attachments', async () => {
         const file = new File(['notes'], 'notes.txt', { type: 'text/plain' })
         const { emitted } = await collectAdditions(file)
 
+        expect(thumbnail.createImageThumbnailDataUrl).not.toHaveBeenCalled()
         expect(emitted).toHaveLength(3)
         expect(emitted.every((attachment) => attachment.previewUrl === undefined)).toBe(true)
     })

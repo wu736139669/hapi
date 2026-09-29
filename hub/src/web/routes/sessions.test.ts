@@ -74,6 +74,7 @@ function createApp(session: Session, opts?: {
     updateSessionSummary?: SyncEngine['updateSessionSummary']
     setSessionPinned?: (sessionId: string, pinned: boolean) => void
     setSessionPinMode?: (sessionId: string, mode: 'none' | 'project' | 'global') => void
+    readChatAttachment?: SyncEngine['readChatAttachment']
 }) {
     const applySessionConfigCalls: Array<[string, Record<string, unknown>]> = []
     const applySessionConfig = async (sessionId: string, config: Record<string, unknown>) => {
@@ -173,7 +174,8 @@ function createApp(session: Session, opts?: {
         implementCodexPlan: opts?.implementCodexPlan,
         rewindConversation: opts?.rewindConversation ?? (async () => ({ type: 'success' })),
         suggestSessionTitle: opts?.suggestSessionTitle ?? (async () => 'Generated title'),
-        updateSessionSummary: opts?.updateSessionSummary ?? (async () => {})
+        updateSessionSummary: opts?.updateSessionSummary ?? (async () => {}),
+        readChatAttachment: opts?.readChatAttachment ?? (async () => null)
     } as Partial<SyncEngine>
 
     const app = new Hono<WebAppEnv>()
@@ -187,6 +189,32 @@ function createApp(session: Session, opts?: {
 }
 
 describe('sessions routes', () => {
+    it('serves chat attachments with an immutable ETag and answers 304 revalidation', async () => {
+        const session = createSession()
+        const { app } = createApp(session, {
+            readChatAttachment: async () => ({
+                buffer: Buffer.from('img-bytes'),
+                mimeType: 'image/png',
+                filename: 'photo.png',
+                sha256: 'abc123'
+            })
+        })
+        const first = await app.request('/api/sessions/session-1/attachments/att-1')
+        expect(first.status).toBe(200)
+        expect(first.headers.get('etag')).toBe('"abc123"')
+        expect(first.headers.get('cache-control')).toContain('immutable')
+        expect(await first.text()).toBe('img-bytes')
+
+        const second = await app.request('/api/sessions/session-1/attachments/att-1', {
+            headers: { 'if-none-match': '"abc123"' }
+        })
+        expect(second.status).toBe(304)
+
+        const missing = createApp(createSession())
+        expect((await missing.app.request('/api/sessions/session-1/attachments/att-1')).status).toBe(404)
+        expect((await missing.app.request('/api/sessions/session-1/attachments/bad%2Fid')).status).toBe(400)
+    })
+
     it('dispatches plan implementation using the authenticated namespace and returns stale/unknown outcomes', async () => {
         const session = createSession({ metadata: { path: '/tmp', host: 'test', flavor: 'codex', capabilities: { concurrentClients: true } } })
         const calls: unknown[] = []

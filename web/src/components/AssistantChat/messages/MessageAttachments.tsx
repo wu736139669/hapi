@@ -1,3 +1,5 @@
+import { useCallback, useState } from 'react'
+import type { ApiClient } from '@/api/client'
 import type { AttachmentMetadata } from '@/types/api'
 import { FileIcon } from '@/components/FileIcon'
 import { isImageMimeType } from '@/lib/fileAttachments'
@@ -9,15 +11,56 @@ function formatFileSize(bytes: number): string {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function ImageAttachment(props: { attachment: AttachmentMetadata }) {
+const MAX_CACHED_ORIGINALS = 50
+const originalUrlCache = new Map<string, string>()
+
+function rememberOriginal(key: string, objectUrl: string): void {
+    originalUrlCache.delete(key)
+    originalUrlCache.set(key, objectUrl)
+    while (originalUrlCache.size > MAX_CACHED_ORIGINALS) {
+        const oldest = originalUrlCache.entries().next().value as [string, string] | undefined
+        if (!oldest) break
+        originalUrlCache.delete(oldest[0])
+        URL.revokeObjectURL(oldest[1])
+    }
+}
+
+function ImageAttachment(props: { attachment: AttachmentMetadata; api?: ApiClient; sessionId?: string }) {
     const { attachment } = props
+    const [fullSrc, setFullSrc] = useState<string | undefined>(undefined)
+
+    // Viewer opens with the inline thumbnail and upgrades to the hub-served
+    // original once it loads; old messages without a hub copy keep the thumb.
+    const requestFullSize = useCallback(() => {
+        const { api, sessionId } = props
+        const attachmentUrl = attachment.attachmentUrl
+        if (fullSrc || !attachmentUrl || !api || !sessionId) return
+        const cached = originalUrlCache.get(attachmentUrl)
+        if (cached) {
+            setFullSrc(cached)
+            return
+        }
+        void (async () => {
+            try {
+                const blob = await api.getSessionAttachmentBlob(sessionId, attachment.id)
+                const objectUrl = URL.createObjectURL(blob)
+                rememberOriginal(attachmentUrl, objectUrl)
+                setFullSrc(objectUrl)
+            } catch {
+                // Original unavailable; the thumbnail stays as the best view.
+            }
+        })()
+    }, [attachment.attachmentUrl, attachment.id, fullSrc, props])
+
     return (
         <ImagePreview
             src={attachment.previewUrl ?? ''}
+            fullSrc={fullSrc}
             fileName={attachment.filename}
             label={attachment.filename}
             buttonClassName="relative overflow-hidden rounded-lg text-left cursor-zoom-in"
             imageClassName="max-h-48 max-w-full object-contain"
+            onTriggerClick={requestFullSize}
             caption={(
                 <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5">
                     <span className="text-xs text-white/90 line-clamp-1">
@@ -46,7 +89,7 @@ function FileAttachment(props: { attachment: AttachmentMetadata }) {
     )
 }
 
-export function MessageAttachments(props: { attachments: AttachmentMetadata[] }) {
+export function MessageAttachments(props: { attachments: AttachmentMetadata[]; api?: ApiClient; sessionId?: string }) {
     const { attachments } = props
     if (!attachments || attachments.length === 0) return null
 
@@ -61,7 +104,7 @@ export function MessageAttachments(props: { attachments: AttachmentMetadata[] })
                     data-hapi-image-count={images.length}
                 >
                     {images.map(attachment => (
-                        <ImageAttachment key={attachment.id} attachment={attachment} />
+                        <ImageAttachment key={attachment.id} attachment={attachment} api={props.api} sessionId={props.sessionId} />
                     ))}
                 </div>
             )}

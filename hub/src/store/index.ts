@@ -9,6 +9,7 @@ import type { StoredMessage } from './types'
 import { PushStore } from './pushStore'
 import { FcmStore } from './fcmStore'
 import { ScratchlistStore } from './scratchlistStore'
+import { ChatAttachmentsStore } from './chatAttachments'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
@@ -39,6 +40,7 @@ export { MessageStore } from './messageStore'
 export { PushStore } from './pushStore'
 export { FcmStore } from './fcmStore'
 export { ScratchlistStore } from './scratchlistStore'
+export { ChatAttachmentsStore } from './chatAttachments'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 export { UsageStore } from './usageStore'
@@ -54,7 +56,7 @@ export {
 
 // Usage history is a durable namespace ledger. Keep it independent from
 // session lifetime so deleting a session cannot erase historical totals.
-const SCHEMA_VERSION: number = 26
+export const SCHEMA_VERSION: number = 27
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -64,6 +66,7 @@ const REQUIRED_TABLES = [
     'push_subscriptions',
     'fcm_devices',
     'session_scratchlist',
+    'chat_attachments',
     'usage_events',
     'usage_scan_state',
     'events',
@@ -84,6 +87,7 @@ export class Store {
     readonly push: PushStore
     readonly fcm: FcmStore
     readonly scratchlist: ScratchlistStore
+    readonly chatAttachments: ChatAttachmentsStore
     readonly usage: UsageStore
     readonly studios: StudioStore
     readonly workGraph: WorkGraphStore
@@ -142,6 +146,7 @@ export class Store {
         this.push = new PushStore(this.db)
         this.fcm = new FcmStore(this.db)
         this.scratchlist = new ScratchlistStore(this.db)
+        this.chatAttachments = new ChatAttachmentsStore(this.db)
         this.usage = new UsageStore(this.db)
         this.studios = new StudioStore(this.db)
         this.workGraph = new WorkGraphStore(this.db)
@@ -368,6 +373,7 @@ export class Store {
             23: () => this.migrateFromV23ToV24(),
             24: () => this.migrateFromV24ToV25(),
             25: () => this.migrateFromV25ToV26(),
+            26: () => this.migrateFromV26ToV27(),
         })
 
         if (currentVersion === 0) {
@@ -653,6 +659,20 @@ export class Store {
             );
             CREATE INDEX IF NOT EXISTS idx_studio_posts_room_created
                 ON studio_posts(room_id, created_at ASC);
+
+            CREATE TABLE IF NOT EXISTS chat_attachments (
+                session_id TEXT NOT NULL,
+                id TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                sha256 TEXT NOT NULL,
+                storage_key TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (session_id, id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_chat_attachments_session
+                ON chat_attachments(session_id, created_at);
         `)
     }
 
@@ -1168,6 +1188,29 @@ export class Store {
             LEFT JOIN sessions AS s ON s.id = state.session_id;
             DROP TABLE usage_scan_state;
             ALTER TABLE usage_scan_state_v26 RENAME TO usage_scan_state;
+        `)
+    }
+
+    /**
+     * Durable hub-side copies of chat image attachments, served by
+     * /api/sessions/:id/attachments/:attachmentId with ETag caching. The
+     * message payload keeps only a small thumbnail; the original lives here.
+     */
+    private migrateFromV26ToV27(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS chat_attachments (
+                session_id TEXT NOT NULL,
+                id TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                sha256 TEXT NOT NULL,
+                storage_key TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (session_id, id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_chat_attachments_session
+                ON chat_attachments(session_id, created_at);
         `)
     }
 

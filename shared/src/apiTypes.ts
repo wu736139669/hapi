@@ -716,13 +716,16 @@ export type CursorMigrateRefusalReason =
 export const UploadFileRequestSchema = z.object({
     filename: z.string().min(1).max(255),
     content: z.string().min(1),
-    mimeType: z.string().min(1).max(255)
+    mimeType: z.string().min(1).max(255),
+    /** Client attachment id; lets the hub keep a durable copy addressable by id. */
+    attachmentId: z.string().min(1).max(64).regex(/^[A-Za-z0-9._-]+$/).optional()
 })
 
 export type UploadFileRequest = z.infer<typeof UploadFileRequestSchema>
 
 export const DeleteUploadRequestSchema = z.object({
-    path: z.string().min(1)
+    path: z.string().min(1),
+    attachmentId: z.string().min(1).max(64).regex(/^[A-Za-z0-9._-]+$/).optional()
 })
 
 export type DeleteUploadRequest = z.infer<typeof DeleteUploadRequestSchema>
@@ -955,6 +958,10 @@ export type GeneratedImageResponse = {
 export type UploadFileResponse = {
     success: boolean
     path?: string
+    /** Set when the hub kept a durable image copy for web display. */
+    attachmentId?: string
+    /** Session-scoped URL for the hub copy, e.g. /api/sessions/<id>/attachments/<attachmentId>. */
+    attachmentUrl?: string
     error?: string
 }
 

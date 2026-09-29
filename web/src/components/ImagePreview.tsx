@@ -31,6 +31,8 @@ function getPointCenter(a: ImagePoint, b: ImagePoint): ImagePoint {
 
 export function ImagePreview(props: {
     src: string
+    /** Optional higher-resolution source swapped in once loaded (viewer only). */
+    fullSrc?: string
     fileName: string
     label: string
     buttonClassName?: string
@@ -377,7 +379,7 @@ export function ImagePreview(props: {
                         onDoubleClick={resetView}
                     >
                         <img
-                            src={activePreview.src}
+                            src={props.fullSrc ?? activePreview.src}
                             alt={activePreview.label}
                             draggable={false}
                             className="absolute left-1/2 top-1/2 max-h-[90vh] max-w-[90vw] select-none object-contain"

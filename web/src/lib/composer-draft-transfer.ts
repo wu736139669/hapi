@@ -122,6 +122,7 @@ function stripSessionScopedUploadFields(attachment: AttachmentDraftInput): Attac
         ...attachment,
         path: undefined,
         previewUrl: undefined,
+        attachmentUrl: undefined,
         uploadSessionId: undefined,
     }
 }
@@ -151,6 +152,7 @@ async function loadPersistedAttachments(
             file,
             path: metadata?.path,
             previewUrl: metadata?.previewUrl,
+            attachmentUrl: metadata?.attachmentUrl,
             uploadSessionId: metadata?.uploadSessionId,
         }
     })

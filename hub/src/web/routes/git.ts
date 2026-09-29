@@ -4,6 +4,7 @@ import { z } from 'zod'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
+import { IMMUTABLE_MEDIA_CACHE_CONTROL as GENERATED_IMAGE_CACHE_CONTROL, ifNoneMatchMatches } from '../mediaCache'
 
 const fileSearchSchema = z.object({
     query: z.string().optional(),
@@ -44,20 +45,6 @@ async function runRpc<T>(fn: () => Promise<T>): Promise<T | { success: false; er
     }
 }
 
-// Generated-image bytes for a given id never change, so they are cached for a year as immutable.
-const GENERATED_IMAGE_CACHE_CONTROL = 'private, max-age=31536000, immutable'
-
-// Weak comparison of an If-None-Match header against our ETag (handles lists, `*`, and W/ prefixes).
-function ifNoneMatchMatches(header: string | undefined, etag: string): boolean {
-    if (!header) {
-        return false
-    }
-    const normalized = etag.replace(/^W\//, '')
-    return header.split(',').some((candidate) => {
-        const trimmed = candidate.trim()
-        return trimmed === '*' || trimmed.replace(/^W\//, '') === normalized
-    })
-}
 
 export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()

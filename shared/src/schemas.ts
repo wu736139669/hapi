@@ -318,7 +318,9 @@ export const AttachmentMetadataSchema = z.object({
     mimeType: z.string(),
     size: z.number(),
     path: z.string(),
-    previewUrl: z.string().optional()
+    previewUrl: z.string().optional(),
+    /** Hub-served original image URL for zoom-to-full-size (web display detail). */
+    attachmentUrl: z.string().optional()
 })
 
 export type AttachmentMetadata = z.infer<typeof AttachmentMetadataSchema>

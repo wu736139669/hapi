@@ -20,7 +20,8 @@ function parseAttachments(raw: unknown): AttachmentMetadata[] | undefined {
                 mimeType: item.mimeType,
                 size: item.size,
                 path: item.path,
-                previewUrl: typeof item.previewUrl === 'string' ? item.previewUrl : undefined
+                previewUrl: typeof item.previewUrl === 'string' ? item.previewUrl : undefined,
+                attachmentUrl: typeof item.attachmentUrl === 'string' ? item.attachmentUrl : undefined
             })
         }
     }

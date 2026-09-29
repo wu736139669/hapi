@@ -3,16 +3,17 @@ import type { ApiClient } from '@/api/client'
 import type { AttachmentMetadata } from '@/types/api'
 import { isImageMimeType } from '@/lib/fileAttachments'
 import { randomId } from '@/lib/randomId'
+import { createImageThumbnailDataUrl } from '@/lib/imageThumbnail'
 import { getRestoredUploadMetadata } from '@/lib/composer-attachment-drafts'
 import type { AttachmentDraftHandoff } from '@/lib/composer-draft-transfer'
 
 /** Composer / share upload ceiling — keep deep-link fetch in sync. */
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-const MAX_PREVIEW_BYTES = 5 * 1024 * 1024
 
 type PendingUploadAttachment = PendingAttachment & {
     path?: string
     previewUrl?: string
+    attachmentUrl?: string
     uploadSessionId?: string
 }
 
@@ -27,10 +28,10 @@ export function createAttachmentAdapter(
 ): AttachmentAdapter {
     const cancelledAttachmentIds = new Set<string>()
 
-    const deleteUpload = async (path?: string, uploadSessionId = sessionId) => {
+    const deleteUpload = async (path?: string, uploadSessionId = sessionId, attachmentId?: string) => {
         if (!path) return
         try {
-            await api.deleteUploadFile(uploadSessionId, path)
+            await api.deleteUploadFile(uploadSessionId, path, attachmentId)
         } catch {
             // Best effort cleanup
         }
@@ -60,6 +61,7 @@ export function createAttachmentAdapter(
                     status: { type: 'requires-action', reason: 'composer-send' },
                     path: restored.path,
                     previewUrl: restored.previewUrl,
+                    attachmentUrl: restored.attachmentUrl,
                     uploadSessionId: restored.uploadSessionId,
                 } as PendingUploadAttachment
                 return
@@ -70,12 +72,10 @@ export function createAttachmentAdapter(
 
             try {
                 let previewUrl: string | undefined
-                if (isImageMimeType(contentType) && file.size <= MAX_PREVIEW_BYTES) {
-                    try {
-                        previewUrl = await fileToDataUrl(file)
-                    } catch {
-                        // Preview generation is optional; retry the read for the upload payload below.
-                    }
+                if (isImageMimeType(contentType)) {
+                    // Small thumbnail only: the original travels to the hub as a
+                    // separate cached attachment, never inside the message JSON.
+                    previewUrl = await createImageThumbnailDataUrl(file) ?? undefined
                 }
 
                 yield {
@@ -121,9 +121,8 @@ export function createAttachmentAdapter(
                     return
                 }
 
-                const content = previewUrl
-                    ? base64FromDataUrl(previewUrl)
-                    : await fileToBase64(file)
+                // Upload the original bytes; the wire preview stays a thumbnail.
+                const content = await fileToBase64(file)
 
                 if (cancelledAttachmentIds.has(id)) {
                     return
@@ -139,10 +138,10 @@ export function createAttachmentAdapter(
                     previewUrl
                 } as PendingUploadAttachment
 
-                const result = await api.uploadFile(uploadSessionId, file.name, content, contentType)
+                const result = await api.uploadFile(uploadSessionId, file.name, content, contentType, id)
                 if (cancelledAttachmentIds.has(id)) {
                     if (result.success && result.path) {
-                        await deleteUpload(result.path, uploadSessionId)
+                        await deleteUpload(result.path, uploadSessionId, id)
                     }
                     return
                 }
@@ -168,6 +167,7 @@ export function createAttachmentAdapter(
                     status: { type: 'requires-action', reason: 'composer-send' },
                     path: result.path,
                     previewUrl,
+                    attachmentUrl: result.attachmentUrl,
                     uploadSessionId,
                 } as PendingUploadAttachment
 
@@ -187,7 +187,7 @@ export function createAttachmentAdapter(
             cancelledAttachmentIds.add(attachment.id)
             const path = (attachment as PendingUploadAttachment).path
             const uploadSessionId = (attachment as PendingUploadAttachment).uploadSessionId
-            await deleteUpload(path, uploadSessionId)
+            await deleteUpload(path, uploadSessionId, attachment.id)
         },
 
         async send(attachment: PendingAttachment): Promise<CompleteAttachment> {
@@ -201,7 +201,8 @@ export function createAttachmentAdapter(
                 mimeType: attachment.contentType ?? 'application/octet-stream',
                 size: attachment.file?.size ?? 0,
                 path,
-                previewUrl: pending.previewUrl
+                previewUrl: pending.previewUrl,
+                ...(pending.attachmentUrl ? { attachmentUrl: pending.attachmentUrl } : {})
             } : undefined
 
             return {

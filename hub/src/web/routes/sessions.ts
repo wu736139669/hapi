@@ -34,6 +34,7 @@ import { loadScratchlistAttachmentLimitsFromEnv } from '../../config/scratchlist
 import { validateScratchlistAttachmentsForWrite, scratchlistSessionBytesBeforeForPut } from '../../scratchlistAttachments/validate'
 import { TitleSuggestionError } from '../../sync/titleSuggestion'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
+import { IMMUTABLE_MEDIA_CACHE_CONTROL, ifNoneMatchMatches } from '../mediaCache'
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
@@ -315,6 +316,26 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 parsed.data.content,
                 parsed.data.mimeType
             )
+            // Keep a durable hub copy of images so the chat can show a small
+            // thumbnail inline and lazy-load the original from a cached URL.
+            // Copy failures must not fail the upload: the agent still gets the
+            // file, only zoom-to-original degrades.
+            if (result.success && parsed.data.attachmentId) {
+                try {
+                    const saved = await engine.saveChatAttachmentCopy(
+                        sessionResult.sessionId,
+                        parsed.data.attachmentId,
+                        parsed.data.filename,
+                        parsed.data.mimeType,
+                        parsed.data.content
+                    )
+                    if (saved) {
+                        return c.json({ ...result, attachmentId: saved.id, attachmentUrl: saved.url })
+                    }
+                } catch {
+                    // Best-effort copy; keep the successful upload response.
+                }
+            }
             return c.json(result)
         } catch (error) {
             return c.json({
@@ -322,6 +343,46 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 error: error instanceof Error ? error.message : 'Failed to upload file'
             }, 500)
         }
+    })
+
+    app.get('/sessions/:id/attachments/:attachmentId', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const attachmentId = c.req.param('attachmentId')
+        if (!/^[A-Za-z0-9._-]{1,64}$/.test(attachmentId)) {
+            return c.json({ error: 'Invalid attachment id' }, 400)
+        }
+
+        const attachment = await engine.readChatAttachment(sessionResult.sessionId, attachmentId)
+        if (!attachment) {
+            return c.json({ error: 'Attachment not found' }, 404)
+        }
+
+        // The sha256 is a content fingerprint, so it doubles as the ETag. Answer
+        // 304 before re-reading bytes when the client already holds this version.
+        const etag = `"${attachment.sha256}"`
+        if (ifNoneMatchMatches(c.req.header('if-none-match'), etag)) {
+            return c.body(null, 304, {
+                'Cache-Control': IMMUTABLE_MEDIA_CACHE_CONTROL,
+                ETag: etag
+            })
+        }
+
+        return c.body(Uint8Array.from(attachment.buffer), 200, {
+            'Content-Type': attachment.mimeType,
+            'Content-Disposition': `inline; filename="${encodeURIComponent(attachment.filename)}"`,
+            'X-Content-Type-Options': 'nosniff',
+            'Cache-Control': IMMUTABLE_MEDIA_CACHE_CONTROL,
+            ETag: etag
+        })
     })
 
     app.post('/sessions/:id/upload/delete', async (c) => {
@@ -343,6 +404,13 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
 
         try {
             const result = await engine.deleteUploadFile(sessionResult.sessionId, parsed.data.path)
+            if (parsed.data.attachmentId) {
+                try {
+                    await engine.deleteChatAttachment(sessionResult.sessionId, parsed.data.attachmentId)
+                } catch {
+                    // Best effort: an orphaned copy is reclaimable by the attachments gc script.
+                }
+            }
             return c.json(result)
         } catch (error) {
             return c.json({

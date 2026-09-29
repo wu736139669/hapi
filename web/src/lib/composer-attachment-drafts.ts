@@ -11,6 +11,7 @@ type StoredAttachment = {
     blob: Blob
     path?: string
     previewUrl?: string
+    attachmentUrl?: string
     uploadSessionId?: string
 }
 
@@ -29,6 +30,7 @@ export type AttachmentDraftInput = {
     file: File
     path?: string
     previewUrl?: string
+    attachmentUrl?: string
     uploadSessionId?: string
 }
 
@@ -36,6 +38,7 @@ export type RestoredUploadMetadata = {
     id: string
     path?: string
     previewUrl?: string
+    attachmentUrl?: string
     uploadSessionId?: string
 }
 
@@ -77,6 +80,7 @@ function toStoredFile(attachment: AttachmentDraftInput): StoredAttachment {
         blob: file,
         path: attachment.path,
         previewUrl: attachment.previewUrl,
+        attachmentUrl: attachment.attachmentUrl,
         uploadSessionId: attachment.uploadSessionId,
     }
 }
@@ -92,6 +96,7 @@ function toFile(file: StoredAttachment): File {
         id: file.id,
         path: file.path,
         previewUrl: file.previewUrl,
+        attachmentUrl: file.attachmentUrl,
         uploadSessionId: file.uploadSessionId,
     })
     return restored
