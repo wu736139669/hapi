@@ -3,9 +3,8 @@
  */
 
 import { io, type Socket } from 'socket.io-client'
-import { readdir, realpath, stat } from 'node:fs/promises'
-import { realpathSync } from 'node:fs'
-import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
+import { readdir, stat } from 'node:fs/promises'
+import { join } from 'node:path'
 import { logger } from '@/ui/logger'
 import { configuration } from '@/configuration'
 import type { ClientToServerEvents, ServerToClientEvents, Update, UpdateMachineBody } from '@hapi/protocol'
@@ -68,7 +67,9 @@ import { inspectCursorChatStore } from '@/cursor/cursorChatStoreStatus'
 import { homedir } from 'node:os'
 import type { CursorChatStoreStatus } from '@hapi/protocol/apiTypes'
 import { getAgentAvailabilityResponse } from '@/agent/agentAvailability'
-import { MachinePathPolicy } from './machinePathPolicy'
+import { MachinePathPolicy, normalizeWindowsDriveRoot } from './machinePathPolicy'
+
+export { normalizeWindowsDriveRoot }
 
 type MachineRpcHandlers = {
     spawnSession: (options: SpawnSessionOptions) => Promise<SpawnSessionResult>
@@ -91,30 +92,6 @@ interface CursorChatStoreStatusRequest {
     homeDir?: string
 }
 
-export function normalizeWindowsDriveRoot(path: string): string {
-    return /^[A-Za-z]:$/.test(path) ? `${path}\\` : path
-}
-
-function canonicalRealpathSync(path: string): string {
-    return normalizeWindowsDriveRoot(realpathSync.native(path))
-}
-
-function normalizeWorkspaceRoots(paths?: string[]): string[] | undefined {
-    if (!paths?.length) {
-        return undefined
-    }
-
-    const normalized = Array.from(new Set(paths.map((path) => {
-        try {
-            return canonicalRealpathSync(path)
-        } catch {
-            return normalizeWindowsDriveRoot(resolvePath(path))
-        }
-    })))
-
-    return normalized.length > 0 ? normalized : undefined
-}
-
 function workspaceRootsEqual(left?: string[], right?: string[]): boolean {
     const normalizedLeft = left ?? []
     const normalizedRight = right ?? []
@@ -135,7 +112,6 @@ export class ApiMachineClient {
     private keepAliveStartTimeout: ReturnType<typeof setTimeout> | null = null
     private rpcHandlerManager: RpcHandlerManager
 
-    private readonly normalizedWorkspaceRoots: string[] | undefined
     private readonly pathPolicy: MachinePathPolicy
 
     constructor(
@@ -143,13 +119,8 @@ export class ApiMachineClient {
         private readonly machine: Machine,
         private readonly workspaceRoots?: string[]
     ) {
-        // Realpath roots once so all subsequent comparisons are against
-        // canonical, symlink-resolved locations. Falls back to lexical
-        // resolution if realpath fails so we still get protection.
-        this.normalizedWorkspaceRoots = normalizeWorkspaceRoots(workspaceRoots)
         this.pathPolicy = new MachinePathPolicy({
             workspaceRoots,
-            homeDirectory: this.machine.metadata?.homeDir ?? homedir(),
         })
 
         this.rpcHandlerManager = new RpcHandlerManager({
@@ -196,7 +167,7 @@ export class ApiMachineClient {
         )
 
         this.rpcHandlerManager.registerHandler<ListMachineDirectoryRequest, MachineListDirectoryResponse>(RPC_METHODS.ListMachineDirectory, async (params) => {
-            if (!this.normalizedWorkspaceRoots?.length) {
+            if (!this.pathPolicy.hasWorkspaceRoots()) {
                 return { success: false, error: 'Workspace browsing is not enabled for this machine' }
             }
 
@@ -207,8 +178,8 @@ export class ApiMachineClient {
 
             const includeHidden = params?.includeHidden === true
 
-            const targetPath = await this.resolveForWorkspaceCheck(rawPath)
-            if (!this.isWithinWorkspaceRoots(targetPath)) {
+            const targetPath = await this.pathPolicy.resolveForCheck(rawPath)
+            if (!this.pathPolicy.isWithinBrowseRoots(targetPath)) {
                 return { success: false, error: 'Path is outside workspace roots' }
             }
 
@@ -225,34 +196,27 @@ export class ApiMachineClient {
                     if (!includeHidden && entry.name.startsWith('.')) return
 
                     const fullPath = join(targetPath, entry.name)
+                    const resolvedEntryPath = entry.isSymbolicLink()
+                        ? await this.pathPolicy.resolveForCheck(fullPath)
+                        : fullPath
+                    if (!this.pathPolicy.isWithinBrowseRoots(resolvedEntryPath)) return
+                    const stats = await stat(resolvedEntryPath).catch(() => undefined)
                     let type: 'file' | 'directory' | 'other' = 'other'
-                    let size: number | undefined
-                    let modified: number | undefined
                     let isGitRepo = false
 
-                    if (entry.isDirectory()) {
+                    if (entry.isDirectory() || stats?.isDirectory()) {
                         type = 'directory'
                         try {
-                            const gitStat = await stat(join(fullPath, '.git'))
+                            const gitStat = await stat(join(resolvedEntryPath, '.git'))
                             isGitRepo = gitStat.isDirectory() || gitStat.isFile()
                         } catch {
                             // not a git repo
                         }
-                    } else if (entry.isFile()) {
+                    } else if (entry.isFile() || stats?.isFile()) {
                         type = 'file'
                     }
 
-                    if (!entry.isSymbolicLink()) {
-                        try {
-                            const stats = await stat(fullPath)
-                            size = stats.size
-                            modified = stats.mtime.getTime()
-                        } catch {
-                            // ignore stat errors
-                        }
-                    }
-
-                    entries.push({ name: entry.name, type, size, modified, isGitRepo })
+                    entries.push({ name: entry.name, type, size: stats?.size, modified: stats?.mtime.getTime(), isGitRepo })
                 }))
 
                 entries.sort((a, b) => {
@@ -469,50 +433,10 @@ export class ApiMachineClient {
     }
 
     private async isLocalSessionWithinWorkspaceRoots(session: { cwd?: string | null }): Promise<boolean> {
-        if (!this.normalizedWorkspaceRoots?.length) return true
+        if (!this.pathPolicy.hasWorkspaceRoots()) return true
         const cwd = session.cwd?.trim()
         if (!cwd) return false
-        const resolvedCwd = await this.resolveForWorkspaceCheck(cwd)
-        return this.pathPolicy.isWithinSpawnRoots(resolvedCwd)
-    }
-
-    private isWithinWorkspaceRoots(absolutePath: string): boolean {
-        if (!this.normalizedWorkspaceRoots?.length) return true
-        return this.normalizedWorkspaceRoots.some((workspaceRoot) => {
-            const rel = relative(workspaceRoot, absolutePath)
-            return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
-        })
-    }
-
-    /**
-     * Canonicalize a path for workspace-root containment checks. Resolves
-     * symlinks via realpath so a symlink such as `/safe/out -> /etc` cannot
-     * be used to escape the configured root with a lexical-only check.
-     *
-     * If the path doesn't exist (e.g. a session is being spawned in a
-     * directory we'll create), walks up to the nearest existing ancestor
-     * and realpaths *that*, joining the missing tail back on. This way the
-     * check still runs against the real on-disk location once any
-     * intermediate symlink in the parent chain has been resolved.
-     */
-    private async resolveForWorkspaceCheck(path: string): Promise<string> {
-        const absolute = resolvePath(path)
-        try {
-            return normalizeWindowsDriveRoot(await realpath(absolute))
-        } catch {
-            const missing: string[] = []
-            let cursor = absolute
-            while (cursor !== dirname(cursor)) {
-                missing.unshift(basename(cursor))
-                cursor = dirname(cursor)
-                try {
-                    return join(normalizeWindowsDriveRoot(await realpath(cursor)), ...missing)
-                } catch {
-                    // keep walking to the nearest existing parent
-                }
-            }
-            return normalizeWindowsDriveRoot(absolute)
-        }
+        return this.pathPolicy.isWithinSpawnRoots(await this.pathPolicy.resolveForCheck(cwd))
     }
 
     setRPCHandlers({ spawnSession, stopSession, requestShutdown }: MachineRpcHandlers): void {
@@ -523,8 +447,8 @@ export class ApiMachineClient {
                 throw new Error('Directory is required')
             }
 
-            const resolvedDirectory = await this.resolveForWorkspaceCheck(directory)
-            if (!this.isWithinWorkspaceRoots(resolvedDirectory)) {
+            const resolvedDirectory = await this.pathPolicy.resolveForCheck(directory)
+            if (!this.pathPolicy.isWithinSpawnRoots(resolvedDirectory)) {
                 return { type: 'error', errorMessage: 'Directory is outside this machine\'s workspace roots' }
             }
 

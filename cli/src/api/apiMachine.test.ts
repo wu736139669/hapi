@@ -765,6 +765,51 @@ describe('ApiMachineClient list-directory handler', () => {
         return entries.map((entry) => entry.name).sort()
     }
 
+    it('refuses browsing when no workspace roots are configured', async () => {
+        // Local deployment policy: a machine without --workspace-root keeps
+        // directory browsing disabled instead of exposing the runner account's
+        // whole filesystem to the web UI.
+        const machine = makeMachine('machine-ls-unrestricted')
+        const client = new ApiMachineClient('cli-token', machine)
+        try {
+            const result = await callListDirectory(client, machine.id, { path: workspaceRoot })
+            expect(result).toMatchObject({
+                success: false,
+                error: 'Workspace browsing is not enabled for this machine'
+            })
+        } finally {
+            client.shutdown()
+        }
+    })
+
+    it('lists in-root directory links and rejects links escaping explicit workspace roots', async () => {
+        const outside = mkdtempSync(join(tmpdir(), 'hapi-machine-ls-outside-'))
+        mkdirSync(join(workspaceRoot, 'visible-dir', '.git'))
+        symlinkSync(join(workspaceRoot, 'visible-dir'), join(workspaceRoot, 'linked-repo'), 'dir')
+        symlinkSync(outside, join(workspaceRoot, 'escape'), 'dir')
+        const machine = makeMachine('machine-ls-links')
+        const client = new ApiMachineClient('cli-token', machine, [workspaceRoot])
+        try {
+            const result = await callListDirectory(client, machine.id, { path: workspaceRoot })
+            expect(result).toMatchObject({
+                success: true,
+                entries: expect.arrayContaining([
+                    expect.objectContaining({ name: 'linked-repo', type: 'directory', isGitRepo: true }),
+                ]),
+            })
+            expect(entryNames(result)).not.toContain('escape')
+            expect(await callListDirectory(client, machine.id, { path: join(workspaceRoot, 'escape') }))
+                .toEqual({ success: false, error: 'Path is outside workspace roots' })
+            expect(await callListDirectory(client, machine.id, { path: join(workspaceRoot, '..') }))
+                .toEqual({ success: false, error: 'Path is outside workspace roots' })
+            expect(await callListDirectory(client, machine.id, { path: join(workspaceRoot, 'linked-repo') }))
+                .toMatchObject({ success: true })
+        } finally {
+            client.shutdown()
+            rmSync(outside, { recursive: true, force: true })
+        }
+    })
+
     it('filters dot-prefixed entries by default', async () => {
         const machine = makeMachine('machine-ls-1')
         const client = new ApiMachineClient('cli-token', machine, [workspaceRoot])
