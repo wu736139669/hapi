@@ -180,7 +180,10 @@ export class SharedCodexRoot {
             'shell_environment_policy.set.HAPI_SESSION_ID': this.session.sessionId
         } };
     }
-    async bind(threadId: string, response: Record<string, unknown>, subscribe: boolean): Promise<void> {
+    /** Local claim only: queue, projection, metadata and settings. Native
+     *  history reconciliation is a separate step (syncHistory) so liveness
+     *  signals never wait on an arbitrarily large thread replay. */
+    async bind(threadId: string, response: Record<string, unknown>, subscribe: boolean): Promise<Record<string, unknown>> {
         if (this.threadId && this.threadId !== threadId) throw new Error('Cannot retarget a shared HAPI session');
         this.threadId = threadId;
         this.queue = new SharedCodexQueue(this.client, threadId, join(this.host.directory, `${this.session.sessionId}.queue.json`),
@@ -201,6 +204,11 @@ export class SharedCodexRoot {
         }));
         if (subscribe) response = record(await this.client.request('thread/resume', { threadId }));
         this.acceptSettings(response); this.acceptSettings(this.host.settingsFor(threadId) ?? {});
+        return response;
+    }
+    /** Reconcile the full native history into the hub. Huge threads can take
+     *  minutes; the HAPI session is already usable while this runs. */
+    async syncHistory(response: Record<string, unknown>): Promise<void> {
         await this.projection.history(response.thread); await this.refresh(); await this.refreshChildren(true);
     }
     async activate(options: SharedLaunchOptions = {}): Promise<void> {

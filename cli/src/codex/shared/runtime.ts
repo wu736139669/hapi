@@ -201,15 +201,19 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
         await control.request('thread/metadata/update', { threadId, gitInfo: gitInfo(string(record(response.thread).cwd) ?? root.bootstrap.workingDirectory) });
         assertRunning();
         roots.set(threadId, root);
-        await root.bind(threadId, response, subscribe);
+        const effective = await root.bind(threadId, response, subscribe);
         assertRunning();
-        // Cold-resumed threads predate the control connection's automatic
-        // new-thread subscription. Subscribe once without changing settings.
-        await control.request('thread/resume', { threadId });
         await root.activate(initialOptions);
         await root.session.flush();
         await persist();
+        // The runner kills a child whose "session started" webhook misses its
+        // bounded wait. Report ownership as soon as the session is controllable;
+        // the native-history replay below can take minutes on large threads.
         await notifyRunnerSessionStarted(root.session.sessionId, root.session.getMetadata() ?? root.bootstrap.metadata);
+        // Cold-resumed threads predate the control connection's automatic
+        // new-thread subscription. Subscribe once without changing settings.
+        await control.request('thread/resume', { threadId });
+        await root.syncHistory(effective);
     };
     const create = (method: 'thread/start' | 'thread/fork', params: Record<string, unknown>, parent?: SharedCodexRoot, initialOptions?: SharedLaunchOptions): Promise<SharedCodexRoot> => operation(async () => {
         const root = await prepare(string(params.cwd) ?? launch.cwd, undefined, parent);

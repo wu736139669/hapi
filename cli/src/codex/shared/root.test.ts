@@ -15,6 +15,7 @@ vi.mock('../codexAppServerClient', () => ({
         thread = { id: 'thread', turns: [] as NativeTurn[] };
         settings: Record<string, unknown> = { model: 'mock', collaborationMode: { mode: 'default' } };
         queue: Array<{ id: string; clientUserMessageId: unknown; input: unknown }> = [];
+        requests: string[] = [];
         notify?: (method: string, params: unknown) => void;
         abandoned?: () => void;
         setNotificationHandler(handler: typeof this.notify) { this.notify = handler; }
@@ -25,6 +26,7 @@ vi.mock('../codexAppServerClient', () => ({
         isInitialized() { return this.initialized; }
         async disconnect() { this.initialized = false; }
         async request(method: string, params: Record<string, unknown> = {}) {
+            this.requests.push(method);
             if (method === 'thread/read' || method === 'thread/resume') return { ...this.settings, thread: structuredClone(this.thread) };
             if (method === 'thread/list') return { data: [] };
             if (method === 'thread/queue/list') return { data: this.queue };
@@ -53,7 +55,7 @@ afterEach(async () => {
     finally { vi.useRealTimers(); }
 });
 
-async function fixture() {
+async function fixture(options: { deferHistory?: boolean } = {}) {
     const directory = await mkdtemp('/tmp/hapi-shared-root-');
     let state: AgentState = { steeringActive: true };
     let metadata: Metadata = { path: directory, host: 'test', flavor: 'codex' };
@@ -79,15 +81,17 @@ async function fixture() {
     } satisfies RootHost);
     cleanups.push(async () => { await root.close(false); await rm(directory, { recursive: true, force: true }); });
     await root.prepare();
-    await root.bind('thread', { model: 'mock', thread: { turns: [] } }, false);
+    const response = await root.bind('thread', { model: 'mock', thread: { turns: [] } }, false);
+    if (!options.deferHistory) await root.syncHistory(response);
     const native = root.client as unknown as {
         initialized: boolean;
         thread: { id: string; turns: NativeTurn[] };
         queue: Array<{ id: string; clientUserMessageId: string; input: unknown }>;
+        requests: string[];
         notify(method: string, params: unknown): void;
         abandoned(): void;
     };
-    return { root, native, rpc, send, state: () => state, updateState, reconnect: () => reconnect?.() };
+    return { root, native, rpc, send, state: () => state, updateState, reconnect: () => reconnect?.(), syncHistory: () => root.syncHistory(response) };
 }
 
 async function completePlan(f: Awaited<ReturnType<typeof fixture>>, status = 'completed') {
@@ -104,6 +108,13 @@ async function completePlan(f: Awaited<ReturnType<typeof fixture>>, status = 'co
 }
 
 describe('shared plan actions', () => {
+    it('keeps bind local and reconciles native history only in syncHistory', async () => {
+        const f = await fixture({ deferHistory: true });
+        expect(f.native.requests).not.toContain('thread/read');
+        await f.syncHistory();
+        expect(f.native.requests).toContain('thread/read');
+    });
+
     it('preserves content while native turns, mode changes and disconnects withdraw controls', async () => {
         const f = await fixture();
         const id = await completePlan(f);
