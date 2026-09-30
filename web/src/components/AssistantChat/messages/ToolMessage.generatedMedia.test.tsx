@@ -129,7 +129,7 @@ describe('GeneratedImageCard video fetch', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Load video' }))
 
         await waitFor(() => {
-            expect(getGeneratedImageBlob).toHaveBeenCalledWith('session-1', 'img-1')
+            expect(getGeneratedImageBlob).toHaveBeenCalledWith('session-1', 'img-1', 0, undefined, expect.any(Function))
         })
     })
 
@@ -149,6 +149,29 @@ describe('GeneratedImageCard video fetch', () => {
         await waitFor(() => {
             expect(document.querySelector('audio[controls]')).toBeInTheDocument()
         })
+    })
+
+    it('shows byte progress while an explicitly loaded video downloads', async () => {
+        let release!: () => void
+        const gate = new Promise<void>((resolve) => { release = resolve })
+        const getGeneratedImageBlob = vi.fn(async (
+            _sessionId: string,
+            _imageId: string,
+            _attempt?: number,
+            _token?: string | null,
+            onProgress?: (loaded: number, total: number | null) => void
+        ) => {
+            onProgress?.(5, 10)
+            await gate
+            return new Blob(['x'], { type: 'video/mp4' })
+        })
+        renderCard({ mimeType: 'video/mp4', getGeneratedImageBlob })
+
+        fireEvent.click(screen.getByRole('button', { name: 'Load video' }))
+
+        await waitFor(() => expect(screen.getByText('50%')).toBeInTheDocument())
+        release()
+        await waitFor(() => expect(document.querySelector('video')).toBeInTheDocument())
     })
 
     it('returns an evicted video card to its Load button to bound memory', async () => {

@@ -77,6 +77,7 @@ import type {
 import type { AgentFlavor, MessageDeliveryMode } from '@hapi/protocol'
 import type { CancelMessageResponse, SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
 import type { TranscriptionMode, TranscriptionProvider, TranscriptionProviderInfo } from '@hapi/protocol/voice'
+import { readBlobWithProgress, type BlobProgressReporter } from '@/lib/readBlobWithProgress'
 
 export type RetryIndeterminateMessageResponse =
     | { status: 'retried' | 'already-queued' | 'retry-unavailable'; localId: string | null }
@@ -719,7 +720,13 @@ export class ApiClient {
         return await this.request<FileSearchResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/files${qs ? `?${qs}` : ''}`)
     }
 
-    async getGeneratedImageBlob(sessionId: string, imageId: string, attempt: number = 0, overrideToken?: string | null): Promise<Blob> {
+    async getGeneratedImageBlob(
+        sessionId: string,
+        imageId: string,
+        attempt: number = 0,
+        overrideToken?: string | null,
+        onProgress?: BlobProgressReporter
+    ): Promise<Blob> {
         const headers = new Headers()
         const liveToken = this.getToken ? this.getToken() : null
         const authToken = overrideToken !== undefined
@@ -739,13 +746,13 @@ export class ApiClient {
             const refreshed = await this.onUnauthorized()
             if (refreshed) {
                 this.token = refreshed
-                return await this.getGeneratedImageBlob(sessionId, imageId, attempt + 1, refreshed)
+                return await this.getGeneratedImageBlob(sessionId, imageId, attempt + 1, refreshed, onProgress)
             }
         }
         if (!res.ok) {
             throw new ApiError(`HTTP ${res.status}`, res.status, undefined, await res.text().catch(() => undefined))
         }
-        return await res.blob()
+        return await readBlobWithProgress(res, onProgress)
     }
 
     async readSessionFile(sessionId: string, path: string): Promise<FileReadResponse> {

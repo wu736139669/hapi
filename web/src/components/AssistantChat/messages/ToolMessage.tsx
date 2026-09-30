@@ -72,6 +72,7 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
     const [error, setError] = useState<string | null>(null)
     const [imageStyle, setImageStyle] = useState<CSSProperties | undefined>(undefined)
     const [loadMedia, setLoadMedia] = useState(false)
+    const [progress, setProgress] = useState<{ loaded: number; total: number | null } | null>(null)
     const objectUrlRef = useRef<string | null>(null)
     const evictedRef = useRef(false)
     const isVideo = isInlineVideoMimeType(props.block.mimeType)
@@ -107,19 +108,35 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
             // listener brings this card back to its Load button when evicted.
             setError(null)
             evictedRef.current = false
+            setProgress({ loaded: 0, total: null })
             const unsubscribe = subscribeGeneratedMediaEviction(mediaKey, () => {
                 evictedRef.current = true
                 setObjectUrl(null)
                 setLoadMedia(false)
+                setProgress(null)
             })
-            void loadGeneratedMediaObjectUrl(mediaKey, () => ctx.api.getGeneratedImageBlob(ctx.sessionId, props.block.imageId))
+            void loadGeneratedMediaObjectUrl(mediaKey, () => ctx.api.getGeneratedImageBlob(
+                ctx.sessionId,
+                props.block.imageId,
+                0,
+                undefined,
+                (loaded, total) => {
+                    if (!disposed) {
+                        setProgress({ loaded, total })
+                    }
+                }
+            ))
                 .then((url) => {
                     if (!disposed && !evictedRef.current) {
                         setObjectUrl(url)
                     }
+                    if (!disposed) {
+                        setProgress(null)
+                    }
                 })
                 .catch((err: unknown) => {
                     if (!disposed) {
+                        setProgress(null)
                         setError(err instanceof Error ? err.message : 'Failed to load inline media')
                     }
                 })
@@ -223,7 +240,28 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
                     {isVideo ? 'Load video' : isAudio ? 'Load audio' : 'Prepare download'}
                 </button>
             ) : (
-                <div className="h-48 w-72 max-w-full animate-pulse rounded-xl bg-[var(--app-subtle-bg)]" />
+                <div className="flex h-48 w-72 max-w-full flex-col items-center justify-center gap-3 rounded-xl bg-[var(--app-subtle-bg)] px-6">
+                    {progress?.total ? (
+                        <>
+                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--app-border)]">
+                                <div
+                                    className="h-full rounded-full bg-[var(--app-link)] transition-[width] duration-200"
+                                    style={{ width: `${Math.min(100, Math.round((progress.loaded / progress.total) * 100))}%` }}
+                                />
+                            </div>
+                            <span className="text-xs tabular-nums text-[var(--app-hint)]">
+                                {Math.min(100, Math.round((progress.loaded / progress.total) * 100))}%
+                            </span>
+                        </>
+                    ) : (
+                        <>
+                            <div className="h-1.5 w-full animate-pulse overflow-hidden rounded-full bg-[var(--app-border)]" />
+                            <span className="text-xs text-[var(--app-hint)]">
+                                {isVideo ? 'Loading video…' : isAudio ? 'Loading audio…' : 'Preparing download…'}
+                            </span>
+                        </>
+                    )}
+                </div>
             )}
         </div>
     )
