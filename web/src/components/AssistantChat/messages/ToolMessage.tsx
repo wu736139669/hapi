@@ -18,6 +18,7 @@ import { ImagePreview } from '@/components/ImagePreview'
 import { FileIcon } from '@/components/FileIcon'
 import { useTranslation } from '@/lib/use-translation'
 import { inlineMediaLabelKey, isInlineAudioMimeType, isInlineImageMimeType, isInlineVideoMimeType } from '@/lib/generatedInlineMedia'
+import { loadGeneratedMediaObjectUrl, subscribeGeneratedMediaEviction } from '@/lib/generatedMediaCache'
 
 function isToolCallBlock(value: unknown): value is ToolCallBlock {
     if (!isObject(value)) return false
@@ -72,6 +73,7 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
     const [imageStyle, setImageStyle] = useState<CSSProperties | undefined>(undefined)
     const [loadMedia, setLoadMedia] = useState(false)
     const objectUrlRef = useRef<string | null>(null)
+    const evictedRef = useRef(false)
     const isVideo = isInlineVideoMimeType(props.block.mimeType)
     const isAudio = isInlineAudioMimeType(props.block.mimeType)
     const isImage = isInlineImageMimeType(props.block.mimeType)
@@ -90,12 +92,42 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
         }
     }, [])
 
+    const mediaKey = `${ctx.sessionId}:${props.block.imageId}`
+
     useEffect(() => {
         if (!shouldFetch) {
             return
         }
 
         let disposed = false
+
+        if (!isImage) {
+            // Explicitly loaded media lives in a bounded shared cache: the cap
+            // keeps at most a few tens-of-MB blobs alive per session, and the
+            // listener brings this card back to its Load button when evicted.
+            setError(null)
+            evictedRef.current = false
+            const unsubscribe = subscribeGeneratedMediaEviction(mediaKey, () => {
+                evictedRef.current = true
+                setObjectUrl(null)
+                setLoadMedia(false)
+            })
+            void loadGeneratedMediaObjectUrl(mediaKey, () => ctx.api.getGeneratedImageBlob(ctx.sessionId, props.block.imageId))
+                .then((url) => {
+                    if (!disposed && !evictedRef.current) {
+                        setObjectUrl(url)
+                    }
+                })
+                .catch((err: unknown) => {
+                    if (!disposed) {
+                        setError(err instanceof Error ? err.message : 'Failed to load inline media')
+                    }
+                })
+            return () => {
+                disposed = true
+                unsubscribe()
+            }
+        }
 
         if (objectUrlRef.current) {
             URL.revokeObjectURL(objectUrlRef.current)
@@ -133,7 +165,7 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
         return () => {
             disposed = true
         }
-    }, [ctx.api, ctx.sessionId, props.block.imageId, isImage, shouldFetch])
+    }, [ctx.api, ctx.sessionId, props.block.imageId, isImage, shouldFetch, mediaKey])
 
     return (
         <div className="max-w-[92%] rounded-2xl border border-[var(--app-border)] bg-[var(--app-tool-card-bg)] p-3">

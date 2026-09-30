@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { HappyChatProvider } from '@/components/AssistantChat/context'
 import { GeneratedImageCard } from '@/components/AssistantChat/messages/ToolMessage'
 import { I18nProvider } from '@/lib/i18n-context'
 import type { ApiClient } from '@/api/client'
 import type { HappyChatContextValue } from '@/components/AssistantChat/context'
+import { _resetGeneratedMediaCacheForTests } from '@/lib/generatedMediaCache'
 
 function renderCard(options: {
     mimeType: string | null
@@ -54,7 +55,52 @@ function renderCard(options: {
     return { getGeneratedImageBlob }
 }
 
+function renderVideoCards(imageIds: string[]) {
+    const getGeneratedImageBlob = vi.fn(async () => new Blob(['x'], { type: 'video/mp4' }))
+    const api = { getGeneratedImageBlob } as unknown as ApiClient
+    const value: HappyChatContextValue = {
+        api,
+        sessionId: 'session-1',
+        metadata: null,
+        terminalToolDisplayMode: 'compact',
+        showSessionSummaryInChat: false,
+        disabled: false,
+        onRefresh: () => {},
+        hasMoreMessages: false,
+        isSyncingTail: false,
+        isLoadingMoreMessages: false,
+        loadOlderMessagesPreservingScroll: async () => 'loaded',
+    }
+
+    render(
+        <I18nProvider>
+            <HappyChatProvider value={value}>
+                {imageIds.map((imageId) => (
+                    <GeneratedImageCard
+                        key={imageId}
+                        block={{
+                            kind: 'generated-image',
+                            id: `block-${imageId}`,
+                            localId: null,
+                            createdAt: 1,
+                            imageId,
+                            fileName: `${imageId}.mp4`,
+                            mimeType: 'video/mp4',
+                        }}
+                    />
+                ))}
+            </HappyChatProvider>
+        </I18nProvider>
+    )
+
+    return { getGeneratedImageBlob }
+}
+
 describe('GeneratedImageCard video fetch', () => {
+    beforeEach(() => {
+        _resetGeneratedMediaCacheForTests()
+    })
+
     it('labels displayed images in English without implying AI generation', () => {
         renderCard({ mimeType: 'image/png', locale: 'en' })
 
@@ -102,6 +148,21 @@ describe('GeneratedImageCard video fetch', () => {
 
         await waitFor(() => {
             expect(document.querySelector('audio[controls]')).toBeInTheDocument()
+        })
+    })
+
+    it('returns an evicted video card to its Load button to bound memory', async () => {
+        renderVideoCards(['v1', 'v2', 'v3', 'v4'])
+        const buttons = screen.getAllByRole('button', { name: 'Load video' })
+        expect(buttons).toHaveLength(4)
+
+        buttons.forEach((button) => fireEvent.click(button))
+
+        // Cap is 3: the oldest load is evicted, so its card falls back to the
+        // Load button while three videos stay rendered.
+        await waitFor(() => {
+            expect(document.querySelectorAll('video')).toHaveLength(3)
+            expect(screen.getAllByRole('button', { name: 'Load video' })).toHaveLength(1)
         })
     })
 
