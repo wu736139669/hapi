@@ -20,11 +20,12 @@ describe('generated images route', () => {
         const session = { id: 'session-1', namespace: 'default', active: true } as unknown as Session
         const engine = {
             resolveSessionAccess: () => ({ ok: true as const, sessionId: 'session-1', session }),
-            readGeneratedImage: async () => ({
+            readGeneratedImageChunk: async (_sessionId: string, _id: string, offset: number, length: number) => ({
                 success: true,
-                content: pngBytes.toString('base64'),
+                content: pngBytes.subarray(offset, offset + length).toString('base64'),
                 mimeType: 'image/png',
-                fileName: 'shot.png'
+                fileName: 'shot.png',
+                size: pngBytes.length
             })
         } as unknown as Partial<SyncEngine>
 
@@ -44,9 +45,9 @@ describe('generated images route', () => {
         let rpcCalls = 0
         const engine = {
             resolveSessionAccess: () => ({ ok: true as const, sessionId: 'session-1', session }),
-            readGeneratedImage: async () => {
+            readGeneratedImageChunk: async () => {
                 rpcCalls += 1
-                return { success: true, content: '', mimeType: 'image/png', fileName: 'shot.png' }
+                return { success: true, content: '', mimeType: 'image/png', fileName: 'shot.png', size: 0 }
             }
         } as unknown as Partial<SyncEngine>
 
@@ -64,12 +65,16 @@ describe('generated images route', () => {
         let mimeType = 'audio/wav'
         const engine = {
             resolveSessionAccess: () => ({ ok: true as const, sessionId: 'session-1', session }),
-            readGeneratedImage: async () => ({
-                success: true,
-                content: Buffer.from('media').toString('base64'),
-                mimeType,
-                fileName: mimeType === 'audio/wav' ? 'sample.wav' : 'archive.bin'
-            })
+            readGeneratedImageChunk: async (_sessionId: string, _id: string, offset: number, length: number) => {
+                const payload = Buffer.from('media')
+                return {
+                    success: true,
+                    content: payload.subarray(offset, offset + length).toString('base64'),
+                    mimeType,
+                    fileName: mimeType === 'audio/wav' ? 'sample.wav' : 'archive.bin',
+                    size: payload.length
+                }
+            }
         } as unknown as Partial<SyncEngine>
 
         const audio = await buildApp(engine).request('/api/sessions/session-1/generated-images/audio-1')
@@ -80,6 +85,66 @@ describe('generated images route', () => {
         const file = await buildApp(engine).request('/api/sessions/session-1/generated-images/file-1')
         expect(file.headers.get('content-disposition')).toStartWith('attachment;')
         expect(file.headers.get('content-type')).toContain('application/octet-stream')
+    })
+
+    it('serves the whole payload when a pre-chunk session ignores offset/length', async () => {
+        const session = { id: 'session-1', namespace: 'default', active: true } as unknown as Session
+        const payload = Buffer.from('legacy-media-bytes')
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true as const, sessionId: 'session-1', session }),
+            // Old CLI handlers ignore offset/length and never report `size`.
+            readGeneratedImageChunk: async () => ({
+                success: true,
+                content: payload.toString('base64'),
+                mimeType: 'video/mp4',
+                fileName: 'clip.mp4'
+            })
+        } as unknown as Partial<SyncEngine>
+
+        const response = await buildApp(engine).request('/api/sessions/session-1/generated-images/legacy-1')
+        expect(response.status).toBe(200)
+        expect(response.headers.get('content-type')).toContain('video/mp4')
+        expect(Buffer.from(await response.arrayBuffer()).equals(payload)).toBe(true)
+    })
+
+    it('streams multi-chunk media and honors Range requests', async () => {
+        const session = { id: 'session-1', namespace: 'default', active: true } as unknown as Session
+        const payload = Buffer.alloc(2 * 1024 * 1024 + 512 * 1024, 7)
+        const calls: Array<[number, number]> = []
+        const engine = {
+            resolveSessionAccess: () => ({ ok: true as const, sessionId: 'session-1', session }),
+            readGeneratedImageChunk: async (_sessionId: string, _id: string, offset: number, length: number) => {
+                calls.push([offset, length])
+                return {
+                    success: true,
+                    content: payload.subarray(offset, offset + length).toString('base64'),
+                    mimeType: 'video/mp4',
+                    fileName: 'clip.mp4',
+                    size: payload.length,
+                    offset
+                }
+            }
+        } as unknown as Partial<SyncEngine>
+
+        const full = await buildApp(engine).request('/api/sessions/session-1/generated-images/vid-1')
+        expect(full.status).toBe(200)
+        expect(full.headers.get('accept-ranges')).toBe('bytes')
+        expect(full.headers.get('content-length')).toBe(String(payload.length))
+        expect(Buffer.from(await full.arrayBuffer()).equals(payload)).toBe(true)
+        // probe + two more chunks (1MB + 1MB + 0.5MB)
+        expect(calls).toHaveLength(3)
+
+        const ranged = await buildApp(engine).request('/api/sessions/session-1/generated-images/vid-1', {
+            headers: { range: 'bytes=1048576-1048579' }
+        })
+        expect(ranged.status).toBe(206)
+        expect(ranged.headers.get('content-range')).toBe(`bytes 1048576-1048579/${payload.length}`)
+        expect(Buffer.from(await ranged.arrayBuffer()).equals(payload.subarray(1048576, 1048580))).toBe(true)
+
+        const invalid = await buildApp(engine).request('/api/sessions/session-1/generated-images/vid-1', {
+            headers: { range: 'bytes=99999999-' }
+        })
+        expect(invalid.status).toBe(416)
     })
 })
 

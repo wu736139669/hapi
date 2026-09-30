@@ -952,6 +952,10 @@ export type GeneratedImageResponse = {
     content?: string
     mimeType?: string
     fileName?: string
+    /** Total media size when content is a chunk (offset/length requests). */
+    size?: number
+    offset?: number
+    length?: number
     error?: string
 }
 

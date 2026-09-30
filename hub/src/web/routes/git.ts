@@ -45,6 +45,9 @@ async function runRpc<T>(fn: () => Promise<T>): Promise<T | { success: false; er
     }
 }
 
+/** One hub→CLI slice per streaming step; keeps slow-runner transfers inside RPC/idle budgets. */
+const GENERATED_MEDIA_CHUNK_BYTES = 1024 * 1024
+
 
 export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
@@ -172,25 +175,123 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
             })
         }
 
-        const result = await runRpc(() => engine.readGeneratedImage(sessionResult.sessionId, parsed.data.imageId))
-        if (!result.success || !result.content) {
-            return c.json({ success: false, error: result.error ?? 'Generated image not found' }, 404)
-        }
+        const sessionId = sessionResult.sessionId
+        const imageId = parsed.data.imageId
 
-        const bytes = Uint8Array.from(Buffer.from(result.content, 'base64'))
-        const mimeType = result.mimeType ?? 'application/octet-stream'
-        const disposition = !result.mimeType || mimeType.startsWith('image/') || mimeType.startsWith('video/') || mimeType.startsWith('audio/')
+        // The first bounded chunk doubles as a probe: it carries total size + mime. Larger
+        // media is then streamed chunk by chunk instead of one tens-of-MB socket ack, so a
+        // remote runner on a slow tunnel cannot trip RPC/idle timeouts mid-transfer.
+        let probe: Awaited<ReturnType<SyncEngine['readGeneratedImageChunk']>>
+        try {
+            probe = await engine.readGeneratedImageChunk(sessionId, imageId, 0, GENERATED_MEDIA_CHUNK_BYTES)
+        } catch (error) {
+            return c.json({ success: false, error: error instanceof Error ? error.message : String(error) }, 404)
+        }
+        if (!probe.success || typeof probe.content !== 'string') {
+            return c.json({ success: false, error: probe.error ?? 'Generated image not found' }, 404)
+        }
+        if (typeof probe.size !== 'number') {
+            // Pre-chunk CLI (session process started before the streaming deploy):
+            // the probe is actually the whole payload — serve it in one response.
+            const bytes = Uint8Array.from(Buffer.from(probe.content, 'base64'))
+            const legacyMimeType = probe.mimeType ?? 'application/octet-stream'
+            const legacyDisposition = !probe.mimeType || legacyMimeType.startsWith('image/') || legacyMimeType.startsWith('video/') || legacyMimeType.startsWith('audio/')
+                ? 'inline'
+                : 'attachment'
+            return c.body(bytes, 200, {
+                'Content-Type': legacyMimeType,
+                'Content-Disposition': `${legacyDisposition}; filename="${encodeURIComponent(probe.fileName ?? 'generated-media')}"`,
+                'X-Content-Type-Options': 'nosniff',
+                'Cache-Control': GENERATED_IMAGE_CACHE_CONTROL,
+                ETag: etag
+            })
+        }
+        const total = probe.size
+        if (total <= 0) {
+            return c.json({ success: false, error: 'Generated media is empty' }, 404)
+        }
+        const mimeType = probe.mimeType ?? 'application/octet-stream'
+        const disposition = !probe.mimeType || mimeType.startsWith('image/') || mimeType.startsWith('video/') || mimeType.startsWith('audio/')
             ? 'inline'
             : 'attachment'
+
+        // Range support so big media can be seeked/resumed by players and download tools.
+        let start = 0
+        let end = total - 1
+        let status: 200 | 206 = 200
+        const rangeHeader = c.req.header('range')
+        if (rangeHeader) {
+            const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim())
+            const rawStart = match?.[1] ?? null
+            const rawEnd = match?.[2] ?? null
+            if (!match || (rawStart === '' && rawEnd === '')) {
+                return c.body(null, 416, { 'Content-Range': `bytes */${total}` })
+            }
+            if (rawStart === '') {
+                const suffix = Number(rawEnd)
+                if (!Number.isFinite(suffix) || suffix <= 0) {
+                    return c.body(null, 416, { 'Content-Range': `bytes */${total}` })
+                }
+                start = Math.max(0, total - suffix)
+            } else {
+                start = Number(rawStart)
+                if (rawEnd !== '') {
+                    end = Number(rawEnd)
+                }
+            }
+            if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= total) {
+                return c.body(null, 416, { 'Content-Range': `bytes */${total}` })
+            }
+            end = Math.min(end, total - 1)
+            status = 206
+        }
+        const contentLength = end - start + 1
+        const probeBytes = Uint8Array.from(Buffer.from(probe.content, 'base64'))
+
+        const stream = new ReadableStream<Uint8Array>({
+            async start(controller) {
+                try {
+                    let cursor = start
+                    if (cursor < probeBytes.byteLength) {
+                        const sliceEnd = Math.min(probeBytes.byteLength, end + 1)
+                        if (sliceEnd > cursor) {
+                            controller.enqueue(probeBytes.subarray(cursor, sliceEnd))
+                            cursor = sliceEnd
+                        }
+                    }
+                    while (cursor <= end) {
+                        const chunk = await engine.readGeneratedImageChunk(sessionId, imageId, cursor, GENERATED_MEDIA_CHUNK_BYTES)
+                        if (!chunk.success || typeof chunk.content !== 'string') {
+                            throw new Error(chunk.error ?? 'Generated media read failed')
+                        }
+                        const bytes = Uint8Array.from(Buffer.from(chunk.content, 'base64'))
+                        if (bytes.byteLength === 0) {
+                            break
+                        }
+                        const remaining = end - cursor + 1
+                        const slice = bytes.byteLength > remaining ? bytes.subarray(0, remaining) : bytes
+                        controller.enqueue(slice)
+                        cursor += slice.byteLength
+                    }
+                    controller.close()
+                } catch (error) {
+                    controller.error(error instanceof Error ? error : new Error(String(error)))
+                }
+            }
+        })
+
         // Generated images are content-addressed by an immutable random id, so the bytes for a
         // given id never change. Cache aggressively so remounts/scroll/session reopen don't
         // re-run the full HTTP -> socket.io RPC -> base64 round-trip every time (issue #927).
-        return c.body(bytes, 200, {
+        return c.body(stream, status, {
             'Content-Type': mimeType,
-            'Content-Disposition': `${disposition}; filename="${encodeURIComponent(result.fileName ?? 'generated-media')}"`,
+            'Content-Disposition': `${disposition}; filename="${encodeURIComponent(probe.fileName ?? 'generated-media')}"`,
             'X-Content-Type-Options': 'nosniff',
             'Cache-Control': GENERATED_IMAGE_CACHE_CONTROL,
-            ETag: etag
+            ETag: etag,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': String(contentLength),
+            ...(status === 206 ? { 'Content-Range': `bytes ${start}-${end}/${total}` } : {})
         })
     })
 

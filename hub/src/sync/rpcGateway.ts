@@ -48,6 +48,13 @@ import type { RpcRegistry } from '../socket/rpcRegistry'
 
 const DEFAULT_RPC_TIMEOUT_MS = 30_000
 const MODEL_LIST_RPC_TIMEOUT_MS = 120_000
+/**
+ * Byte-heavy reads/writes (file downloads, generated media, uploads) carry
+ * their payload inside the socket ack. A remote runner behind a slow tunnel
+ * needs far more than the default for tens of MB (e.g. a 19MB video at
+ * ~0.4MB/s), so give these calls a multi-minute budget.
+ */
+const MEDIA_TRANSFER_RPC_TIMEOUT_MS = 300_000
 
 /**
  * tiann/hapi#916: thrown by {@link RpcGateway.rpcCall} when the target CLI is
@@ -347,11 +354,26 @@ export class RpcGateway {
     }
 
     async readSessionFile(sessionId: string, path: string): Promise<RpcReadFileResponse> {
-        return await this.sessionRpc(sessionId, RPC_METHODS.ReadFile, { path }) as RpcReadFileResponse
+        return await this.sessionRpc(sessionId, RPC_METHODS.ReadFile, { path }, MEDIA_TRANSFER_RPC_TIMEOUT_MS) as RpcReadFileResponse
     }
 
     async readGeneratedImage(sessionId: string, imageId: string): Promise<RpcGeneratedImageResponse> {
-        return await this.sessionRpc(sessionId, RPC_METHODS.ReadGeneratedImage, { id: imageId }) as RpcGeneratedImageResponse
+        return await this.sessionRpc(sessionId, RPC_METHODS.ReadGeneratedImage, { id: imageId }, MEDIA_TRANSFER_RPC_TIMEOUT_MS) as RpcGeneratedImageResponse
+    }
+
+    /** Bounded slice read so the hub can stream large media without one giant ack. */
+    async readGeneratedImageChunk(
+        sessionId: string,
+        imageId: string,
+        offset: number,
+        length: number
+    ): Promise<RpcGeneratedImageResponse> {
+        return await this.sessionRpc(
+            sessionId,
+            RPC_METHODS.ReadGeneratedImage,
+            { id: imageId, offset, length },
+            MEDIA_TRANSFER_RPC_TIMEOUT_MS
+        ) as RpcGeneratedImageResponse
     }
 
     async listDirectory(sessionId: string, path: string): Promise<RpcListDirectoryResponse> {
@@ -363,7 +385,7 @@ export class RpcGateway {
     }
 
     async uploadFile(sessionId: string, filename: string, content: string, mimeType: string): Promise<RpcUploadFileResponse> {
-        return await this.sessionRpc(sessionId, RPC_METHODS.UploadFile, { sessionId, filename, content, mimeType }) as RpcUploadFileResponse
+        return await this.sessionRpc(sessionId, RPC_METHODS.UploadFile, { sessionId, filename, content, mimeType }, MEDIA_TRANSFER_RPC_TIMEOUT_MS) as RpcUploadFileResponse
     }
 
     async deleteUploadFile(sessionId: string, path: string): Promise<RpcDeleteUploadResponse> {

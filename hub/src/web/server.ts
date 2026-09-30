@@ -513,7 +513,10 @@ export async function startWebServer(options: {
     const server = (Bun.serve as any)({
         hostname: configuration.listenHost,
         port: configuration.listenPort,
-        idleTimeout: Math.max(30, socketHandler.idleTimeout),
+        // Media downloads wait on a hub→CLI RPC that can take minutes on a slow
+        // runner tunnel while zero bytes flow to the client. Keep the HTTP
+        // connection alive well past the socket idle default (Bun caps at 255s).
+        idleTimeout: Math.min(255, Math.max(30, socketHandler.idleTimeout, 240)),
         maxRequestBodySize: Math.max(socketHandler.maxRequestBodySize, 68 * 1024 * 1024),
         websocket: {
             ...originalWsHandler,

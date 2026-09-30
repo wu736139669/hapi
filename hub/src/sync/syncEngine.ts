@@ -4050,6 +4050,15 @@ export class SyncEngine {
         return await this.rpcGateway.readGeneratedImage(sessionId, imageId)
     }
 
+    async readGeneratedImageChunk(
+        sessionId: string,
+        imageId: string,
+        offset: number,
+        length: number
+    ): Promise<RpcGeneratedImageResponse> {
+        return await this.rpcGateway.readGeneratedImageChunk(sessionId, imageId, offset, length)
+    }
+
     async listDirectory(sessionId: string, path: string): Promise<RpcListDirectoryResponse> {
         return await this.rpcGateway.listDirectory(sessionId, path)
     }

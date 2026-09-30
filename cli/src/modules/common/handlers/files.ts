@@ -17,9 +17,15 @@ type ReadFileResponse = FileReadResponse
 
 interface ReadGeneratedImageRequest {
     id: string
+    /** Optional slice start; the hub streams large media in bounded chunks. */
+    offset?: number
+    length?: number
 }
 
 type ReadGeneratedImageResponse = GeneratedImageResponse
+
+/** Cap one chunk so a single RPC ack stays small on slow runner links. */
+const MAX_GENERATED_IMAGE_CHUNK_BYTES = 4 * 1024 * 1024
 
 interface WriteFileRequest {
     path: string
@@ -68,11 +74,35 @@ export function registerFileHandlers(rpcHandlerManager: RpcHandlerManager, worki
         }
 
         try {
+            const total = image.content.byteLength
+            const hasSlice = typeof data.offset === 'number' || typeof data.length === 'number'
+            if (!hasSlice) {
+                return {
+                    success: true,
+                    content: image.content.toString('base64'),
+                    mimeType: image.mimeType,
+                    fileName: image.fileName,
+                    size: total
+                }
+            }
+
+            const offset = Number.isFinite(data.offset) ? Math.max(0, Math.floor(data.offset as number)) : 0
+            if (offset > total) {
+                return rpcError('Chunk offset is past the end of the media')
+            }
+            const requested = Number.isFinite(data.length) && (data.length as number) > 0
+                ? Math.floor(data.length as number)
+                : MAX_GENERATED_IMAGE_CHUNK_BYTES
+            const length = Math.min(requested, MAX_GENERATED_IMAGE_CHUNK_BYTES, total - offset)
+            const slice = image.content.subarray(offset, offset + length)
             return {
                 success: true,
-                content: image.content.toString('base64'),
+                content: slice.toString('base64'),
                 mimeType: image.mimeType,
-                fileName: image.fileName
+                fileName: image.fileName,
+                size: total,
+                offset,
+                length
             }
         } catch (error) {
             logger.debug('Failed to read generated image:', error)
