@@ -1,5 +1,6 @@
 import type { Store } from '../store'
 import type { UsageEvent } from '../store/usage'
+import { legacyCodexThreads } from '../store/usageSources'
 
 export type UsageRecoveryResult = { inserted: number; matched: number; enriched: number }
 
@@ -7,8 +8,11 @@ function counters(event: UsageEvent): string {
     return [event.agent, event.inputTokens, event.outputTokens, event.cacheReadTokens, event.cacheCreationTokens].join('|')
 }
 
-function cumulativeFingerprint(event: UsageEvent): string {
-    return `${event.sourceKey.split('|')[1]}|${counters(event)}`
+function cumulativeFingerprint(event: UsageEvent, legacyThreads: Map<string, string>): string {
+    const thread = event.sourceKey.split('|')[1]
+    const native = event.agent === 'codex' && thread === event.sessionId
+        ? legacyThreads.get(event.sessionId) ?? thread : thread
+    return `${native}|${counters(event)}`
 }
 
 /** Merge native/backup accounting without adding another copy of recorded requests. */
@@ -19,12 +23,13 @@ export function mergeRecoveredUsage(
     authoritativeModels: ReadonlySet<string> = new Set()
 ): UsageRecoveryResult {
     const existing = store.usage.getEventsByNamespace(namespace)
+    const legacyThreads = legacyCodexThreads(store.usage.getSources(namespace))
     const stableKeys = new Map(existing.map((event) => [`${event.agent}|${event.sourceKey}`, event]))
     const cumulative = new Map<string, UsageEvent[]>()
     const deltas = new Map<string, UsageEvent[]>()
     for (const event of existing) {
         const index = event.kind === 'cumulative' ? cumulative : deltas
-        const key = event.kind === 'cumulative' ? cumulativeFingerprint(event) : `${event.sessionId}|${counters(event)}`
+        const key = event.kind === 'cumulative' ? cumulativeFingerprint(event, legacyThreads) : `${event.sessionId}|${counters(event)}`
         const values = index.get(key) ?? []
         values.push(event)
         index.set(key, values)
@@ -37,7 +42,7 @@ export function mergeRecoveredUsage(
         const identity = `${event.agent}|${event.sourceKey}`
         const exact = stableKeys.get(identity)
         const candidates = event.kind === 'cumulative'
-            ? cumulative.get(cumulativeFingerprint(event))
+            ? cumulative.get(cumulativeFingerprint(event, legacyThreads))
             : event.agent === 'claude' ? undefined : deltas.get(`${event.sessionId}|${counters(event)}`)
         const match = exact ?? candidates?.find((candidate) => !consumed.has(`${candidate.sessionId}|${candidate.sourceKey}`))
         if (match) {

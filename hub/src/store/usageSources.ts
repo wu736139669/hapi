@@ -10,6 +10,20 @@ export type UsageSource = {
     sessionId: string
 }
 
+/** Resolve the old HAPI-id fallback only when its native thread is unambiguous. */
+export function legacyCodexThreads(sources: UsageSource[]): Map<string, string> {
+    const candidates = new Map<string, Set<string>>()
+    for (const source of sources) {
+        if (source.agent !== 'codex' || source.nativeSessionId.startsWith('usage-ledger:')) continue
+        const threads = candidates.get(source.sessionId) ?? new Set<string>()
+        threads.add(source.nativeSessionId)
+        candidates.set(source.sessionId, threads)
+    }
+    return new Map(Array.from(candidates.entries())
+        .filter(([, threads]) => threads.size === 1)
+        .map(([sessionId, threads]) => [sessionId, Array.from(threads)[0]!]))
+}
+
 export function usageSourceLedgerId(source: Omit<UsageSource, 'sessionId'>): string {
     return `usage-source:${createHash('sha256')
         .update(JSON.stringify([source.namespace, source.machineId, source.agent, source.nativeSessionId]))

@@ -1,7 +1,7 @@
 import type { UsageSummaryBucket, UsageSummaryResponse } from '@hapi/protocol/apiTypes'
 import type { UsageEvent } from '../store/usage'
 import type { Store } from '../store'
-import { usageSourceLedgerId } from '../store/usageSources'
+import { legacyCodexThreads, usageSourceLedgerId, type UsageSource } from '../store/usageSources'
 
 type Totals = Omit<UsageSummaryBucket, 'key'>
 
@@ -37,6 +37,73 @@ function addTotals(
 }
 
 type UsageSnapshot = [number, number, number, number]
+
+function snapshotKey(event: UsageEvent, thread: string): string {
+    return [event.sessionId, thread, event.inputTokens, event.outputTokens,
+        event.cacheReadTokens, event.cacheCreationTokens].join('|')
+}
+
+/** Old hubs replayed native history with a HAPI-id thread and replay timestamps.
+ * Match provider snapshots before delta calculation; align any missing frames
+ * between unique native anchors so their tokens are not charged twice either.
+ * The stored evidence remains unchanged. Ambiguous aliases keep their history.
+ */
+function alignLegacyCodexEvents(events: UsageEvent[], sources: UsageSource[]): {
+    events: UsageEvent[]; duplicates: Set<UsageEvent>
+} {
+    const threads = legacyCodexThreads(sources)
+    const native = new Map<string, UsageEvent[]>()
+    const legacy = new Map<string, UsageEvent[]>()
+    for (const event of events) {
+        if (event.agent !== 'codex' || event.kind !== 'cumulative') continue
+        const thread = event.sourceKey.split('|')[1]!
+        if (thread === event.sessionId && threads.has(event.sessionId)) {
+            const rows = legacy.get(event.sessionId) ?? []
+            rows.push(event)
+            legacy.set(event.sessionId, rows)
+        }
+    }
+    for (const event of events) {
+        if (event.agent !== 'codex' || event.kind !== 'cumulative' || !legacy.has(event.sessionId)) continue
+        const thread = event.sourceKey.split('|')[1]!
+        if (thread !== threads.get(event.sessionId)) continue
+        const key = snapshotKey(event, thread)
+        const rows = native.get(key) ?? []
+        rows.push(event)
+        native.set(key, rows)
+    }
+    const duplicates = new Set<UsageEvent>()
+    const aligned = new Map<UsageEvent, UsageEvent>()
+    for (const [sessionId, rows] of legacy) {
+        const thread = threads.get(sessionId)!
+        rows.sort((a, b) => a.createdAt - b.createdAt || a.sourceSeq - b.sourceSeq)
+        const anchors = rows.map((event) => {
+            const matches = native.get(snapshotKey(event, thread))
+            if (matches?.length) duplicates.add(event)
+            return matches?.length === 1 ? matches[0]! : null
+        })
+        let previous = -1
+        for (let index = 0; index < rows.length; index += 1) {
+            if (!anchors[index]) continue
+            const start = previous < 0 ? null : anchors[previous]
+            const end = anchors[index]!
+            if (start && end.createdAt > start.createdAt) {
+                for (let missing = previous + 1; missing < index; missing += 1) {
+                    const event = rows[missing]!
+                    if (duplicates.has(event)) continue
+                    const parts = event.sourceKey.split('|')
+                    parts[1] = thread
+                    aligned.set(event, { ...event, sourceKey: parts.join('|'),
+                        createdAt: start.createdAt + (end.createdAt - start.createdAt)
+                            * (missing - previous) / (index - previous) })
+                }
+            }
+            previous = index
+        }
+    }
+    return { events: aligned.size ? events.map((event) => aligned.get(event) ?? event)
+        .sort((a, b) => a.createdAt - b.createdAt || a.sourceSeq - b.sourceSeq) : events, duplicates }
+}
 
 function cumulativeSnapshotDelta(
     current: UsageSnapshot,
@@ -99,6 +166,7 @@ export function getUsageSummary(
     const allReconciledRows = store.usage.getReconciledByNamespace(namespace)
     const snapshotIds = new Set(allReconciledRows.map((row) => `${row.sessionId}|${row.agent}`))
     const sources = store.usage.getSources(namespace)
+    const accounting = alignLegacyCodexEvents(events, sources)
     // Native ledger ids and old/resumed HAPI ids are aliases of a billed
     // conversation. Count that conversation once across merges and clears.
     const sessionAliases = new Map<string, string>()
@@ -142,7 +210,7 @@ export function getUsageSummary(
     const cumulativeFingerprints = new Set<string>()
     const dayFormatter = createDayFormatter(timeZone)
 
-    for (const event of events) {
+    for (const event of accounting.events) {
         let inputTokens = event.inputTokens
         let outputTokens = event.outputTokens
         let cacheReadTokens = event.cacheReadTokens
@@ -179,9 +247,8 @@ export function getUsageSummary(
             outputTokens = delta[1]
             cacheReadTokens = delta[2]
             cacheCreationTokens = delta[3]
-            cumulativePrevious.set(streamKey, current)
             const turnId = sourceParts[3]
-            if (turnId) {
+            if (turnId && !accounting.duplicates.has(event)) {
                 const fingerprint = [
                     event.sessionId,
                     turnId,
@@ -197,8 +264,11 @@ export function getUsageSummary(
                 duplicateCumulativeEvent = cumulativeFingerprints.has(fingerprint)
                 cumulativeFingerprints.add(fingerprint)
             }
+            // A replay must not rewind an already-established provider
+            // baseline. A copied fork still needs its first baseline.
+            if (!duplicateCumulativeEvent || previous === null) cumulativePrevious.set(streamKey, current)
         }
-        if (duplicateCumulativeEvent || !isInRange(event) || inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens <= 0) continue
+        if (accounting.duplicates.has(event) || duplicateCumulativeEvent || !isInRange(event) || inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens <= 0) continue
         // Skip only the live OpenCode rows of a reconciled session: the
         // snapshot replaces them. Other agents' events on the same session
         // (e.g. after a flavor switch) still count.

@@ -13,6 +13,47 @@ function event(key: string, sessionId = 'deleted', extra: Partial<UsageEvent> = 
 }
 
 describe('usage recovery', () => {
+    it('matches a legacy HAPI-id thread to its proven native source', () => {
+        const store = new Store(':memory:')
+        store.usage.rememberSource({ namespace: 'default', machineId: 'm', agent: 'codex',
+            nativeSessionId: 'native-thread', sessionId: 'deleted' })
+        const legacy = event('cumulative|deleted|parent|old-turn|100|10|80|0', 'deleted', {
+            agent: 'codex', kind: 'cumulative', lastInputTokens: 100, lastOutputTokens: 10,
+            lastCacheReadTokens: 80, lastCacheCreationTokens: 0
+        })
+        store.usage.recordScan('deleted', 'default', 0, 0, [legacy], false)
+        const recovered = [{ ...legacy, sourceKey: 'cumulative|native-thread|parent|native-turn|100|10|80|0' }]
+        expect(mergeRecoveredUsage(store, 'default', recovered).inserted).toBe(0)
+        expect(mergeRecoveredUsage(store, 'default', recovered).inserted).toBe(0)
+        expect(getUsageSummary(store, 'default', 'all').totals).toMatchObject({ inputTokens: 100, requests: 1 })
+        store.close()
+    })
+
+    it('deduplicates legacy replay timestamps while retaining missing intermediate requests', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('legacy', {
+            flavor: 'codex', machineId: 'm', codexSessionId: 'native-thread'
+        }, null, 'default')
+        const time = Date.now() - 10000
+        const frame = (thread: string, index: number, timestamp: number) => event(
+            `cumulative|${thread}|parent|${thread}-turn-${index}|${index * 100}|${index * 10}|${index * 80}|0`, session.id, {
+                agent: 'codex', kind: 'cumulative', createdAt: timestamp, sourceSeq: index,
+                inputTokens: index * 100, outputTokens: index * 10, cacheReadTokens: index * 80,
+                lastInputTokens: 100, lastOutputTokens: 10, lastCacheReadTokens: 80, lastCacheCreationTokens: 0
+            })
+        store.usage.recordScan(session.id, 'default', 0, 0, [
+            frame('native-thread', 1, time), frame('native-thread', 3, time + 1000),
+            frame('native-thread', 4, time + 2000),
+            frame(session.id, 1, time + 5000), frame(session.id, 2, time + 5001), frame(session.id, 3, time + 5002)
+        ], false)
+        store.sessions.deleteSession(session.id, 'default')
+        expect(getUsageSummary(store, 'default', 'all').totals).toMatchObject({
+            inputTokens: 400, outputTokens: 40, cacheReadTokens: 320, requests: 4, sessions: 1
+        })
+        expect(store.usage.getEventsByNamespace('default')).toHaveLength(6)
+        store.close()
+    })
+
     it('can resume an interrupted backfill without advancing its cursor or duplicating usage', () => {
         const store = new Store(':memory:')
         const db = (store as unknown as { db: Database }).db
