@@ -104,6 +104,8 @@ for request/response shapes and error semantics, and `src/web/routes/` for all e
 - `POST /api/sessions/:id/resume` - Resume inactive session.
 - `POST /api/sessions/:id/reopen` - Reopen a session; follow the returned session ID.
 - `POST /api/sessions/:id/clear` - Start a fresh conversation when supported.
+- `GET /api/sessions/:id/codex/goal` - Read the native Codex Goal. Requires an active owner session with `capabilities.codexGoal`.
+- `POST /api/sessions/:id/codex/goal` - Manage that Goal: `{ action: "update", objective, tokenBudget? }`, `{ action: "pause" }`, `{ action: "resume" }`, or `{ action: "clear" }`. Returns `{ goal }` (`null` after clear); bypasses the chat queue. A null token budget uses Codex's default limits.
 - `POST /api/sessions/:id/upload` - Upload file (base64, max 50MB).
 - `POST /api/sessions/:id/upload/delete` - Delete uploaded file.
 - `POST /api/sessions/:id/archive` - Archive active session.

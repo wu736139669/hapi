@@ -1,4 +1,5 @@
 import {
+    CodexGoalRequestSchema,
     CursorMigrateToAcpRequestSchema,
     DeleteUploadRequestSchema,
     ForkConversationRequestSchema,
@@ -119,14 +120,14 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (limit !== null) {
             sessionRecords = sessionRecords.slice(0, limit)
         }
-        const scheduledCounts = engine.getFutureScheduledMessageCounts(sessionRecords.map((session) => session.id))
-        const nextScheduledAt = engine.getNextScheduledAtBySessionIds(sessionRecords.map((session) => session.id))
+        const scheduledStats = engine.getFutureScheduledMessageStats(sessionRecords.map((session) => session.id))
         const sessions = sessionRecords.map((session) => {
             const summary = toSessionSummary(session)
+            const scheduled = scheduledStats.get(session.id)
             return {
                 ...summary,
-                futureScheduledMessageCount: scheduledCounts.get(session.id) ?? 0,
-                nextScheduledAt: nextScheduledAt.get(session.id) ?? null
+                futureScheduledMessageCount: scheduled?.count ?? 0,
+                nextScheduledAt: scheduled?.nextScheduledAt ?? null
             }
         })
 
@@ -594,6 +595,25 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
                         : outcome.reason === 'no_legacy_store_on_disk' ? 404
                             : 500
         return c.json(outcome, status)
+    })
+
+    app.on(['GET', 'POST'], '/sessions/:id/codex/goal', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+        const access = requireSessionFromParam(c, engine, { requireActive: true })
+        if (access instanceof Response) return access
+        if (c.get('role') === 'session-guest') return c.json({ error: 'Goal controls require session owner access' }, 403)
+        if (access.session.metadata?.flavor !== 'codex' || !access.session.metadata.capabilities?.codexGoal) {
+            return c.json({ error: 'Goal controls require an updated Codex session', code: 'goal_unavailable' }, 409)
+        }
+        const parsed = CodexGoalRequestSchema.safeParse(c.req.method === 'GET'
+            ? { action: 'get' } : await c.req.json().catch(() => null))
+        if (!parsed.success) return c.json({ error: 'Invalid Goal action' }, 400)
+        try {
+            return c.json(await engine.codexGoal(access.sessionId, c.get('namespace'), parsed.data))
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Goal action failed' }, 502)
+        }
     })
 
     app.post('/sessions/:id/codex/plan/implement', async (c) => {

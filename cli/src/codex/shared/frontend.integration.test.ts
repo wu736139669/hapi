@@ -4,6 +4,8 @@ import { createServer } from 'node:http';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { io } from 'socket.io-client';
+import { CodexHistoryStateSchema } from '@hapi/protocol';
 import { record } from './gateway';
 import { CodexAppServerClient } from '../codexAppServerClient';
 import { initializeSharedClient } from './launch';
@@ -107,6 +109,12 @@ describe.skipIf(process.env.HAPI_RUN_SHARED_CODEX_TESTS !== '1' || process.platf
             terminals.push(child); return child;
         };
         const base = process.env.HAPI_API_URL!;
+        const historyObserver = io(`${base}/cli`, { auth: { token: env.CLI_API_TOKEN }, transports: ['websocket'], reconnection: false });
+        const progress = async (sid: string, threadId: string) => {
+            const response = record(await historyObserver.timeout(5_000).emitWithAck('codex-history-sync', { sid, threadId }));
+            expect(response.ok).toBe(true);
+            return CodexHistoryStateSchema.parse(response.state);
+        };
         const auth = await fetch(`${base}/api/auth`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accessToken: env.CLI_API_TOKEN }) });
         const jwt = String(record(await auth.json()).token);
         const api = async (path: string, body?: unknown) => {
@@ -233,9 +241,15 @@ describe.skipIf(process.env.HAPI_RUN_SHARED_CODEX_TESTS !== '1' || process.platf
             await eventually(async () => requests, value => JSON.stringify(value).includes(`ROOT=${sessionId}`), 'per-root shell identity');
             await eventually(async () => webEvents, value => value.includes('CodexBash') && value.includes('tool-call-result') && value.includes(`ROOT=${sessionId}`), 'tool call and result over Web SSE');
             await eventually(() => api(`/sessions/${sessionId}/messages`), value => JSON.stringify(value).includes('CodexBash'), 'tool call persisted for Web reload');
+            const latest = record(await client.request('thread/turns/list', { threadId: nativeThreadId, limit: 1, sortDirection: 'desc', itemsView: 'notLoaded' }));
+            const savedTurnId = record((latest.data as unknown[])[0]).id;
+            const savedProgress = await eventually(() => progress(sessionId, nativeThreadId), value => value.checkpoint?.turnComplete === true
+                && value.checkpoint.turnId === savedTurnId, 'native history checkpoint persisted at Hub');
             const secondOutput = output.length;
             const second = openTerminal(['resume', sessionId]);
-            await eventually(async () => output.slice(secondOutput), text => text.includes('HELLO_SHARED'), 'secondary attach to terminal-owned engine');
+            // Native pagination renders the recent viewport first. Earlier
+            // turns need not appear until the user scrolls back.
+            await eventually(async () => output.slice(secondOutput), text => text.includes('CHECK_ROOT_ENV'), 'secondary attach to terminal-owned engine');
             second.stdin.write('/exit'); await new Promise(resolve => setTimeout(resolve, 150)); second.stdin.write('\r');
             await eventually(async () => second.exitCode, value => value !== null, 'secondary detach');
             expect(record((await detail()).session).active).toBe(true); expect(isProcessAlive(Number(runtime.serverPid))).toBe(true);
@@ -281,6 +295,7 @@ describe.skipIf(process.env.HAPI_RUN_SHARED_CODEX_TESTS !== '1' || process.platf
             };
             const runnerRuntime = await readRuntime(resumedPid);
             client = new CodexAppServerClient({ endpoint: String(runnerRuntime.endpoint) }); client.setServerRequestHandler(() => {}); await initializeSharedClient(client);
+            expect((await progress(sessionId, nativeThreadId)).checkpoint).toEqual(savedProgress.checkpoint);
             await client.request('hapi/stopSession', { sessionId: coldClear.sessionId });
             await send('AFTER_WEB_RESUME');
             await eventually(() => api(`/sessions/${sessionId}/messages`), value => hasReply(value, 'AFTER_WEB_RESUME'), 'Web reply after resume');
@@ -388,9 +403,14 @@ describe.skipIf(process.env.HAPI_RUN_SHARED_CODEX_TESTS !== '1' || process.platf
             await api(`/sessions/${webId}/archive`, {});
             await eventually(webDetail, value => record(value.session).active === false, 'end reopened Web session');
         } catch (error) {
+            const runtimeLogs = await Promise.all((await readdir(join(hh, 'logs')).catch(() => [] as string[]))
+                .filter(name => name.endsWith('.log')).map(async name => (await readFile(join(hh, 'logs', name), 'utf8'))
+                    .split('\n').filter(line => line.includes('[Codex shared]')).join('\n')));
+            await writeFile('/tmp/hapi-shared-e2e-runtime.log', runtimeLogs.join('\n'));
             await writeFile('/tmp/hapi-shared-e2e-terminal.log', output + '\nRUNNER:\n' + runnerOutput);
             throw error;
         } finally {
+            historyObserver.disconnect();
             eventsAbort.abort(); await eventStream;
             await client?.disconnect();
             for (const child of terminals) if (child.pid && child.exitCode === null) await killProcessTreeByPid(child.pid);

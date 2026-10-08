@@ -1,269 +1,7 @@
 import type { UsageSummaryBucket, UsageSummaryResponse } from '@hapi/protocol/apiTypes'
-import type { StoredMessage, StoredSession } from '../store'
 import type { UsageEvent } from '../store/usage'
 import type { Store } from '../store'
-
-type RecordValue = Record<string, unknown>
-
-function asRecord(value: unknown): RecordValue | null {
-    return value !== null && typeof value === 'object' && !Array.isArray(value)
-        ? value as RecordValue
-        : null
-}
-
-function asCount(value: unknown): number | null {
-    return typeof value === 'number' && Number.isFinite(value) && value >= 0
-        ? Math.floor(value)
-        : null
-}
-
-function firstCount(record: RecordValue, ...keys: string[]): number {
-    for (const key of keys) {
-        const value = asCount(record[key])
-        if (value !== null) return value
-    }
-    return 0
-}
-
-function normalizeInputTokens(
-    data: RecordValue,
-    inputTokens: number,
-    cacheReadTokens: number,
-    cacheCreationTokens: number,
-    legacySemantics: 'includes-cache' | 'excludes-cache'
-): number {
-    // v1 generic usage messages make their input contract self-describing.
-    // Unknown/missing metadata intentionally falls back to the historical
-    // provider shape so already persisted transcripts remain readable.
-    const declaredSemantics = data.usageSchema === 'hapi.usage.v1'
-        && (data.inputTokenSemantics === 'includes-cache' || data.inputTokenSemantics === 'excludes-cache')
-        ? data.inputTokenSemantics
-        : null
-    const semantics = declaredSemantics ?? legacySemantics
-    return semantics === 'excludes-cache'
-        ? inputTokens + cacheReadTokens + cacheCreationTokens
-        : inputTokens
-}
-
-function sessionAgent(session: StoredSession): string {
-    const metadata = asRecord(session.metadata)
-    const flavor = metadata?.flavor
-    return typeof flavor === 'string' && flavor.trim() ? flavor.trim() : 'unknown'
-}
-
-function sessionModel(session: StoredSession): string | null {
-    return typeof session.model === 'string' && session.model.trim() ? session.model.trim() : null
-}
-
-function parseUsageEvent(session: StoredSession, message: StoredMessage): UsageEvent | null {
-    const envelope = asRecord(message.content)
-    if (envelope?.role !== 'agent') return null
-
-    const payload = asRecord(envelope.content)
-    if (!payload) return null
-    const data = asRecord(payload.data)
-    if (!data) return null
-
-    // Claude stream-json/SDK messages. A stream emits several updates for one
-    // assistant message, so the provider's message id is the stable upsert key.
-    if (payload.type === 'output' && data.type === 'assistant') {
-        const assistant = asRecord(data.message)
-        const usage = asRecord(assistant?.usage)
-        if (!usage) return null
-        const inputTokens = firstCount(usage, 'input_tokens', 'inputTokens')
-        const outputTokens = firstCount(usage, 'output_tokens', 'outputTokens')
-        const cacheReadTokens = firstCount(usage, 'cache_read_input_tokens', 'cacheReadTokens', 'cachedInputTokens')
-        const cacheCreationTokens = firstCount(usage, 'cache_creation_input_tokens', 'cacheCreationTokens', 'cacheWriteInputTokens')
-        if (inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens <= 0) return null
-        const providerId = typeof assistant?.id === 'string' ? assistant.id : message.id
-        const model = typeof assistant?.model === 'string' && assistant.model.trim()
-            ? assistant.model.trim()
-            : null
-        return {
-            sessionId: session.id,
-            sourceKey: `claude|${providerId}`,
-            sourceSeq: message.seq,
-            createdAt: message.createdAt,
-            agent: 'claude',
-            model,
-            kind: 'delta',
-            inputTokens: normalizeInputTokens(data, inputTokens, cacheReadTokens, cacheCreationTokens, 'excludes-cache'),
-            outputTokens,
-            cacheReadTokens,
-            cacheCreationTokens,
-            lastInputTokens: null,
-            lastOutputTokens: null,
-            lastCacheReadTokens: null,
-            lastCacheCreationTokens: null
-        }
-    }
-
-    // Codex forwards cumulative thread totals plus the most recent request.
-    // ACP-compatible backends wrap per-request usage in `total`, so only Codex
-    // should be diffed as a cumulative stream.
-    if (data.type === 'token_count' || data.type === 'usage') {
-        if (data.hapiUsageScope === 'imported-history') return null
-        const info = asRecord(data.info) ?? data
-        const agent = sessionAgent(session)
-        const explicitThreadId = typeof data.threadId === 'string'
-            ? data.threadId
-            : typeof data.thread_id === 'string'
-                ? data.thread_id
-                : null
-        const metadata = asRecord(session.metadata)
-        const hasImportedCodexHistory = typeof metadata?.codexSourceSessionId === 'string'
-            || metadata?.lifecycleState === 'imported'
-        if (agent === 'codex' && explicitThreadId === null && hasImportedCodexHistory) {
-            return null
-        }
-        const cumulativeTotal = agent === 'codex'
-            ? asRecord(info.total)
-                ?? asRecord(info.total_token_usage)
-                ?? asRecord(info.totalTokenUsage)
-            : null
-        const last = asRecord(info.last)
-            ?? asRecord(info.last_token_usage)
-            ?? asRecord(info.lastTokenUsage)
-            ?? (data.type === 'usage' ? info : null)
-        const total = cumulativeTotal ?? (agent === 'codex' ? last : asRecord(info.total) ?? info)
-        if (!total) return null
-        const rawInputTokens = firstCount(total, 'inputTokens', 'input_tokens')
-        const outputTokens = firstCount(total, 'outputTokens', 'output_tokens')
-        const cacheReadTokens = firstCount(total, 'cachedInputTokens', 'cached_input_tokens', 'cacheReadTokens', 'cache_read_input_tokens')
-        const cacheCreationTokens = firstCount(total, 'cacheWriteInputTokens', 'cache_write_input_tokens', 'cacheCreationTokens', 'cache_creation_input_tokens')
-        if (rawInputTokens + outputTokens + cacheReadTokens + cacheCreationTokens <= 0) return null
-        const threadId = explicitThreadId ?? session.id
-        const scope = typeof data.scopeRole === 'string'
-            ? data.scopeRole
-            : typeof data.scope_role === 'string'
-                ? data.scope_role
-                : 'parent'
-        const isCumulative = cumulativeTotal !== null
-        const turnId = typeof data.turnId === 'string'
-            ? data.turnId
-            : typeof data.turn_id === 'string'
-                ? data.turn_id
-                : ''
-        const model = typeof data.model === 'string' && data.model.trim()
-            ? data.model.trim()
-            : null
-        // Codex/Kimi provider formats have always reported inclusive input.
-        // Imported Pi usage is known-inclusive, and for generic ACP an own
-        // `model` property is the only strong provenance for the unmarked
-        // inclusive wire introduced with the usage dashboard. Older ambiguous
-        // payloads are conservatively treated as cache-exclusive.
-        const legacyInputSemantics = agent === 'codex'
-            || agent === 'kimi'
-            || (agent === 'pi' && message.localId?.startsWith('pi:'))
-            || Object.prototype.hasOwnProperty.call(data, 'model')
-            ? 'includes-cache'
-            : 'excludes-cache'
-        const inputTokens = normalizeInputTokens(
-            data,
-            rawInputTokens,
-            cacheReadTokens,
-            cacheCreationTokens,
-            legacyInputSemantics
-        )
-        const lastOutputTokens = last ? firstCount(last, 'outputTokens', 'output_tokens') : null
-        const lastCacheReadTokens = last
-            ? firstCount(last, 'cachedInputTokens', 'cached_input_tokens', 'cacheReadTokens', 'cache_read_input_tokens')
-            : null
-        const lastCacheCreationTokens = last
-            ? firstCount(last, 'cacheWriteInputTokens', 'cache_write_input_tokens', 'cacheCreationTokens', 'cache_creation_input_tokens')
-            : null
-        const lastInputTokens = last
-            ? normalizeInputTokens(
-                data,
-                firstCount(last, 'inputTokens', 'input_tokens'),
-                lastCacheReadTokens ?? 0,
-                lastCacheCreationTokens ?? 0,
-                legacyInputSemantics
-            )
-            : null
-        return {
-            sessionId: session.id,
-            sourceKey: isCumulative
-                ? [
-                    'cumulative',
-                    threadId,
-                    scope,
-                    turnId,
-                    inputTokens,
-                    outputTokens,
-                    cacheReadTokens,
-                    cacheCreationTokens
-                ].join('|')
-                : `delta|${message.id}`,
-            sourceSeq: message.seq,
-            createdAt: message.createdAt,
-            agent,
-            model,
-            kind: isCumulative ? 'cumulative' : 'delta',
-            inputTokens,
-            outputTokens,
-            cacheReadTokens,
-            cacheCreationTokens,
-            lastInputTokens,
-            lastOutputTokens,
-            lastCacheReadTokens,
-            lastCacheCreationTokens
-        }
-    }
-
-    return null
-}
-
-function collectUsageEvents(store: Store, sessions: StoredSession[]): void {
-    const scanStates = store.usage.getScanStates(sessions.map((session) => session.id))
-    for (const session of sessions) {
-        const messageEpoch = store.messages.getMessageEpoch(session.id)
-        const scanState = scanStates.get(session.id)
-        const replaceEvents = !scanState || scanState.messageEpoch !== messageEpoch
-        const afterSeq = replaceEvents ? 0 : scanState.lastSeq
-        const messages = store.messages.getMessagesAfterSeq(session.id, afterSeq)
-        const events = new Map<string, UsageEvent>()
-        let indexedModels: Map<string, string> | null = null
-        const getIndexedModel = (sourceKey: string): string | null => {
-            if (indexedModels === null) {
-                indexedModels = new Map(
-                    store.usage.getEvents([session.id])
-                        .filter((event): event is UsageEvent & { model: string } => event.model !== null)
-                        .map((event) => [event.sourceKey, event.model])
-                )
-            }
-            return indexedModels.get(sourceKey) ?? null
-        }
-        const fallbackModel = sessionModel(session)
-        for (const message of messages) {
-            const event = parseUsageEvent(session, message)
-            if (!event) continue
-            const existingEvent = events.get(event.sourceKey)
-            const explicitModel = event.model
-            event.model = explicitModel
-                ?? existingEvent?.model
-                ?? getIndexedModel(event.sourceKey)
-                ?? fallbackModel
-            if (event.kind === 'delta' || !existingEvent) {
-                events.set(event.sourceKey, event)
-            } else if (explicitModel !== null) {
-                // A replay may add model metadata missing from the original snapshot.
-                existingEvent.model = explicitModel
-            }
-        }
-        const lastSeq = messages.at(-1)?.seq ?? afterSeq
-        if (messages.length > 0 || replaceEvents) {
-            store.usage.recordScan(
-                session.id,
-                session.namespace,
-                messageEpoch,
-                lastSeq,
-                Array.from(events.values()),
-                replaceEvents
-            )
-        }
-    }
-}
+import { usageSourceLedgerId } from '../store/usageSources'
 
 type Totals = Omit<UsageSummaryBucket, 'key'>
 
@@ -344,10 +82,9 @@ export function getUsageSummary(
     timeZone: string = 'UTC'
 ): UsageSummaryResponse {
     const sessions = store.sessions.getSessionsByNamespace(namespace)
-    // This is intentionally lazy. Existing HAPI databases have no usage table;
-    // the first dashboard request backfills history, while later requests only
-    // update the idempotent event rows.
-    collectUsageEvents(store, sessions)
+    // New messages are indexed on insertion. Backfill history from older hubs
+    // and refresh usage after structural transcript changes.
+    store.usage.collectSessions(sessions)
 
     const now = Date.now()
     const days = range === '30d' ? 30 : range === 'all' ? null : 7
@@ -359,8 +96,41 @@ export function getUsageSummary(
     // same session: the live pipeline under-counts turns that report usage
     // only for their final step, and mixing both sources would double count
     // the steps it did see. See usageReconciliation.ts.
-    const reconciledRows = store.usage.getReconciledByNamespace(namespace)
-    const reconciledSessionIds = new Set(reconciledRows.map((row) => row.sessionId))
+    const allReconciledRows = store.usage.getReconciledByNamespace(namespace)
+    const snapshotIds = new Set(allReconciledRows.map((row) => `${row.sessionId}|${row.agent}`))
+    const sources = store.usage.getSources(namespace)
+    // Native ledger ids and old/resumed HAPI ids are aliases of a billed
+    // conversation. Count that conversation once across merges and clears.
+    const sessionAliases = new Map<string, string>()
+    const canonicalSession = (id: string): string => {
+        const parent = sessionAliases.get(id)
+        if (!parent || parent === id) return id
+        const root = canonicalSession(parent)
+        sessionAliases.set(id, root)
+        return root
+    }
+    for (const source of sources) {
+        const native = canonicalSession(usageSourceLedgerId(source))
+        const session = canonicalSession(source.sessionId)
+        if (native !== session) sessionAliases.set(native, session)
+    }
+    const supersededLegacySnapshots = new Set(sources
+        .filter((source) => snapshotIds.has(`${usageSourceLedgerId(source)}|${source.agent}`))
+        .map((source) => `${source.sessionId}|${source.agent}`))
+    // A previous hub can leave a newer session-keyed report beside a restored
+    // native snapshot. They describe the same requests, so count the native
+    // source once while the next reconciliation refreshes its full totals.
+    const reconciledRows = allReconciledRows.filter((row) => !supersededLegacySnapshots.has(`${row.sessionId}|${row.agent}`))
+    const reconciledSessions = new Set(reconciledRows.map((row) => `${row.sessionId}|${row.agent}`))
+    const reconciledSources = new Set(sources
+        .filter((source) => reconciledSessions.has(`${source.sessionId}|${source.agent}`)
+            || reconciledSessions.has(`${usageSourceLedgerId(source)}|${source.agent}`))
+        .map((source) => `${source.machineId}|${source.agent}|${source.nativeSessionId}`))
+    for (const source of sources) {
+        if (reconciledSources.has(`${source.machineId}|${source.agent}|${source.nativeSessionId}`)) {
+            reconciledSessions.add(`${source.sessionId}|${source.agent}`)
+        }
+    }
     const isInRange = (event: UsageEvent) => (from === null || event.createdAt >= from) && event.createdAt <= now
 
     const totals = emptyTotals()
@@ -382,7 +152,10 @@ export function getUsageSummary(
             const sourceParts = event.sourceKey.split('|')
             // Provider thread ids are only unique within a HAPI session. Keep
             // deleted-session history from altering a newer session's delta.
-            const streamKey = `${event.sessionId}|${sourceParts.slice(0, 3).join('|')}`
+            // Parent/child labels describe presentation, not distinct billing
+            // streams. Native thread identity keeps replayed traces from
+            // starting another cumulative baseline under a different label.
+            const streamKey = `${event.sessionId}|${sourceParts.slice(0, 2).join('|')}`
             const previous = cumulativePrevious.get(streamKey) ?? null
             const current: UsageSnapshot = [
                 event.inputTokens,
@@ -429,7 +202,7 @@ export function getUsageSummary(
         // Skip only the live OpenCode rows of a reconciled session: the
         // snapshot replaces them. Other agents' events on the same session
         // (e.g. after a flavor switch) still count.
-        if (event.agent === 'opencode' && reconciledSessionIds.has(event.sessionId)) continue
+        if (reconciledSessions.has(`${event.sessionId}|${event.agent}`)) continue
         // Cache reads and writes partition processed input. Preserve the
         // request and its primary token counts when a provider emits an
         // impossible partition, but conservatively decline to credit either
@@ -450,7 +223,7 @@ export function getUsageSummary(
         const modelTotals = byModel.get(modelKey) ?? emptyTotals()
         addTotals(modelTotals, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens)
         byModel.set(modelKey, modelTotals)
-        sessionsWithUsage.add(event.sessionId)
+        sessionsWithUsage.add(canonicalSession(event.sessionId))
     }
 
     // Reconciliation rows are absolute per-day totals, so range filtering
@@ -472,7 +245,7 @@ export function getUsageSummary(
         const modelTotals = byModel.get(row.model) ?? emptyTotals()
         addTotals(modelTotals, row.inputTokens, row.outputTokens, row.cacheReadTokens, row.cacheCreationTokens, row.requests)
         byModel.set(row.model, modelTotals)
-        sessionsWithUsage.add(row.sessionId)
+        sessionsWithUsage.add(canonicalSession(row.sessionId))
     }
 
     const sortBuckets = (values: Map<string, Totals>): UsageSummaryBucket[] => Array.from(values.entries())

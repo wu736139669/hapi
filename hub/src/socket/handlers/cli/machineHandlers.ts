@@ -205,7 +205,16 @@ export function registerMachineHandlers(socket: CliSocketWithData, deps: Machine
             const opencodeSessionId = metadata && typeof metadata.opencodeSessionId === 'string'
                 ? metadata.opencodeSessionId
                 : null
-            if (opencodeSessionId) sessionIdByOpencodeId.set(opencodeSessionId, session.id)
+            if (typeof metadata?.machineId === 'string' && metadata.machineId !== machineId) continue
+            if (opencodeSessionId) {
+                store.usage.rememberSource({ namespace, machineId, agent: 'opencode', nativeSessionId: opencodeSessionId, sessionId: session.id })
+                sessionIdByOpencodeId.set(opencodeSessionId, session.id)
+            }
+        }
+        for (const source of store.usage.getSources(namespace, machineId)) {
+            if (source.agent === 'opencode' && !sessionIdByOpencodeId.has(source.nativeSessionId)) {
+                sessionIdByOpencodeId.set(source.nativeSessionId, source.sessionId)
+            }
         }
 
         const now = Date.now()
@@ -213,10 +222,9 @@ export function registerMachineHandlers(socket: CliSocketWithData, deps: Machine
             if (entry.rows.length === 0) continue
             const sessionId = sessionIdByOpencodeId.get(entry.opencodeSessionId)
             if (!sessionId) continue
-            store.usage.replaceReconciled(
-                sessionId,
-                namespace,
-                entry.rows.map((row) => ({ ...row, sessionId, agent: 'opencode' as const })),
+            store.usage.reconcileSource(
+                { namespace, machineId, agent: 'opencode', nativeSessionId: entry.opencodeSessionId, sessionId },
+                entry.rows.map((row) => ({ ...row, agent: 'opencode' as const })),
                 now
             )
         }

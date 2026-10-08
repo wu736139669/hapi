@@ -104,7 +104,9 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
                 try {
                     await initializeSharedClient(control);
                     // Roots remain loaded by their independent side-clients.
-                    for (const threadId of roots.keys()) await control.request('thread/resume', { threadId });
+                    for (const [threadId, root] of roots) {
+                        if (root.hasNativeHistory()) await control.request('thread/resume', { threadId, excludeTurns: true });
+                    }
                     return;
                 } catch (error) {
                     logger.debug('[Codex shared] control reconnect', error);
@@ -123,8 +125,10 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
         shutdownPromise = (async () => {
             // Close frontend admission first, then drain binding/startup work.
             // No root may materialize after cleanup took its snapshot.
+            logger.debug('[Codex shared] shutdown: closing gateway');
             await gateway?.close().catch(() => {});
             await startup.catch(() => {});
+            logger.debug('[Codex shared] shutdown: draining lifecycle', { pending: operations.size });
             while (operations.size) await Promise.allSettled([...operations]);
             let timer: ReturnType<typeof setTimeout> | undefined;
             try {
@@ -133,6 +137,7 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
                     new Promise<void>(resolve => { timer = setTimeout(resolve, 5_000); })
                 ]);
             } finally { clearTimeout(timer); }
+            logger.debug('[Codex shared] shutdown: stopping engine');
             await control.disconnect();
             if (server && server.exitCode === null && server.signalCode === null) {
                 if (!await killProcessByChildProcess(server)) throw new Error('Codex engine did not stop; ownership retained for orphan recovery');
@@ -146,9 +151,11 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
             failure ??= error;
             logger.debug('[Codex shared] shutdown', error);
         }).finally(async () => {
+            logger.debug('[Codex shared] shutdown: closing roots');
             await Promise.allSettled([...prepared].map(root => root.close(ending.has(root))));
             await rm(sockets, { recursive: true, force: true }).catch(error => logger.debug('[Codex shared] socket cleanup', error));
             finish();
+            logger.debug('[Codex shared] shutdown: finished');
         });
         return shutdownPromise;
     };
@@ -197,7 +204,7 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
         const reserved = runtime.sessions[root.session.sessionId];
         if (reserved && reserved.threadId !== threadId) throw new Error('Codex retargeted a reserved thread');
         if (!reserved) await reserve(root, threadId);
-        // No fake user turn/name. Metadata write materializes an empty legacy rollout for native resume.
+        // Persist native Git context without creating a synthetic user turn.
         await control.request('thread/metadata/update', { threadId, gitInfo: gitInfo(string(record(response.thread).cwd) ?? root.bootstrap.workingDirectory) });
         assertRunning();
         roots.set(threadId, root);
@@ -212,7 +219,9 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
         await notifyRunnerSessionStarted(root.session.sessionId, root.session.getMetadata() ?? root.bootstrap.metadata);
         // Cold-resumed threads predate the control connection's automatic
         // new-thread subscription. Subscribe once without changing settings.
-        await control.request('thread/resume', { threadId });
+        // New threads already subscribe all initialized connections. Native
+        // resume cannot reload an empty 0.159 thread before its first rollout.
+        if (root.hasNativeHistory()) await control.request('thread/resume', { threadId, excludeTurns: true });
         await root.syncHistory(effective);
     };
     const create = (method: 'thread/start' | 'thread/fork', params: Record<string, unknown>, parent?: SharedCodexRoot, initialOptions?: SharedLaunchOptions): Promise<SharedCodexRoot> => operation(async () => {
@@ -289,6 +298,8 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
             const root = roots.get(string(record(request.params).threadId) ?? '');
             const nativeId = string(record(request.params).queuedSubmissionId);
             if (root && nativeId) await root.nativeQueueDeleted(nativeId);
+        } else if (!response.error && ['thread/rollback', 'thread/revert'].includes(request.method ?? '')) {
+            roots.get(string(record(request.params).threadId) ?? '')?.invalidateHistory();
         }
         if (!response.error && ['thread/start', 'thread/resume', 'thread/fork'].includes(request.method ?? '')) {
             const threadId = string(record(record(response.result).thread).id);
@@ -343,7 +354,7 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
         let root: SharedCodexRoot;
         if (options.resumeLast) {
             const response = record(await control.request('thread/list', { limit: 1, sortKey: 'updated_at', sortDirection: 'desc',
-                ...(!options.resumeAll ? { cwd: launch.cwd } : {}) }));
+                useStateDbOnly: true, ...(!options.resumeAll ? { cwd: launch.cwd } : {}) }));
             options.resumeSessionId = string(record(Array.isArray(response.data) ? response.data[0] : undefined).id);
             if (!options.resumeSessionId) throw new Error('No Codex session to resume');
         }
@@ -360,7 +371,9 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
                 const root = await prepare(launch.cwd, existing);
                 await reserveRecord(root, threadId); return root;
             });
-            const params = root.config({ ...launch.threadParams, threadId });
+            // History is synchronized after the runner receives its startup webhook.
+            // Hydrating it inside native resume can exceed that deadline on large threads.
+            const params = root.config({ ...launch.threadParams, threadId, excludeTurns: true });
             let response: Record<string, unknown>;
             try {
                 response = record(await root.client.request('thread/resume', params));

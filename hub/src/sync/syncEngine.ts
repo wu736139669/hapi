@@ -13,13 +13,14 @@ import {
     isMachineCapabilitySkewed,
     runnerSupportsAgentTeam,
 } from '@hapi/protocol/runnerCapabilities'
-import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, RewindConversationErrorCode, SlashCommandsResponse, ImplementCodexPlanResult } from '@hapi/protocol/apiTypes'
+import type { CodexGoalRequest, CodexGoalResponse, CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, RewindConversationErrorCode, SlashCommandsResponse, ImplementCodexPlanResult } from '@hapi/protocol/apiTypes'
 import type { SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
 import type { AgentFlavor, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import { hasConversationMessageContent, unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
 import { randomUUID } from 'node:crypto'
 import type { Store, CancelQueuedMessageResult } from '../store'
+import type { FutureScheduledMessageStats } from '../store/messages'
 import type { HapiSessionExportResult } from '@hapi/protocol/sessionExport'
 import type { RpcRegistry } from '../socket/rpcRegistry'
 import { clearAgentTerminalBuffer } from '../socket/agentTerminalBuffer'
@@ -359,12 +360,8 @@ export class SyncEngine {
         this.sessionCache.setSessionPinMode(sessionId, mode)
     }
 
-    getFutureScheduledMessageCounts(sessionIds: string[], now: number = Date.now()): Map<string, number> {
-        return this.store.messages.countFutureScheduledBySessionIds(sessionIds, now)
-    }
-
-    getNextScheduledAtBySessionIds(sessionIds: string[], now: number = Date.now()): Map<string, number> {
-        return this.store.messages.minFutureScheduledAtBySessionIds(sessionIds, now)
+    getFutureScheduledMessageStats(sessionIds: string[], now: number = Date.now()): Map<string, FutureScheduledMessageStats> {
+        return this.store.messages.getFutureScheduledStatsBySessionIds(sessionIds, now)
     }
 
     getSession(sessionId: string): Session | undefined {
@@ -1991,6 +1988,15 @@ export class SyncEngine {
             return { ok: false, code: 'unavailable', error: 'Plan implementation requires an active shared Codex session' }
         }
         return await this.rpcGateway.implementCodexPlan(access.sessionId, planId)
+    }
+
+    async codexGoal(sessionId: string, namespace: string, request: CodexGoalRequest): Promise<CodexGoalResponse> {
+        const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
+        if (!access.ok || !access.session.active || access.session.metadata?.flavor !== 'codex'
+            || !access.session.metadata.capabilities?.codexGoal) {
+            throw new Error('Goal controls require an active, updated Codex session')
+        }
+        return await this.rpcGateway.codexGoal(access.sessionId, request)
     }
 
     async switchSession(sessionId: string, to: 'remote' | 'local'): Promise<void> {

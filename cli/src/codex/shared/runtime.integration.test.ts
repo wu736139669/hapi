@@ -15,6 +15,13 @@ class MockSession {
     readonly sessionId = randomUUID();
     state: AgentState = { requests: { 'old-worker': { tool: 'request_user_input', arguments: {}, createdAt: 0 } } }; metadata: Metadata;
     messages: unknown[] = []; consumed: string[] = []; dead = false;
+    histories = new Map<string, import('@hapi/protocol').CodexHistoryState>();
+    async syncCodexHistory(threadId: string, commit?: import('@hapi/protocol').CodexHistorySyncRequest['commit']) {
+        const prior = this.histories.get(threadId) ?? { epoch: 0, revision: 0, checkpoint: null };
+        const state = commit ? { epoch: 0, revision: prior.revision + 1, checkpoint: commit.checkpoint } : prior;
+        this.histories.set(threadId, state); return state;
+    }
+    async waitForMessages() { return true; } async flushMetadata() { return true; }
     user?: (message: { content: { text: string } }, id?: string) => void;
     rpc = new Map<string, (params: unknown) => Promise<unknown>>();
     rpcHandlerManager = { registerHandler: (name: string, fn: (params: unknown) => Promise<unknown>) => { this.rpc.set(name, fn); } };
@@ -170,4 +177,65 @@ describe.skipIf(process.env.HAPI_RUN_SHARED_CODEX_TESTS !== '1')('installed Code
             await rm(home, { recursive: true, force: true, maxRetries: 3 });
         }
     }, 60_000);
+    it('cold-resumes before history synchronization can block the runner webhook', async () => {
+        const home = await mkdtemp('/tmp/hapi-shared-resume-'); state.home = home;
+        const ch = join(home, 'codex'); await mkdir(ch);
+        await writeFile(join(ch, 'config.toml'), 'model = "mock-model"\nmodel_provider = "mock"\n[model_providers.mock]\nname = "No model calls"\nbase_url = "http://127.0.0.1:1/v1"\nwire_api = "responses"\nrequires_openai_auth = false\n[analytics]\nenabled = false\n[feedback]\nenabled = false\n');
+        vi.stubEnv('CODEX_HOME', ch); vi.stubEnv('HOME', home);
+        const { runSharedRuntime } = await import('./runtime');
+        const { SharedCodexRoot } = await import('./root');
+        const { bootstrapExistingSession } = await import('@/agent/sessionFactory');
+        const { notifyRunnerSessionStarted } = await import('@/runner/controlClient');
+        const seedRequest = CodexAppServerClient.prototype.request;
+        let coldThreadId: string | undefined;
+        // Native 0.159 cannot hydrate a new empty paginated thread without a source rollout.
+        // Seed a persisted legacy thread; the cold-resume behavior is shared by both formats.
+        const seed = vi.spyOn(CodexAppServerClient.prototype, 'request').mockImplementation(function<T>(this: CodexAppServerClient, method: string, params?: unknown): Promise<T> {
+            if (method === 'thread/resume' && coldThreadId && record(params).threadId === coldThreadId && record(params).excludeTurns !== true) {
+                return Promise.reject(new Error('Full history hydration would block startup'));
+            }
+            return seedRequest.call(this, method, method === 'thread/start' ? { ...record(params), historyMode: 'legacy' } : params) as Promise<T>;
+        });
+        const stop = new AbortController();
+        let initialReady!: (value: import('./runtime').RuntimeReady) => void;
+        const initial = new Promise<import('./runtime').RuntimeReady>(resolve => { initialReady = resolve; });
+        const running = runSharedRuntime({ workingDirectory: home }, initialReady, stop.signal);
+        let resumed: Promise<void> | undefined;
+        const coldStop = new AbortController();
+        let release!: () => void;
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        let historyEntered!: () => void;
+        const history = new Promise<void>(resolve => { historyEntered = resolve; });
+        const spies: Array<{ mockRestore(): void }> = [seed];
+        try {
+            const { sessionId, runtime } = await Promise.race([initial, running.then(() => { throw new Error('Runtime stopped before ready'); })]);
+            const threadId = runtime.sessions[sessionId].threadId;
+            stop.abort(); await running;
+            coldThreadId = threadId;
+            const session = state.sessions.get(sessionId)!; session.dead = false;
+            vi.mocked(bootstrapExistingSession).mockResolvedValueOnce({
+                session: session as unknown as ApiSessionClient, sessionInfo: { id: sessionId, namespace: 'test' },
+                metadata: session.metadata, workingDirectory: home, machineId: 'test', startedBy: 'terminal', api: {}
+            } as unknown as Awaited<ReturnType<typeof bootstrapExistingSession>>);
+            const syncHistory = SharedCodexRoot.prototype.syncHistory;
+            spies.push(vi.spyOn(SharedCodexRoot.prototype, 'syncHistory').mockImplementation(async function(this: import('./root').SharedCodexRoot, response: Record<string, unknown>) {
+                historyEntered(); await gate; await syncHistory.call(this, response);
+            }));
+            vi.mocked(notifyRunnerSessionStarted).mockClear();
+            let coldReady!: (value: import('./runtime').RuntimeReady) => void;
+            const cold = new Promise<import('./runtime').RuntimeReady>(resolve => { coldReady = resolve; });
+            resumed = runSharedRuntime({ workingDirectory: home, resumeSessionId: threadId, existingSessionId: sessionId }, coldReady, coldStop.signal);
+            await Promise.race([history, resumed]);
+            expect(notifyRunnerSessionStarted).toHaveBeenCalledWith(sessionId, expect.objectContaining({ codexSessionId: threadId }));
+            expect(session.dead).toBe(false);
+            expect(state.sessions.size).toBe(1);
+            release();
+            expect((await Promise.race([cold, resumed.then(() => { throw new Error('Resume stopped before ready'); })])).sessionId).toBe(sessionId);
+        } finally {
+            release(); stop.abort(); coldStop.abort();
+            await running.catch(() => {}); await resumed?.catch(() => {});
+            for (const spy of spies) spy.mockRestore();
+            await rm(home, { recursive: true, force: true });
+        }
+    }, 30_000);
 });

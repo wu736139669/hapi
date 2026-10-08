@@ -16,7 +16,7 @@ import { logger } from '@/ui/logger'
  * timeline message.
  */
 
-const SCAN_INTERVAL_MS = 30 * 60 * 1000
+const SCAN_INTERVAL_MS = 5 * 60 * 1000
 const INITIAL_DELAY_MS = 20_000
 
 export type OpencodeUsageScannerOptions = {

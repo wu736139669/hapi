@@ -134,6 +134,9 @@ export async function startCodexGateway(options: {
     return { endpoint, async close() {
         for (const [client, upstream] of connections) { client.terminate(); upstream.terminate(); }
         websocket.close();
+        // Bun can retain upgraded Unix connections after ws.terminate(),
+        // leaving server.close() and the execution owner waiting forever.
+        server.closeAllConnections();
         await new Promise<void>(resolve => server.close(() => resolve()));
         if (options.path) await unlink(options.path).catch(() => {});
     } };

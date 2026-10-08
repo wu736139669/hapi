@@ -15,11 +15,13 @@ import { buildUserInputFromMessage } from '../utils/appServerConfig';
 import { resolveCodexPermissionModeConfig } from '../utils/permissionModeConfig';
 import { resolveCodexSlashCommand } from '../utils/slashCommands';
 import { parseReasoningEffortValue } from '../utils/reasoningEffort';
+import { manageThreadGoal } from '../utils/manageThreadGoal';
 import { SharedCodexPermissions } from './permissions';
 import { SharedCodexQueue } from './queue';
 import { SharedCodexProjection, inputText } from './projection';
 import { getCodexSystemPrompt } from '../utils/systemPrompt';
 import { record, string } from './gateway';
+import { CodexHistorySync, readCurrentThread } from './history';
 import { initializeSharedClient, type SharedLaunchOptions } from './launch';
 import { inheritedSandbox, settingsMatch } from './settings';
 import { planImplementationMessageId, planProposalForItem, planProposalForTurn } from './plan';
@@ -48,12 +50,15 @@ export class SharedCodexRoot {
     private permissions!: SharedCodexPermissions;
     private queue!: SharedCodexQueue;
     private projection!: SharedCodexProjection;
+    private history!: CodexHistorySync;
+    private readonly childHistories = new Map<string, CodexHistorySync>();
     private readonly children = new Map<string, SharedCodexProjection>();
     private readonly ancestry = new Map<string, string | null>();
     private heartbeat?: ReturnType<typeof setInterval>;
     private work: Promise<unknown> = Promise.resolve();
     private notifications = Promise.resolve();
     private currentTurn: string | undefined;
+    private goalRevision = 0;
     private latestTurn?: { id: string; status: string; planId?: string };
     private publishedPlanId: string | null | undefined;
     private submittingPlan = false;
@@ -62,6 +67,7 @@ export class SharedCodexRoot {
     private settingsRevision = 0;
     private refreshing?: Promise<void>;
     private interrupted = false;
+    private pristineThread?: Record<string, unknown>;
     private closed = false;
     private stopping = false;
     private closing?: Promise<void>;
@@ -83,7 +89,9 @@ export class SharedCodexRoot {
             }
             if (method === 'thread/settings/updated' && record(params).threadId === this.threadId) this.acceptSettings(record(record(params).threadSettings));
             if (record(params).threadId === this.threadId) {
+                if (method === 'thread/goal/updated' || method === 'thread/goal/cleared') this.goalRevision++;
                 if (method === 'turn/started') {
+                    this.pristineThread = undefined;
                     this.turnRevision++; this.currentTurn = string(record(record(params).turn).id); this.interrupted = false;
                     if (this.currentTurn) this.latestTurn = { id: this.currentTurn, status: 'inProgress' };
                     this.publishSteering();
@@ -148,6 +156,8 @@ export class SharedCodexRoot {
         this.bridge = await buildHapiMcpBridge(this.session, { exportSessionEnv: false, emitTitleSummary: false,
             skillLookup: { workingDirectory: this.bootstrap.workingDirectory, flavor: 'codex' } });
         await initializeSharedClient(this.client);
+        await this.client.request('experimentalFeature/enablement/set', { enablement: { goals: true } })
+            .catch(error => logger.debug('[Codex shared] Goal feature enablement', error));
         this.permissions = new SharedCodexPermissions(this.session, this.client, this.host.generation);
         this.client.setServerRequestHandler(request => { void this.receiveRequest(request); });
     }
@@ -188,12 +198,18 @@ export class SharedCodexRoot {
     async bind(threadId: string, response: Record<string, unknown>, subscribe: boolean): Promise<Record<string, unknown>> {
         if (this.threadId && this.threadId !== threadId) throw new Error('Cannot retarget a shared HAPI session');
         this.threadId = threadId;
+        const initialThread = record(response.thread);
+        // Native 0.159 does not create a source rollout until the first input.
+        // A freshly created empty root already has an authoritative snapshot;
+        // asking persisted-history APIs here rejects an otherwise usable root.
+        if (subscribe && initialThread.preview === '' && Array.isArray(initialThread.turns) && !initialThread.turns.length) this.pristineThread = initialThread;
         this.queue = new SharedCodexQueue(this.client, threadId, join(this.host.directory, `${this.session.sessionId}.queue.json`),
             (ids, steered) => this.session.emitMessagesConsumed(ids, { steered }), ids => this.session.emitSteerIndeterminate(ids),
             (id, input) => this.session.syncNativeQueuedMessage(id, input === null ? null : inputText(input)),
             ids => this.session.setSteerDeliveryState(ids, 'queued'));
         await this.queue.load();
         this.projection = new SharedCodexProjection(this.session, threadId, id => this.queue.committed(id));
+        this.history = this.historyFor(this.projection);
         this.session.updateMetadata(metadata => ({ ...metadata, codexSessionId: threadId, capabilities: {
             ...metadata.capabilities, concurrentClients: true, terminal: true,
             // In-place rewind needs a native + hub commit barrier. Do not
@@ -204,20 +220,30 @@ export class SharedCodexRoot {
             completedRequests: { ...state.completedRequests, ...Object.fromEntries(Object.entries(state.requests ?? {}).map(([id, request]) =>
                 [id, { ...request, completedAt: Date.now(), status: 'canceled' as const }])) }
         }));
-        if (subscribe) response = record(await this.client.request('thread/resume', { threadId }));
+        if (subscribe && !this.pristineThread) response = record(await this.client.request('thread/resume', { threadId, excludeTurns: true }));
         this.acceptSettings(response); this.acceptSettings(this.host.settingsFor(threadId) ?? {});
         return response;
     }
-    /** Reconcile the full native history into the hub. Huge threads can take
-     *  minutes; the HAPI session is already usable while this runs. */
-    async syncHistory(response: Record<string, unknown>): Promise<void> {
-        await this.projection.history(response.thread); await this.refresh(); await this.refreshChildren(true);
+    /** Current state first; durable history catch-up runs independently. */
+    async syncHistory(_response: Record<string, unknown>): Promise<void> {
+        await this.refresh(); await this.refreshChildren(true);
     }
+    hasNativeHistory(): boolean { return !this.pristineThread; }
+    private historyFor(projection: SharedCodexProjection): CodexHistorySync {
+        return new CodexHistorySync(this.client, this.session, projection, (turnId, item) => {
+            if (projection.threadId !== this.threadId || this.latestTurn?.id !== turnId) return;
+            const planId = planProposalForItem(this.threadId, turnId, item);
+            if (planId && this.latestTurn.planId !== planId) { this.turnRevision++; this.latestTurn.planId = planId; this.publishPlan(); }
+        }, error => { if (!this.closed && !this.stopping) logger.debug('[Codex shared] incremental history',
+            error instanceof Error ? { message: error.message, stack: error.stack } : error); });
+    }
+    invalidateHistory(): void { this.history?.invalidate(); for (const history of this.childHistories.values()) history.invalidate(); }
     async activate(options: SharedLaunchOptions = {}): Promise<void> {
         // Restored input cannot run before the cold-resume settings are applied.
         await this.initialSettings(options);
         if (this.stopping) throw new Error('Codex execution is stopping');
         this.registerControls(); this.ready();
+        this.session.updateMetadata(metadata => ({ ...metadata, capabilities: { ...metadata.capabilities, codexGoal: true } }));
         this.heartbeat = setInterval(() => this.alive(), 2_000); this.alive(); this.session.emitSessionReady();
     }
     private publishSteering(): void {
@@ -274,7 +300,13 @@ export class SharedCodexRoot {
                 projection = new SharedCodexProjection(this.session, eventThread, async () => {}, this.threadId);
                 this.children.set(eventThread, projection);
             }
-            await projection.notification(method, params); return;
+            await projection.notification(method, params);
+            if (method === 'item/completed' || method === 'turn/completed') {
+                let history = this.childHistories.get(eventThread);
+                if (!history) { history = this.historyFor(projection); this.childHistories.set(eventThread, history); }
+                history.schedule();
+            }
+            return;
         }
         if (method === 'turn/completed') this.session.sendSessionEvent({ type: 'ready' });
         if (method === 'thread/name/updated' && (typeof p.threadName === 'string' || p.threadName === null)) {
@@ -283,6 +315,7 @@ export class SharedCodexRoot {
         if (method === 'thread/archived') { await this.host.end(this, false); return; }
         if (method === 'thread/queue/changed') await this.queue.reconcile();
         await this.projection.notification(method, params, modelAtReceipt); this.alive();
+        if (method === 'item/completed' || method === 'turn/completed') this.history?.schedule();
     }
     async readThread(threadId = this.threadId): Promise<Record<string, unknown>> {
         let thread = record(record(await this.client.request('thread/read', { threadId, includeTurns: false })).thread);
@@ -303,7 +336,7 @@ export class SharedCodexRoot {
     private async refreshNow(): Promise<void> {
         if (!this.threadId || this.closed || !this.client.isInitialized()) return;
         const revision = this.turnRevision;
-        const thread = await this.readThread();
+        const thread = this.pristineThread ? { ...this.pristineThread, turns: [] } : await readCurrentThread(this.client, this.threadId);
         const turns = Array.isArray(thread.turns) ? thread.turns.map(record) : [];
         if (revision === this.turnRevision) {
             this.currentTurn = string(turns.find(turn => turn.status === 'inProgress')?.id);
@@ -312,13 +345,15 @@ export class SharedCodexRoot {
             const id = string(last?.id);
             this.latestTurn = id && last ? { id, status: string(last.status) ?? 'unknown', planId: planProposalForTurn(this.threadId, last) } : undefined;
         }
-        await this.projection.history(thread); await this.queue.reconcile(); this.alive();
+        const last = turns.at(-1);
+        if (last) await this.history.preview(last);
+        await this.queue.reconcile(); this.alive(); if (!this.pristineThread) this.history.schedule(0);
     }
     private async refreshChildren(subscribe: boolean): Promise<void> {
         let cursor: string | undefined;
         do {
             const page = record(await this.client.request('thread/list', { ancestorThreadId: this.threadId, cursor,
-                sourceKinds: ['subAgent', 'subAgentReview', 'subAgentCompact', 'subAgentThreadSpawn', 'subAgentOther'] }));
+                useStateDbOnly: true, sourceKinds: ['subAgent', 'subAgentReview', 'subAgentCompact', 'subAgentThreadSpawn', 'subAgentOther'] }));
             for (const value of Array.isArray(page.data) ? page.data : []) {
                 const thread = record(value); const id = string(thread.id);
                 if (id && id !== this.threadId) this.ancestry.set(id, string(thread.parentThreadId) ?? null);
@@ -337,8 +372,13 @@ export class SharedCodexRoot {
         for (const [id, projection] of this.children) {
             // Replaying a completed/unloaded child must not start its engine.
             try {
-                if (subscribe && loaded.has(id)) await this.client.request('thread/resume', { threadId: id });
-                projection.reset(); await projection.history(await this.readThread(id));
+                if (subscribe && loaded.has(id)) await this.client.request('thread/resume', { threadId: id, excludeTurns: true });
+                let history = this.childHistories.get(id);
+                if (!history) { history = this.historyFor(projection); this.childHistories.set(id, history); }
+                const thread = await readCurrentThread(this.client, id);
+                const last = Array.isArray(thread.turns) ? record(thread.turns.at(-1)) : undefined;
+                if (last) await history.preview(last);
+                history.schedule(0);
             } catch (error) { logger.debug('[Codex shared] child history unavailable', { id, error }); }
         }
     }
@@ -359,7 +399,7 @@ export class SharedCodexRoot {
                     this.permissions = new SharedCodexPermissions(this.session, this.client, `${this.host.generation}:${randomUUID()}`);
                     this.client.setServerRequestHandler(request => { void this.receiveRequest(request); });
                     const settingsRevision = this.settingsRevision;
-                    const response = record(await this.client.request('thread/resume', { threadId: this.threadId }));
+                    const response = this.pristineThread ? {} : record(await this.client.request('thread/resume', { threadId: this.threadId, excludeTurns: true }));
                     const observedSettings = this.settingsRevision !== settingsRevision;
                     this.acceptSettings(response);
                     if (!observedSettings) this.acceptSettings(this.host.settingsFor(this.threadId) ?? {});
@@ -402,6 +442,9 @@ export class SharedCodexRoot {
                 developer_instructions: null
             } } } : {})
         };
+        // Native 0.159 omits a settings notification for a no-op update.
+        // An existing authoritative snapshot already confirms these values.
+        if (settingsMatch(this.settingsNative, params)) return { applied: this.settings };
         let changed!: () => void;
         let timer: ReturnType<typeof setTimeout> | undefined;
         const accepted = new Promise<void>((resolve, reject) => {
@@ -415,6 +458,14 @@ export class SharedCodexRoot {
             // The RPC only acknowledges queueing the settings operation. The
             // native notification, not our submitted candidate, establishes state.
             await accepted; this.alive(); return { applied: this.settings };
+        } catch (error) {
+            logger.debug('[Codex shared] settings confirmation failed', { expected: params, actual: {
+                model: this.settingsNative.model, effort: this.settingsNative.effort,
+                collaborationMode: { mode: record(this.settingsNative.collaborationMode).mode,
+                    settings: { model: record(record(this.settingsNative.collaborationMode).settings).model,
+                        reasoning_effort: record(record(this.settingsNative.collaborationMode).settings).reasoning_effort } }
+            } });
+            throw error;
         } finally { clearTimeout(timer); this.settingsListeners.delete(changed); }
     }
     async initialSettings(options: SharedLaunchOptions): Promise<void> {
@@ -473,6 +524,23 @@ export class SharedCodexRoot {
         });
         rpc.registerHandler(RPC_METHODS.KillSession, async () => { await this.host.end(this); return { success: true }; });
         rpc.registerHandler(RPC_METHODS.SetSessionConfig, raw => this.applySettings(raw));
+        rpc.registerHandler(RPC_METHODS.CodexGoal, async raw => {
+            const revision = this.goalRevision;
+            const result = await manageThreadGoal(this.threadId, raw, (method, params) => this.client.request(method, params));
+            if (record(raw).action !== 'get' && this.goalRevision === revision) {
+                // Response fallback for servers that omit notifications. Keep
+                // older projections ahead of it and prefer newer native events.
+                this.notifications = this.notifications.then(() => {
+                    if (this.closed || this.goalRevision !== revision) return;
+                    this.session.sendAgentMessage({
+                        type: result.goal ? 'thread_goal_updated' : 'thread_goal_cleared',
+                        thread_id: this.threadId, scope: { role: 'parent', threadId: this.threadId },
+                        ...(result.goal ? { goal: result.goal } : {})
+                    });
+                }).catch(error => logger.debug('[Codex shared] Goal projection', error));
+            }
+            return result;
+        });
         rpc.registerHandler(RPC_METHODS.ImplementCodexPlan, raw => {
             const { planId } = ImplementCodexPlanRequestSchema.parse(raw);
             const work = this.work.catch(() => {}).then(() => this.implementPlan(planId));
@@ -552,6 +620,7 @@ export class SharedCodexRoot {
     }
     stopAccepting(): void {
         this.stopping = true; this.ready();
+        this.history?.close(); for (const history of this.childHistories.values()) history.close();
         this.publishSteering();
         this.publishPlan();
         this.session.onReconnect(null); this.client.setTransportAbandonedHandler(null);

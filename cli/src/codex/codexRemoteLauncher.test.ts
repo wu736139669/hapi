@@ -225,6 +225,13 @@ vi.mock('./codexAppServerClient', () => {
             return { goal: harness.goal };
         }
 
+        async request(method: string, params: Record<string, unknown>) {
+            if (method === 'thread/goal/get') return this.getThreadGoal(params);
+            if (method === 'thread/goal/set') return this.setThreadGoal(params);
+            if (method === 'thread/goal/clear') return this.clearThreadGoal(params);
+            throw new Error(`Unexpected request: ${method}`);
+        }
+
         async steerTurn(params?: { threadId?: string; input?: unknown[]; expectedTurnId?: string; clientUserMessageId?: string }): Promise<{
             dispatched: Promise<void>;
             completed: Promise<unknown>;
@@ -1956,6 +1963,27 @@ describe('codexRemoteLauncher', () => {
                 })
             })
         ]));
+    });
+
+    it('manages a Goal directly through RPC while the remote turn remains busy', async () => {
+        harness.suppressTurnCompletion = true;
+        harness.suppressGoalNotifications = true;
+        harness.goal = { threadId: 'thread-1', objective: 'Existing Goal', status: 'active', tokenBudget: null,
+            tokensUsed: 0, timeUsedSeconds: 0, createdAt: 1, updatedAt: 1 };
+        const { session, rpcHandlers, codexMessages } = createSessionStub(['first'], createMode(), false, false);
+        void codexRemoteLauncher(session as never);
+        await vi.waitFor(() => expect(harness.startTurnThreadIds).toHaveLength(1));
+        const action = rpcHandlers.get(RPC_METHODS.CodexGoal)!;
+        expect(await action({ action: 'pause' })).toMatchObject({ goal: { status: 'paused' } });
+        expect(await action({ action: 'resume' })).toMatchObject({ goal: { status: 'active' } });
+        expect(await action({ action: 'clear' })).toEqual({ goal: null });
+        expect(harness.startTurnThreadIds).toHaveLength(1);
+        expect(harness.interruptedTurns).toHaveLength(0);
+        expect(codexMessages).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'thread_goal_updated', goal: expect.objectContaining({ status: 'paused' }) }),
+            expect.objectContaining({ type: 'thread_goal_cleared', thread_id: 'thread-1' })
+        ]));
+        session.queue.close();
     });
 
     it('still attempts goal RPC when dynamic goals feature enablement is unsupported', async () => {

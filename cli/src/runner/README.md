@@ -119,7 +119,7 @@ Initiated by mobile app via backend RPC:
    - Configures agent-specific token environment
    - Spawns detached HAPI process with `--hapi-starting-mode remote --started-by runner`
    - Adds to `pidToTrackedSession` map
-   - Waits for the session-start webhook (15 seconds by default; `HAPI_RUNNER_WEBHOOK_TIMEOUT_MS` overrides)
+   - Waits for the session-start webhook (120 seconds for cold Codex resumes, 15 seconds otherwise; `HAPI_RUNNER_WEBHOOK_TIMEOUT_MS` overrides)
 4. New HAPI process:
    - Creates session with backend, receives `happySessionId`
    - Calls `notifyRunnerSessionStarted()` to POST to runner's `/session-started`

@@ -40,6 +40,14 @@ Run Claude Code, Codex, Cursor Agent, DeepSeek Harness, Grok Build, or OpenCode 
 - `hapi ping-peer <session-id-prefix> <message>` - Resume (if needed) and message another session. Prefer this or MCP `ping_peer` / `list_peers` over reinventing JWT+curl. Also `--message-file` / `--list`.
 - `hapi inspect-peer <session-id-or-prefix>` - Read-only peer metadata + recent message text (no resume). Prefer this or MCP `inspect_peer` when a user cites `[title](/sessions/<id>)` or Copy-reference `See session "…" (/sessions/<id>) for context`. `/sessions/<id>` is a hub path, not a local file. Optional `--limit`.
 
+Codex recovery reads current state and a small recent preview first. A background
+worker pages native items and persists confirmed progress in the Hub database;
+later restarts or reconnects continue from that position. Existing sessions need
+one initial background reconciliation. A history rollback or replaced Hub
+message epoch invalidates the checkpoint. Native versions without item paging
+fall back to one turn per request, so a very large individual turn still needs
+native item-pagination support.
+
 ### Resume a remote session locally
 
 ```bash

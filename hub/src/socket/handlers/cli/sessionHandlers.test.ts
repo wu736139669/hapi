@@ -53,6 +53,67 @@ function reasoningTextOf(message: { content: unknown }): string {
 }
 
 describe('cli session handlers', () => {
+    it('keeps tail previews newer than subsequently backfilled history after consumption ACKs', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('history-order', {}, null, 'default')
+        const socket = new FakeSocket()
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store, resolveSessionAccess: () => ({ ok: true, value: session }), emitAccessError() {}
+        })
+        socket.trigger('message', { sid: session.id, localId: 'latest', createdAt: 3000, message: reasoningContent('latest', 'latest result', false) })
+        socket.trigger('message', { sid: session.id, localId: 'older', createdAt: 2000, message: reasoningContent('older', 'old result', false) })
+        store.messages.markMessagesInvoked(session.id, ['latest', 'older'], Date.now())
+        const rows = store.messages.getMessagesByPosition(session.id, 20)
+        expect(rows.map(row => row.localId)).toEqual(['older', 'latest'])
+        expect(rows.map(row => row.invokedAt)).toEqual([2000, 3000])
+        store.close()
+    })
+    it('isolates history progress by session access and validates the native checkpoint', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('allowed', {}, null, 'default')
+        const socket = new FakeSocket(); const ack = mock()
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store, resolveSessionAccess: sid => sid === session.id ? { ok: true, value: session } : { ok: false, reason: 'access-denied' }, emitAccessError() {}
+        })
+        socket.trigger('codex-history-sync', { sid: session.id, threadId: 'thread' }, ack)
+        expect(ack.mock.lastCall?.[0]).toEqual({ ok: true, state: { epoch: 0, revision: 0, checkpoint: null } })
+        socket.trigger('codex-history-sync', { sid: 'other', threadId: 'thread' }, ack)
+        expect(ack.mock.lastCall?.[0]).toEqual({ ok: false })
+        socket.trigger('codex-history-sync', { sid: session.id, threadId: 'thread', commit: { epoch: 0, revision: 0, checkpoint: { version: 99 }, localIds: [] } }, ack)
+        expect(ack.mock.lastCall?.[0]).toEqual({ ok: false })
+        store.close()
+    })
+    it('confirms persisted transcript messages and stable-ID retries without duplicating rows', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('transcript-ack', {}, null, 'default')
+        const socket = new FakeSocket()
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store, resolveSessionAccess: () => ({ ok: true, value: session }), emitAccessError() {}
+        })
+        const payload = { sid: session.id, localId: 'stable', message: reasoningContent('item', 'settled', false) }
+        const ack = mock((response: unknown) => {
+            expect(response).toEqual({ ok: true })
+            expect(store.messages.getAllMessages(session.id)).toHaveLength(1)
+        })
+        socket.trigger('message', payload, ack)
+        socket.trigger('message', payload, ack)
+        expect(ack).toHaveBeenCalledTimes(2)
+        store.close()
+    })
+
+    it('rejects malformed or unauthorized transcript messages without a success ACK', () => {
+        const store = new Store(':memory:')
+        const socket = new FakeSocket()
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store, resolveSessionAccess: () => ({ ok: false, reason: 'access-denied' }), emitAccessError() {}
+        })
+        const ack = mock()
+        socket.trigger('message', {}, ack)
+        socket.trigger('message', { sid: 'other', message: {} }, ack)
+        expect(ack.mock.calls).toEqual([[{ ok: false }], [{ ok: false }]])
+        store.close()
+    })
+
     it.each([undefined, 'terminated', 'error'] as const)('preserves shared Codex pending input on execution exit (%s)', reason => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('shared-end', { flavor: 'codex', capabilities: { concurrentClients: true } }, null, 'default')

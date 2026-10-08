@@ -38,6 +38,7 @@ import {
     type RemoteLauncherExitReason
 } from '@/modules/common/remote/RemoteLauncherBase';
 import { CodexConversationHistory } from './conversationHistory';
+import { manageThreadGoal } from './utils/manageThreadGoal';
 
 
 
@@ -4056,6 +4057,19 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                 ?? (goal as unknown as Record<string, unknown>).updated_at as number | undefined
                 ?? 0
         });
+
+        session.client.rpcHandlerManager.registerHandler(RPC_METHODS.CodexGoal, async (raw: unknown) => {
+            const threadId = this.currentThreadId;
+            if (!supportsGoals || !threadId) throw new Error('Goal controls are unavailable for this Codex session');
+            const result = await manageThreadGoal(threadId, raw, (method, params) => appServerClient.request(method, params));
+            if (this.currentThreadId !== threadId) throw new Error('The Codex conversation changed. Refresh the session.');
+            if ((raw as { action: string }).action !== 'get') {
+                sendGoalEvent({ type: result.goal ? 'thread_goal_updated' : 'thread_goal_cleared',
+                    thread_id: threadId, ...(result.goal ? { goal: result.goal } : {}) });
+            }
+            return result;
+        });
+        session.client.updateMetadata(metadata => ({ ...metadata, capabilities: { ...metadata.capabilities, codexGoal: true } }));
 
         const handleGoalCommand = async (message: QueuedMessage): Promise<boolean> => {
             const command = parseGoalCommand(message.message);

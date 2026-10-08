@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, spyOn } from 'bun:test'
+import { Database } from 'bun:sqlite'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
 import { getReasoningStreamId } from '@hapi/protocol/messages'
 import { Store } from './index'
+import { getFutureScheduledStatsBySessionIds } from './messages'
 
 function makeStore(): Store {
     return new Store(':memory:')
@@ -440,7 +442,7 @@ describe('countFutureScheduledLocalMessages', () => {
         expect(store.messages.countFutureScheduledLocalMessages(session.id, now)).toBe(1)
     })
 
-    it('batch query returns counts keyed by session id', () => {
+    it('batch query returns counts and earliest timestamps keyed by session id', () => {
         const store = makeStore()
         const sessionA = makeSession(store, 'sched-batch-a')
         const sessionB = makeSession(store, 'sched-batch-b')
@@ -464,13 +466,60 @@ describe('countFutureScheduledLocalMessages', () => {
             'b-1'
         )
 
-        const counts = store.messages.countFutureScheduledBySessionIds([sessionA.id, sessionB.id], now)
-        expect(counts.get(sessionA.id)).toBe(2)
-        expect(counts.get(sessionB.id)).toBeUndefined()
+        const stats = store.messages.getFutureScheduledStatsBySessionIds([sessionA.id, sessionB.id], now)
+        expect(stats.get(sessionA.id)).toEqual({ count: 2, nextScheduledAt: now + 60_000 })
+        expect(stats.get(sessionB.id)).toBeUndefined()
+        expect(store.messages.getFutureScheduledStatsBySessionIds([], now).size).toBe(0)
+    })
 
-        const nextAt = store.messages.minFutureScheduledAtBySessionIds([sessionA.id, sessionB.id], now)
-        expect(nextAt.get(sessionA.id)).toBe(now + 60_000)
-        expect(nextAt.get(sessionB.id)).toBeUndefined()
+    it('excludes invoked, mature, immediate, nonqueued, and other-session messages from batch statistics', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'sched-filtered')
+        const otherSession = makeSession(store, 'sched-outside')
+        const now = Date.now()
+
+        store.messages.addMessage(session.id, { text: 'later' }, 'later', now + 120_000)
+        store.messages.addMessage(session.id, { text: 'earliest' }, 'earliest', now + 60_000)
+        store.messages.addMessage(session.id, { text: 'immediate' }, 'immediate')
+        store.messages.addMessage(session.id, { text: 'mature' }, 'mature', now - 1)
+        store.messages.addMessage(session.id, { text: 'due now' }, 'due-now', now)
+        store.messages.addMessage(session.id, { text: 'invoked' }, 'invoked', now + 1)
+        store.messages.markMessagesInvoked(session.id, ['invoked'], now)
+        store.messages.addMessage(session.id, { text: 'dispatching' }, 'dispatching', now + 2)
+        store.messages.setMessagesDeliveryState(session.id, ['dispatching'], 'dispatching')
+        store.messages.addMessage(session.id, { text: 'indeterminate' }, 'indeterminate', now + 3)
+        store.messages.markMessagesIndeterminate(session.id, ['indeterminate'])
+        store.messages.addMessage(otherSession.id, { text: 'outside' }, 'outside', now + 4)
+
+        expect(store.messages.getFutureScheduledStatsBySessionIds([session.id], now)).toEqual(
+            new Map([[session.id, { count: 2, nextScheduledAt: now + 60_000 }]])
+        )
+    })
+
+    it('uses the pending scheduled index instead of scanning historical local messages', () => {
+        const db = new Database(':memory:')
+        db.exec(`
+            CREATE TABLE messages (
+                session_id TEXT, local_id TEXT, invoked_at INTEGER,
+                scheduled_at INTEGER, delivery_state TEXT
+            );
+            CREATE INDEX idx_messages_local_id ON messages(session_id, local_id)
+                WHERE local_id IS NOT NULL;
+            CREATE INDEX idx_messages_scheduled_pending ON messages(scheduled_at)
+                WHERE scheduled_at IS NOT NULL AND invoked_at IS NULL;
+        `)
+        const prepare = spyOn(db, 'prepare')
+        try {
+            expect(getFutureScheduledStatsBySessionIds(db, ['session-1', 'session-2'], 1000).size).toBe(0)
+            expect(prepare).toHaveBeenCalledTimes(1)
+            const sql = prepare.mock.calls[0]![0]
+            const plan = db.query(`EXPLAIN QUERY PLAN ${sql}`).all('session-1', 'session-2', 1000) as { detail: string }[]
+            expect(plan.some((row) => row.detail.includes('idx_messages_scheduled_pending (scheduled_at>?)'))).toBe(true)
+            expect(plan.some((row) => row.detail.includes('idx_messages_local_id'))).toBe(false)
+        } finally {
+            prepare.mockRestore()
+            db.close()
+        }
     })
 })
 

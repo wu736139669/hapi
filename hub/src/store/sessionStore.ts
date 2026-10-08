@@ -1,6 +1,8 @@
 import type { Database } from 'bun:sqlite'
 
 import type { StoredSession, VersionedUpdateResult } from './types'
+import { collectUsageEvents } from './usageStore'
+import { rememberSessionUsageSources } from './usageSources'
 import {
     deleteSession,
     getOrCreateSession,
@@ -41,7 +43,11 @@ export class SessionStore {
         modelReasoningEffort?: string,
         requestedId?: string
     ): StoredSession {
-        return getOrCreateSession(this.db, tag, metadata, agentState, namespace, model, effort, modelReasoningEffort, requestedId)
+        return this.db.transaction(() => {
+            const session = getOrCreateSession(this.db, tag, metadata, agentState, namespace, model, effort, modelReasoningEffort, requestedId)
+            rememberSessionUsageSources(this.db, session)
+            return session
+        })()
     }
 
     updateSessionMetadata(
@@ -51,7 +57,14 @@ export class SessionStore {
         namespace: string,
         options?: { touchUpdatedAt?: boolean }
     ): VersionedUpdateResult<unknown | null> {
-        return updateSessionMetadata(this.db, id, metadata, expectedVersion, namespace, options)
+        return this.db.transaction(() => {
+            const result = updateSessionMetadata(this.db, id, metadata, expectedVersion, namespace, options)
+            if (result.result === 'success') {
+                const session = getSessionByNamespace(this.db, id, namespace)
+                if (session) rememberSessionUsageSources(this.db, session)
+            }
+            return result
+        })()
     }
 
     updateSessionAgentState(
@@ -133,6 +146,13 @@ export class SessionStore {
     }
 
     deleteSession(id: string, namespace: string): boolean {
-        return deleteSession(this.db, id, namespace)
+        return this.db.transaction(() => {
+            const session = getSessionByNamespace(this.db, id, namespace)
+            if (!session) return false
+            rememberSessionUsageSources(this.db, session)
+            // Capture unindexed legacy history before cascading message deletion.
+            collectUsageEvents(this.db, [session])
+            return deleteSession(this.db, id, namespace)
+        })()
     }
 }

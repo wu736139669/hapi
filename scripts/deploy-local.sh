@@ -26,6 +26,8 @@ if [ ! -x "$build" ]; then
     exit 1
 fi
 
+bash scripts/verify-deploy-build.sh "$build"
+
 mkdir -p "$bin_dir" "$backup_dir"
 
 bash scripts/sign-build.sh "$build"
@@ -82,6 +84,9 @@ echo "health ok"
 # Refresh the runner so its machine RPCs/capabilities match the new binary.
 # Compiled binaries never self-update: the heartbeat mtime check compares the
 # runner's own resolved exec path, which is fixed for the life of the process.
+# The runner also inherits this shell's environment. Keep the full login PATH;
+# scope temporary transfer-tool PATH overrides to the remote deploy command.
+# A healthy hub does not prove the runner can resolve installed agent binaries.
 runner_state="$HOME/.hapi/runner.state.json"
 runner_pid=$(sed -n 's/.*"pid": *\([0-9][0-9]*\).*/\1/p' "$runner_state" 2>/dev/null | head -n 1 || true)
 if [ -n "${runner_pid:-}" ] && kill -0 "$runner_pid" 2>/dev/null; then

@@ -6,6 +6,7 @@ const socketHarness = vi.hoisted(() => ({
         connected: boolean
         connectCalls: number
         connectImmediately: boolean
+        ack: (event: string, ...args: unknown[]) => Promise<unknown>
         emitted: Array<{ event: string; args: unknown[] }>
         listeners: Map<string, Array<(...args: any[]) => void>>
         trigger: (event: string, ...args: any[]) => void
@@ -24,6 +25,7 @@ vi.mock('socket.io-client', () => ({
             connected: false,
             connectCalls: 0,
             connectImmediately: true,
+            ack: async () => ({}),
             emitted: [] as Array<{ event: string; args: unknown[] }>,
             listeners: new Map<string, Array<(...args: any[]) => void>>(),
             trigger: () => {},
@@ -62,8 +64,8 @@ vi.mock('socket.io-client', () => ({
                 state.emitted.push({ event, args })
                 return socket
             },
-            emitWithAck: async () => ({}),
-            timeout: () => ({ emitWithAck: async () => ({}) }),
+            emitWithAck: (event: string, ...args: unknown[]) => state.ack(event, ...args),
+            timeout: () => ({ emitWithAck: (event: string, ...args: unknown[]) => state.ack(event, ...args) }),
             connect: () => {
                 state.connectCalls += 1
                 if (state.connectImmediately) {
@@ -95,6 +97,63 @@ vi.mock('axios', () => ({
 }))
 
 import { ApiSessionClient, isExternalUserMessage, IncomingMessageFilter } from './apiSession'
+
+describe('ApiSessionClient confirmed Codex transcripts', () => {
+    it('preserves native history times, validates durable progress, and trims agent output before upload', async () => {
+        const client = new ApiSessionClient('token', createSession({
+            metadata: { path: '/repo', host: 'test', capabilities: { concurrentClients: true } }
+        }))
+        const socket = socketHarness.sockets.at(-1)!
+        const payloads: Array<{ message: { content: { data?: { message: string }; text?: string } }; createdAt?: number }> = []
+        socket.ack = async (event, data) => {
+            if (event === 'codex-history-sync') return { ok: true, state: { epoch: 0, revision: 1, checkpoint: null } }
+            if (event === 'message') payloads.push(data as typeof payloads[number])
+            return { ok: true }
+        }
+        client.sendAgentMessage({ type: 'message', message: 'x'.repeat(1024 * 1024) }, 'large', { replay: true, createdAt: 1000 })
+        client.sendUserMessage('u'.repeat(100_000), undefined, 'user', { replay: true, createdAt: 2000 })
+        expect(await client.waitForMessages(['large', 'user'])).toBe(true)
+        expect(payloads.map(payload => payload.createdAt)).toEqual([1000, 2000])
+        expect(payloads[0].message.content.data?.message.length).toBeLessThan(64 * 1024)
+        expect(payloads[1].message.content.text?.length).toBe(100_000)
+        expect(await client.syncCodexHistory('thread')).toEqual({ epoch: 0, revision: 1, checkpoint: null })
+        socket.ack = async () => ({ ok: false })
+        await expect(client.syncCodexHistory('thread')).rejects.toThrow('did not confirm')
+        client.close()
+    })
+    it('waits for persistence before consumption and skips confirmed history on reconnect', async () => {
+        const client = new ApiSessionClient('token', createSession({
+            metadata: { path: '/repo', host: 'test', capabilities: { concurrentClients: true } }
+        }))
+        const socket = socketHarness.sockets.at(-1)!
+        const persisted = deferred<unknown>()
+        const ack = vi.fn(() => persisted.promise)
+        socket.ack = ack
+        client.sendAgentMessage({ type: 'message', message: 'completed' }, 'stable', { replay: true })
+        expect(ack).toHaveBeenCalledTimes(1)
+        expect(socket.emitted.filter(e => e.event === 'messages-consumed')).toHaveLength(0)
+        persisted.resolve({ ok: true })
+        await vi.waitFor(() => expect(socket.emitted.filter(e => e.event === 'messages-consumed')).toHaveLength(1))
+        socket.connected = false
+        socket.trigger('disconnect', 'transport close')
+        socket.triggerConnect()
+        client.sendAgentMessage({ type: 'message', message: 'completed' }, 'stable', { replay: true })
+        expect(ack).toHaveBeenCalledTimes(1)
+        client.close()
+    })
+
+    it('keeps flush unconfirmed when the hub rejects transcript persistence', async () => {
+        const client = new ApiSessionClient('token', createSession({
+            metadata: { path: '/repo', host: 'test', capabilities: { concurrentClients: true } }
+        }))
+        const socket = socketHarness.sockets.at(-1)!
+        socket.ack = async () => ({ ok: false })
+        client.sendUserMessage('native history', undefined, 'user-id', { replay: true })
+        expect(await client.flush({ timeoutMs: 20 })).toBe(false)
+        expect(socket.emitted.filter(e => e.event === 'messages-consumed')).toHaveLength(0)
+        client.close()
+    })
+})
 
 function createSession(overrides: Partial<Session> = {}): Session {
     return {

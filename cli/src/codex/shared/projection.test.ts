@@ -28,7 +28,8 @@ describe('shared history projection', () => {
         const original = send.mock.calls.slice(1, 3);
         projection.reset(); send.mockClear();
         await projection.history({ turns: [{ id: 'turn', status: 'completed', items: [item] }] });
-        expect(send.mock.calls).toEqual(original);
+        expect(send.mock.calls.map(call => call.slice(0, 2))).toEqual(original);
+        expect(send.mock.calls.every(call => call[2]?.replay === true)).toBe(true);
     });
 
     it('waits for final proposal content after an active snapshot', async () => {

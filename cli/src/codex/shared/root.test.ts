@@ -28,6 +28,22 @@ vi.mock('../codexAppServerClient', () => ({
         async request(method: string, params: Record<string, unknown> = {}) {
             this.requests.push(method);
             if (method === 'thread/read' || method === 'thread/resume') return { ...this.settings, thread: structuredClone(this.thread) };
+            if (method === 'thread/turns/list') {
+                const turns = params.sortDirection === 'desc' ? [...this.thread.turns].reverse() : this.thread.turns;
+                const offset = Number(params.cursor ?? 0); const limit = Number(params.limit ?? 1);
+                const data = structuredClone(turns.slice(offset, offset + limit));
+                if (params.itemsView === 'notLoaded') for (const turn of data) turn.items = [];
+                return { data, nextCursor: offset + limit < turns.length ? String(offset + limit) : null };
+            }
+            if (method === 'thread/items/list') {
+                const turn = this.thread.turns.find(turn => turn.id === params.turnId);
+                const items = params.sortDirection === 'desc' ? [...turn?.items ?? []].reverse() : turn?.items ?? [];
+                const anchor = params.cursor as { itemId?: string } | undefined;
+                const offset = typeof params.cursor === 'object' ? items.findIndex(item => (item as { id: string }).id === anchor?.itemId) + 1 : Number(params.cursor ?? 0);
+                const data = items.slice(offset, offset + 1).map(item => ({ turnId: turn?.id, item,
+                    completedAtMs: turn?.status !== 'inProgress' || (item as { status?: string }).status === 'completed' ? 1 : null }));
+                return { data: structuredClone(data), nextCursor: offset + 1 < items.length ? String(offset + 1) : null };
+            }
             if (method === 'thread/list') return { data: [] };
             if (method === 'thread/queue/list') return { data: this.queue };
             if (method === 'thread/settings/update') {
@@ -63,6 +79,7 @@ async function fixture(options: { deferHistory?: boolean } = {}) {
     const updateState = vi.fn((fn: (value: AgentState) => AgentState) => { state = fn(state); });
     const rpc = new Map<string, (raw: unknown) => Promise<unknown>>();
     const send = vi.fn();
+    let historyState = { epoch: 0, revision: 0, checkpoint: null as import('@hapi/protocol').CodexHistoryCheckpoint | null };
     const session = {
         sessionId: 'sid', getMetadata: () => metadata,
         updateMetadata: (fn: (value: Metadata) => Metadata) => { metadata = fn(metadata); },
@@ -72,7 +89,12 @@ async function fixture(options: { deferHistory?: boolean } = {}) {
         rpcHandlerManager: { registerHandler: (name: string, handler: (raw: unknown) => Promise<unknown>) => rpc.set(name, handler) },
         sendSessionEvent() {}, sendAgentMessage: send, emitSessionReady() {},
         sendUserMessage() {}, emitMessagesConsumed() {}, emitSteerIndeterminate() {}, syncNativeQueuedMessage() {},
-        sendSessionDeath() {}, async flush() {}, close() {}
+        sendSessionDeath() {}, async flush() {}, close() {},
+        async flushMetadata() { return true; }, async waitForMessages() { return true; },
+        async syncCodexHistory(_threadId: string, commit?: import('@hapi/protocol').CodexHistorySyncRequest['commit']) {
+            if (commit) historyState = { epoch: commit.epoch, revision: historyState.revision + 1, checkpoint: commit.checkpoint };
+            return historyState;
+        }
     } as unknown as ApiSessionClient;
     const root = new SharedCodexRoot({ session, workingDirectory: directory } as SessionBootstrapResult, {
         directory, generation: 'test', endpoint: 'mock', settingsFor: () => undefined,
@@ -108,6 +130,30 @@ async function completePlan(f: Awaited<ReturnType<typeof fixture>>, status = 'co
 }
 
 describe('shared plan actions', () => {
+    it('offers immediate native Goal controls while a turn is running', async () => {
+        const f = await fixture();
+        await f.root.activate();
+        expect(f.metadata().capabilities?.codexGoal).toBe(true);
+        const goal = { threadId: 'thread', objective: 'Fix the build', status: 'active', tokenBudget: null,
+            tokensUsed: 100, timeUsedSeconds: 1, createdAt: 1, updatedAt: 2 };
+        const request = vi.spyOn(f.root.client, 'request').mockImplementation(async (method, params) => {
+            if (method === 'thread/goal/get') return { goal };
+            if (method === 'thread/goal/set') return { goal: { ...goal, ...params as Record<string, unknown> } };
+            if (method === 'thread/goal/clear') return { cleared: true };
+            throw new Error(`Unexpected request: ${method}`);
+        });
+        f.native.notify('turn/started', { threadId: 'thread', turn: { id: 'busy-turn' } });
+        const action = f.rpc.get(RPC_METHODS.CodexGoal)!;
+        expect(await action({ action: 'pause' })).toMatchObject({ goal: { status: 'paused' } });
+        expect(await action({ action: 'resume' })).toMatchObject({ goal: { status: 'active' } });
+        expect(await action({ action: 'clear' })).toEqual({ goal: null });
+        expect(request.mock.calls.every(([method, params]) => method.startsWith('thread/goal/')
+            && (params as { threadId: string }).threadId === 'thread')).toBe(true);
+        expect(f.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'thread_goal_updated',
+            scope: { role: 'parent', threadId: 'thread' }, goal: expect.objectContaining({ status: 'paused' }) }));
+        await vi.waitFor(() => expect(f.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'thread_goal_cleared', thread_id: 'thread' })));
+    });
+
     it('keeps bind local and reconciles native history only in syncHistory', async () => {
         const f = await fixture({ deferHistory: true });
         expect(f.native.requests).not.toContain('thread/read');
@@ -126,6 +172,17 @@ describe('shared plan actions', () => {
         await f.root.refresh();
         expect(f.metadata().summary?.text).toBe('Remote title');
         expect(f.metadata().name).toBe('Terminal title');
+    });
+
+    it('uses the authoritative settings snapshot for a no-op cold-resume mode', async () => {
+        const f = await fixture();
+        f.native.notify('thread/settings/updated', { threadId: 'thread', threadSettings: { model: 'mock',
+            collaborationMode: { mode: 'plan', settings: { model: 'mock', reasoning_effort: null } } } });
+        const before = f.native.requests.filter(method => method === 'thread/settings/update').length;
+        await f.root.initialSettings({ collaborationMode: 'plan' });
+        expect(f.native.requests.filter(method => method === 'thread/settings/update')).toHaveLength(before);
+        await f.root.applySettings({ collaborationMode: 'default' });
+        expect(f.native.requests.filter(method => method === 'thread/settings/update')).toHaveLength(before + 1);
     });
 
     it('preserves content while native turns, mode changes and disconnects withdraw controls', async () => {
@@ -194,7 +251,7 @@ describe('shared plan actions', () => {
         const started = new Promise<void>(resolve => { reading = resolve; });
         vi.spyOn(f.root.client, 'request').mockImplementation(async (method, params) => {
             const result = await request(method, params);
-            if (method === 'thread/read' && (params as { includeTurns?: boolean }).includeTurns) {
+            if (method === 'thread/turns/list' && (params as { itemsView?: string }).itemsView === 'summary') {
                 reading(); await blocked;
             }
             return result;
@@ -258,6 +315,7 @@ describe('shared plan actions', () => {
 describe('shared steering availability', () => {
     it('keeps idle sessions online without polling usage or publishing agent-state updates', async () => {
         const f = await fixture();
+        await vi.waitFor(() => expect(f.native.requests.filter(method => method === 'thread/turns/list').length).toBeGreaterThan(1));
         const requests = vi.spyOn(f.root.client, 'request');
         const heartbeat = vi.spyOn(f.root.session, 'keepAlive');
         const updates = f.updateState.mock.calls.length;

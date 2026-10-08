@@ -3,6 +3,8 @@ import { formatDuration } from '@/chat/presentation'
 import type { SessionStatusData, SessionStatusSubagent } from '@/chat/sessionStatus'
 import { ChecklistList } from '@/components/ToolCard/checklist'
 import { useTranslation } from '@/lib/use-translation'
+import { CodexGoalControls } from '@/components/CodexGoalControls'
+import type { CodexGoalRequest } from '@hapi/protocol/apiTypes'
 
 function Section(props: { title: string; children: ReactNode }) {
     return (
@@ -26,7 +28,10 @@ function elapsedSince(startedAt: number | null, now: number): string | null {
     return formatDuration(Math.max(0, now - startedAt))
 }
 
-export function SessionStatusPanel({ data }: { data: SessionStatusData }) {
+export function SessionStatusPanel({ data, onGoalAction }: {
+    data: SessionStatusData
+    onGoalAction?: (action: CodexGoalRequest) => Promise<void>
+}) {
     const { t } = useTranslation()
     const completedTasks = data.tasks.filter((task) => task.status === 'completed').length
     const hasLiveElapsed = data.terminals.length > 0
@@ -43,6 +48,7 @@ export function SessionStatusPanel({ data }: { data: SessionStatusData }) {
         <details className="group mx-3 mt-3 rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)]">
             <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-semibold text-[var(--app-fg)] [&::-webkit-details-marker]:hidden">
                 {t('session.status.title')}
+                {data.goal ? <span className="min-w-0 truncate font-normal text-[var(--app-hint)]">· {t('session.status.goal')} {t(`session.status.goal.${data.goal.status}`)}</span> : null}
                 <span className="ml-auto text-[10px] text-[var(--app-hint)] transition-transform group-open:rotate-180" aria-hidden="true">▼</span>
             </summary>
             <div className="grid max-h-[min(50dvh,24rem)] gap-3 overflow-y-auto border-t border-[var(--app-border)] px-3 py-2.5 sm:grid-cols-2">
@@ -53,6 +59,12 @@ export function SessionStatusPanel({ data }: { data: SessionStatusData }) {
                             {t(`session.status.goal.${data.goal.status}`)}
                             {data.goal.timeUsedSeconds > 0 ? ` · ${formatDuration(data.goal.timeUsedSeconds * 1000)}` : ''}
                         </div>
+                        {data.goal.tokenBudget != null ? (
+                            <div className="mt-0.5 text-xs text-[var(--app-hint)]">
+                                {t('session.goal.tokens', { used: data.goal.tokensUsed.toLocaleString(), budget: data.goal.tokenBudget.toLocaleString() })}
+                            </div>
+                        ) : null}
+                        {onGoalAction ? <CodexGoalControls goal={data.goal} onAction={onGoalAction} /> : null}
                     </Section>
                 ) : null}
 

@@ -116,7 +116,7 @@ describe('pingPeer', () => {
         })
 
         const result = await pingPeer({
-            sessionIdPrefix: '05d9f0f2',
+            sessionIdPrefix: sessionId,
             message: 'hello peer',
             accessToken: 'tok',
             apiUrl: 'http://127.0.0.1:3006',
@@ -128,6 +128,7 @@ describe('pingPeer', () => {
             name: 'Orchestrator',
             resumed: false
         })
+        expect(http.get.mock.calls.some(([url]) => String(url).endsWith('/api/sessions'))).toBe(false)
         expect(http.post).toHaveBeenCalledTimes(2)
     })
 

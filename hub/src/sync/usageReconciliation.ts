@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { readOpencodeUsageForSessions, resolveOpencodeDbPath } from '@hapi/protocol/opencodeUsage'
 import type { Store } from '../store'
 import type { ReconciledUsageRow } from '../store/usage'
+import type { UsageSource } from '../store/usageSources'
 
 /**
  * Offline usage reconciliation for OpenCode sessions.
@@ -22,7 +23,7 @@ import type { ReconciledUsageRow } from '../store/usage'
  * and cli/src/runner/opencodeUsageScanner.ts).
  */
 
-const RECONCILE_INTERVAL_MS = 30 * 60 * 1000
+const RECONCILE_INTERVAL_MS = 5 * 60 * 1000
 const INITIAL_DELAY_MS = 15_000
 
 export type UsageReconciliationResult = {
@@ -53,19 +54,26 @@ export async function reconcileOpencodeUsage(
         return { dbPath: dbPath ?? null, sessions: 0, rows: 0, messages: 0 }
     }
 
-    const targets: Array<{ sessionId: string; namespace: string; opencodeSessionId: string }> = []
+    const targets = new Map<string, UsageSource>()
     for (const session of store.sessions.getSessions()) {
+        store.usage.rememberSessionSources(session)
         const opencodeSessionId = asString(asRecord(session.metadata)?.opencodeSessionId)
         if (!opencodeSessionId) continue
-        targets.push({ sessionId: session.id, namespace: session.namespace, opencodeSessionId })
+        const source = store.usage.getSources(session.namespace).find((entry) => entry.agent === 'opencode' && entry.sessionId === session.id && entry.nativeSessionId === opencodeSessionId)
+        if (source) targets.set(`${source.namespace}|${source.machineId}|${source.nativeSessionId}`, source)
+    }
+    for (const source of store.usage.getSources()) {
+        if (source.agent !== 'opencode') continue
+        const key = `${source.namespace}|${source.machineId}|${source.nativeSessionId}`
+        if (!targets.has(key)) targets.set(key, source)
     }
 
-    const usageBySession = await readOpencodeUsageForSessions(dbPath, targets.map((target) => target.opencodeSessionId))
+    const usageBySession = await readOpencodeUsageForSessions(dbPath, [...targets.values()].map((target) => target.nativeSessionId))
     let sessionsTouched = 0
     let rowsTotal = 0
     let messagesTotal = 0
-    for (const target of targets) {
-        const usage = usageBySession.get(target.opencodeSessionId) ?? { rows: [], messages: 0 }
+    for (const target of targets.values()) {
+        const usage = usageBySession.get(target.nativeSessionId) ?? { rows: [], messages: 0 }
         // No local messages means this session's OpenCode store lives on
         // another machine (its own process reports the rows) — leave the
         // existing snapshot alone instead of wiping it with an empty one.
@@ -75,7 +83,7 @@ export async function reconcileOpencodeUsage(
             agent: 'opencode',
             ...row
         }))
-        store.usage.replaceReconciled(target.sessionId, target.namespace, rows, now)
+        store.usage.reconcileSource(target, rows, now)
         sessionsTouched += 1
         rowsTotal += rows.length
         messagesTotal += usage.messages

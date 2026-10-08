@@ -6,7 +6,8 @@ import {
     DecryptedMessageSchema,
     MachineSchema,
     PermissionModeSchema,
-    SessionSchema
+    SessionSchema,
+    ThreadGoalSchema
 } from './schemas'
 import { AgentFlavorSchema } from './modes'
 import type {
@@ -807,6 +808,22 @@ export const ImplementCodexPlanRequestSchema = z.object({
 })
 
 export type ImplementCodexPlanRequest = z.infer<typeof ImplementCodexPlanRequestSchema>
+
+export const CodexGoalRequestSchema = z.discriminatedUnion('action', [
+    z.object({ action: z.literal('get') }).strict(),
+    z.object({
+        action: z.literal('update'),
+        objective: z.string().trim().min(1).refine(value => Array.from(value).length <= 4000, 'Goal must be at most 4000 characters'),
+        tokenBudget: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().optional()
+    }).strict(),
+    z.object({ action: z.literal('pause') }).strict(),
+    z.object({ action: z.literal('resume') }).strict(),
+    z.object({ action: z.literal('clear') }).strict()
+])
+
+export type CodexGoalRequest = z.infer<typeof CodexGoalRequestSchema>
+export const CodexGoalResponseSchema = z.object({ goal: ThreadGoalSchema.nullable() })
+export type CodexGoalResponse = z.infer<typeof CodexGoalResponseSchema>
 
 export type ImplementCodexPlanResult = { ok: true } | {
     ok: false

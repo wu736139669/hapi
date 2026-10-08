@@ -615,14 +615,8 @@ describe('usage service', () => {
         )
         store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: 'hello' } })
 
-        const afterSeqs: number[] = []
-        const getMessagesAfterSeq = store.messages.getMessagesAfterSeq.bind(store.messages)
-        store.messages.getMessagesAfterSeq = (sessionId, afterSeq) => {
-            afterSeqs.push(afterSeq)
-            return getMessagesAfterSeq(sessionId, afterSeq)
-        }
-
         expect(getUsageSummary(store, 'default', 'all').totals.requests).toBe(0)
+        expect(store.usage.getScanStates([session.id]).get(session.id)).toEqual({ messageEpoch: 0, lastSeq: 1 })
         addAgentMessage(store, session.id, {
             type: 'output',
             data: {
@@ -634,14 +628,15 @@ describe('usage service', () => {
             }
         })
         expect(getUsageSummary(store, 'default', 'all').totals.requests).toBe(1)
+        expect(store.usage.getScanStates([session.id]).get(session.id)).toEqual({ messageEpoch: 0, lastSeq: 2 })
 
-        store.messages.bumpMessageEpoch(session.id)
+        const messageEpoch = store.messages.bumpMessageEpoch(session.id)
         expect(getUsageSummary(store, 'default', 'all').totals.requests).toBe(1)
-        expect(afterSeqs).toEqual([0, 1, 0])
+        expect(store.usage.getScanStates([session.id]).get(session.id)).toEqual({ messageEpoch, lastSeq: 2 })
         store.close()
     })
 
-    it('removes usage from transcript history discarded by a rewind', () => {
+    it('retains consumed usage when transcript history is discarded by a rewind', () => {
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession(
             'rewound-usage-test',
@@ -672,8 +667,8 @@ describe('usage service', () => {
 
         const result = store.messages.truncateMessagesFromLocalId(session.id, 'rewind-point')
         expect(result.deleted).toBe(2)
-        expect(getUsageSummary(store, 'default', 'all').totals.requests).toBe(1)
-        expect(store.usage.getEvents([session.id])).toHaveLength(1)
+        expect(getUsageSummary(store, 'default', 'all').totals.requests).toBe(2)
+        expect(store.usage.getEvents([session.id])).toHaveLength(2)
         store.close()
     })
 

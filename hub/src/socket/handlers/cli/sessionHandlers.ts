@@ -1,4 +1,4 @@
-import type { ClientToServerEvents } from '@hapi/protocol'
+import { CodexHistorySyncRequestSchema, type ClientToServerEvents } from '@hapi/protocol'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import type { CopilotAgentMode } from '@hapi/protocol'
@@ -51,8 +51,7 @@ const messageSchema = z.object({
     message: z.union([z.string(), z.unknown()]),
     localId: z.string().optional(),
     // Client-provided origin timestamp (epoch ms) — e.g. a Claude transcript
-    // entry's own `timestamp`. Only honored for agent messages (no localId);
-    // see addMessage in messages.ts.
+    // entry's own `timestamp`, or a Codex history item's origin time.
     createdAt: z.number().optional()
 })
 
@@ -103,6 +102,17 @@ export type SessionHandlersDeps = {
 export function registerSessionHandlers(socket: CliSocketWithData, deps: SessionHandlersDeps): void {
     const { store, resolveSessionAccess, emitAccessError, onSessionAlive, onSessionReady, onSessionEnd, onWebappEvent, onBackgroundTaskDelta, onSessionActivity, onSweepImmediateQueued, onMessagesConsumed } = deps
 
+    socket.on('codex-history-sync', (data, ack) => {
+        if (typeof ack !== 'function') return
+        const parsed = CodexHistorySyncRequestSchema.safeParse(data)
+        if (!parsed.success) { ack({ ok: false }); return }
+        const { sid, threadId, commit } = parsed.data
+        const access = resolveSessionAccess(sid)
+        if (!access.ok) { emitAccessError('session', sid, access.reason); ack({ ok: false }); return }
+        const state = commit ? store.historySync.commit(sid, threadId, commit) : store.historySync.get(sid, threadId)
+        ack(state ? { ok: true, state } : { ok: false })
+    })
+
     socket.on('native-queue-message', data => {
         const parsed = z.object({ sid: z.string(), localId: z.string().min(1), text: z.string().nullable() }).safeParse(data)
         if (!parsed.success) return
@@ -122,9 +132,10 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         }
     })
 
-    socket.on('message', (data: unknown) => {
+    socket.on('message', (data: unknown, ack?: (response: { ok: boolean }) => void) => {
         const parsed = messageSchema.safeParse(data)
         if (!parsed.success) {
+            ack?.({ ok: false })
             return
         }
 
@@ -144,15 +155,24 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         const sessionAccess = resolveSessionAccess(sid)
         if (!sessionAccess.ok) {
             emitAccessError('session', sid, sessionAccess.reason)
+            ack?.({ ok: false })
             return
         }
         const session = sessionAccess.value
 
         if (isRedundantGoalStatusEventContent(content)) {
+            ack?.({ ok: true })
             return
         }
 
-        const msg = store.messages.addMessage(sid, content, localId, undefined, createdAt)
+        let msg = store.messages.addMessage(sid, content, localId, undefined, createdAt)
+        if (localId && createdAt !== undefined) {
+            // Native backfill may arrive after its latest tail preview. Keep
+            // historical positions at their origin time, including the later
+            // messages-consumed ACK (which is guarded by first-write-wins).
+            store.messages.markMessagesInvoked(sid, [localId], Math.min(createdAt, Date.now()))
+            msg = store.messages.addMessage(sid, content, localId)
+        }
 
         // A reasoning stream arrives as a series of growing snapshots under one
         // stable id, so a stream should cost one row rather than one per
@@ -249,6 +269,8 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
                 invokedAt: msg.invokedAt
             }
         })
+        // ACK only after persistence and publication, including stable-ID replays.
+        ack?.({ ok: true })
     })
 
     const handleUpdateMetadata: UpdateMetadataHandler = (data, cb) => {

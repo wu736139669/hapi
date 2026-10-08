@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'bun:test'
-import { LocalResumeTargetSchema, ResumableSessionSchema } from './resume'
+import { LocalResumeTargetSchema, ResumableSessionSchema, sessionStartupTimeoutMs } from './resume'
 import { SyncEventSchema } from './schemas'
 import { SessionEndReasonSchema } from './socket'
 
 describe('resume schemas', () => {
+    it('allows a longer startup only for cold Codex resumes', () => {
+        expect(sessionStartupTimeoutMs('codex', 'native-thread')).toBe(120_000)
+        expect(sessionStartupTimeoutMs('codex')).toBe(15_000)
+        expect(sessionStartupTimeoutMs('claude', 'native-session')).toBe(15_000)
+        expect(sessionStartupTimeoutMs()).toBe(15_000)
+    })
+
     it('accepts a local resume target', () => {
         const parsed = LocalResumeTargetSchema.safeParse({
             sessionId: 'hapi-session-1',

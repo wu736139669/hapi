@@ -69,6 +69,8 @@ function createApp(session: Session, opts?: {
     forkConversation?: SyncEngine['forkConversation']
     clearConversation?: SyncEngine['clearConversation']
     implementCodexPlan?: SyncEngine['implementCodexPlan']
+    codexGoal?: SyncEngine['codexGoal']
+    guestSessionId?: string
     rewindConversation?: SyncEngine['rewindConversation']
     suggestSessionTitle?: SyncEngine['suggestSessionTitle']
     updateSessionSummary?: SyncEngine['updateSessionSummary']
@@ -172,6 +174,7 @@ function createApp(session: Session, opts?: {
         forkConversation: opts?.forkConversation ?? (async () => ({ type: 'success', sessionId: 'child-1' })),
         clearConversation: opts?.clearConversation,
         implementCodexPlan: opts?.implementCodexPlan,
+        codexGoal: opts?.codexGoal,
         rewindConversation: opts?.rewindConversation ?? (async () => ({ type: 'success' })),
         suggestSessionTitle: opts?.suggestSessionTitle ?? (async () => 'Generated title'),
         updateSessionSummary: opts?.updateSessionSummary ?? (async () => {}),
@@ -181,6 +184,10 @@ function createApp(session: Session, opts?: {
     const app = new Hono<WebAppEnv>()
     app.use('*', async (c, next) => {
         c.set('namespace', 'default')
+        if (opts?.guestSessionId) {
+            c.set('role', 'session-guest')
+            c.set('sessionId', opts.guestSessionId)
+        }
         await next()
     })
     app.route('/api', createSessionsRoutes(() => engine as SyncEngine))
@@ -189,6 +196,50 @@ function createApp(session: Session, opts?: {
 }
 
 describe('sessions routes', () => {
+    it('routes Goal reads and changes to the owning session', async () => {
+        const calls: unknown[][] = []
+        const session = createSession({ metadata: { path: '/tmp', host: 'test', flavor: 'codex', capabilities: { codexGoal: true } } })
+        const { app } = createApp(session, { codexGoal: async (...args) => { calls.push(args); return { goal: null } } })
+        expect((await app.request('/api/sessions/session-1/codex/goal')).status).toBe(200)
+        for (const action of [{ action: 'update', objective: 'Fix it', tokenBudget: 5000 }, { action: 'pause' }, { action: 'resume' }, { action: 'clear' }]) {
+            const response = await app.request('/api/sessions/session-1/codex/goal', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action)
+            })
+            expect(response.status).toBe(200)
+            expect(await response.json()).toEqual({ goal: null })
+            expect(calls.at(-1)).toEqual(['session-1', 'default', action])
+        }
+        expect(calls[0]).toEqual(['session-1', 'default', { action: 'get' }])
+    })
+
+    it('rejects unavailable, inactive and guest Goal controls before native RPC', async () => {
+        for (const [overrides, guestSessionId, status] of [
+            [{ active: false }, undefined, 409],
+            [{}, undefined, 409],
+            [{ metadata: { path: '/tmp', host: 'test', flavor: 'claude', capabilities: { codexGoal: true } } }, undefined, 409],
+            [{ metadata: { path: '/tmp', host: 'test', flavor: 'codex', capabilities: { codexGoal: true } } }, 'session-1', 403]
+        ] as const) {
+            let called = false
+            const { app } = createApp(createSession(overrides), { guestSessionId, codexGoal: async () => { called = true; return { goal: null } } })
+            const response = await app.request('/api/sessions/session-1/codex/goal', { method: 'POST', body: JSON.stringify({ action: 'clear' }) })
+            expect(response.status).toBe(status)
+            expect(called).toBe(false)
+        }
+    })
+
+    it('validates Goal requests and surfaces native errors instead of claiming success', async () => {
+        const session = createSession({ metadata: { path: '/tmp', host: 'test', flavor: 'codex', capabilities: { codexGoal: true } } })
+        let called = false
+        const { app } = createApp(session, { codexGoal: async () => { called = true; throw new Error('Goal update failed') } })
+        for (const body of [null, { action: 'archive' }, { action: 'update', objective: '' }, { action: 'update', objective: 'Fix', tokenBudget: 1.5 }, { action: 'pause', threadId: 'other' }]) {
+            expect((await app.request('/api/sessions/session-1/codex/goal', { method: 'POST', body: JSON.stringify(body) })).status).toBe(400)
+        }
+        expect(called).toBe(false)
+        const response = await app.request('/api/sessions/session-1/codex/goal', { method: 'POST', body: JSON.stringify({ action: 'pause' }) })
+        expect(response.status).toBe(502)
+        expect(await response.json()).toEqual({ error: 'Goal update failed' })
+    })
+
     it('serves chat attachments with an immutable ETag and answers 304 revalidation', async () => {
         const session = createSession()
         const { app } = createApp(session, {
@@ -1708,11 +1759,10 @@ describe('sessions routes', () => {
         const scheduledIds: string[][] = []
         const engine = {
             getSessionsByNamespace: () => sessions,
-            getFutureScheduledMessageCounts: (ids: string[]) => {
+            getFutureScheduledMessageStats: (ids: string[]) => {
                 scheduledIds.push(ids)
-                return new Map(ids.map((id) => [id, 0]))
+                return new Map([[ids[0]!, { count: 2, nextScheduledAt: 1000 }]])
             },
-            getNextScheduledAtBySessionIds: (_ids: string[]) => new Map<string, number>(),
             resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })
         } as unknown as Partial<SyncEngine>
 
@@ -1728,6 +1778,9 @@ describe('sessions routes', () => {
         const limitedBody = await limited.json() as { sessions: Array<{ id: string }> }
         expect(limitedBody.sessions.map((s) => s.id)).toEqual(['newer-active', 'older-active'])
         expect(scheduledIds.at(-1)).toEqual(['newer-active', 'older-active'])
+        expect(scheduledIds).toHaveLength(1)
+        expect(limitedBody.sessions[0]).toMatchObject({ futureScheduledMessageCount: 2, nextScheduledAt: 1000 })
+        expect(limitedBody.sessions[1]).toMatchObject({ futureScheduledMessageCount: 0, nextScheduledAt: null })
 
         const unlimited = await app.request('/api/sessions')
         expect(unlimited.status).toBe(200)
@@ -1743,8 +1796,7 @@ describe('sessions routes', () => {
         ]
         const engine = {
             getSessionsByNamespace: () => sessions,
-            getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
-            getNextScheduledAtBySessionIds: (_ids: string[]) => new Map<string, number>(),
+            getFutureScheduledMessageStats: () => new Map(),
             resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })
         } as unknown as Partial<SyncEngine>
 

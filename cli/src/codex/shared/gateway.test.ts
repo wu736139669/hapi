@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 import { startCodexGateway, type Envelope } from './gateway';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 async function fixture(after: (request: Envelope, response: Envelope, connection: string) => Promise<void>) {
     const engine = new WebSocketServer({ port: 0, host: '127.0.0.1' });
@@ -31,6 +33,27 @@ async function fixture(after: (request: Envelope, response: Envelope, connection
     } };
 }
 describe('native gateway barriers', () => {
+    it.skipIf(process.platform === 'win32')('releases an attached Unix frontend when the Bun owner stops', () => {
+        const gatewayPath = fileURLToPath(new URL('./gateway.ts', import.meta.url));
+        const program = `
+            import { createRequire } from 'node:module';
+            import { startCodexGateway, socketUrl } from ${JSON.stringify(gatewayPath)};
+            const require = createRequire(${JSON.stringify(fileURLToPath(new URL('../../../package.json', import.meta.url)))});
+            const { default: WebSocket, WebSocketServer } = await import(require.resolve('ws'));
+            setTimeout(() => process.exit(1), 2000);
+            const engine = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+            await new Promise(resolve => engine.once('listening', resolve));
+            const gateway = await startCodexGateway({ upstream: 'ws://127.0.0.1:' + engine.address().port,
+                path: '/tmp/hapi-gateway-close-' + process.pid + '.sock', token: 'test',
+                hooks: { before: async value => value, after: async () => {}, control: async () => {} } });
+            const client = new WebSocket(socketUrl(gateway.endpoint));
+            await new Promise((resolve, reject) => { client.once('open', resolve); client.once('error', reject); });
+            await new Promise(resolve => setTimeout(resolve, 50));
+            await gateway.close();
+            process.exit(0);
+        `;
+        expect(() => execFileSync(process.env.HAPI_BUN_EXEC!, ['-e', program], { timeout: 5000, stdio: 'pipe' })).not.toThrow();
+    });
     it('namespaces colliding native request IDs by connection and withholds replies until binding', async () => {
         let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve; });
         const after = vi.fn(async () => { await barrier; }); const f = await fixture(after);

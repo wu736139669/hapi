@@ -137,6 +137,7 @@ describe('inspectPeer', () => {
             text: 'status on runner versions?'
         })
         expect(result.messages[1]?.text).toContain('Looking into it.')
+        expect(http.get.mock.calls.some(([url]) => String(url).endsWith('/api/sessions'))).toBe(false)
 
         // Read-only: never resume
         expect(http.post).toHaveBeenCalledTimes(1)

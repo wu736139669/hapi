@@ -52,6 +52,18 @@ Remote Macs with the same layout:
 scripts/deploy-remote.sh <ssh-target> [tag]     # e.g. scripts/deploy-remote.sh k2lab card-dedupe
 ```
 
+Both deploy scripts verify that the compiled artifact contains durable Codex
+history synchronization with a separate invalidation epoch, confirmed transcript delivery, and persistent usage
+storage before signing or installation. A matching version number is not
+enough: local builds can all report the same version while containing different
+fixes. Build from the complete deployment workspace. If using an isolated
+checkout, include all local changes and untracked source files; a checkout of
+tracked files plus one task's patch can silently remove another task's fixes.
+Use the current deployment scripts, not an older copy from that checkout.
+Remote transfer uses rsync with a staged copy of the installed binary when
+both Macs have rsync; unchanged blocks are reused. Otherwise it uses scp.
+This avoids a global `PATH` override for a temporary transfer wrapper.
+
 ### Fixed install path (why)
 
 The binary always installs to the **fixed path** `~/.hapi/bin/hapi` (a real
@@ -193,6 +205,26 @@ runner's own code stays old until the process restarts:
 running; the CLI stops the stale runner and starts a fresh one with
 `HAPI_CLI_EXECUTABLE` pinned to the fixed path. Running sessions are detached
 and survive the restart.
+
+The refreshed runner inherits the deployment shell's environment, including
+`PATH`. Deploy from a normal login Terminal without replacing `PATH` with a
+short list of system directories: agents installed under `~/.local/bin`,
+`~/.opencode/bin`, `~/.grok/bin`, or nvm otherwise disappear from availability
+checks and model discovery fails with `spawn codex ENOENT`. Temporary `scp` or
+`rsync` wrappers must prepend to the existing `PATH` and apply only to the
+remote transfer command, not the local deployment or runner refresh.
+
+After refreshing, verify the authenticated Hub APIs
+`GET /api/machines/<machineId>/agent-availability` and
+`GET /api/machines/<machineId>/codex-models`. Compare availability with the
+installed agents before deployment, and require a successful Codex model
+response where Codex is installed. `/health`, binary version, signature, and
+runner PID alone do not validate the runner's launch environment. If it was
+replaced, restore it from a normal login Terminal, then repeat the API checks:
+
+```bash
+HAPI_CLI_EXECUTABLE="$HOME/.hapi/bin/hapi" "$HOME/.hapi/bin/hapi" runner start
+```
 
 ### Manual sequence
 

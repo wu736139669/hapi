@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events'
 import { Store, type StoredMachine } from '../../../store'
 import type { CliSocketWithData } from '../../socketTypes'
 import { registerMachineHandlers } from './machineHandlers'
+import { getUsageSummary } from '../../../sync/usageService'
 
 function harness(options: { access: 'ok' | 'denied' }) {
     const socket = new EventEmitter() as unknown as CliSocketWithData
@@ -48,8 +49,31 @@ describe('opencode-usage-report', () => {
         })
 
         expect(store.usage.getReconciledByNamespace('default')).toEqual([
-            expect.objectContaining({ sessionId: session.id, day: '2026-09-17', requests: 2 })
+            expect.objectContaining({ day: '2026-09-17', requests: 2 })
         ])
+        expect(getUsageSummary(store, 'default', 'all').totals.requests).toBe(2)
+        expect(store.usage.getSources('default', 'machine-1').some((source) => source.sessionId === session.id)).toBe(true)
+    })
+
+    it('updates deleted sources and keeps different machines isolated', () => {
+        const { socket, store } = harness({ access: 'ok' })
+        const session = store.sessions.getOrCreateSession('deleted-source', {
+            machineId: 'machine-1', flavor: 'opencode', opencodeSessionId: 'ses_deleted'
+        }, null, 'default')
+        store.sessions.deleteSession(session.id, 'default')
+        socket.emit('opencode-usage-report', {
+            machineId: 'machine-2', sessions: [{ opencodeSessionId: 'ses_deleted', rows: [row] }]
+        })
+        expect(getUsageSummary(store, 'default', 'all').totals.requests).toBe(0)
+        socket.emit('opencode-usage-report', {
+            machineId: 'machine-1', sessions: [{ opencodeSessionId: 'ses_deleted', rows: [row] }]
+        })
+        expect(getUsageSummary(store, 'default', 'all').totals.requests).toBe(2)
+        socket.emit('opencode-usage-report', {
+            machineId: 'machine-1', sessions: [{ opencodeSessionId: 'ses_deleted', rows: [{ ...row, requests: 3 }] }]
+        })
+        expect(getUsageSummary(store, 'default', 'all').totals.requests).toBe(3)
+        store.close()
     })
 
     it('ignores reports for machines without access', () => {

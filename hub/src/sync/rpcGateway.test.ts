@@ -51,6 +51,19 @@ function createGateway() {
 }
 
 describe('RpcGateway RPC timeouts', () => {
+    it('waits beyond the runner startup deadline for cold Codex resumes', async () => {
+        const { gateway, timeouts, calls } = createGateway()
+
+        await gateway.spawnSession('machine-1', '/workspace', 'codex', undefined, undefined,
+            undefined, undefined, undefined, 'native-thread')
+        await gateway.spawnSession('machine-1', '/workspace', 'codex')
+        await gateway.spawnSession('machine-1', '/workspace', 'claude', undefined, undefined,
+            undefined, undefined, undefined, 'native-session')
+
+        expect(timeouts).toEqual([130_000, 30_000, 30_000])
+        expect(JSON.parse(calls[0].params).resumeSessionId).toBe('native-thread')
+    })
+
     it('uses the default RPC timeout for regular machine RPCs', async () => {
         const { gateway, timeouts } = createGateway()
 

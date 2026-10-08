@@ -16,7 +16,7 @@ import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquire
 import { getCliArgs } from '@/utils/cliArgs';
 import { getProcessStartMarker, isProcessAlive, isWindows, killProcess, killProcessByChildProcess, killProcessTreeByPid } from '@/utils/process';
 import { PERMISSION_MODES } from '@hapi/protocol/modes';
-import { RUNNER_CAPABILITIES } from '@hapi/protocol';
+import { RUNNER_CAPABILITIES, sessionStartupTimeoutMs } from '@hapi/protocol';
 import { withRetry } from '@/utils/time';
 import { isRetryableConnectionError } from '@/utils/errorUtils';
 import { startOpencodeUsageScanner } from './opencodeUsageScanner';
@@ -387,10 +387,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     // so that slow starts no longer leave orphaned child processes which
     // later report back as ghost sessions.
     const envWebhookTimeout = Number(process.env.HAPI_RUNNER_WEBHOOK_TIMEOUT_MS);
-    const webhookTimeoutMs =
-      Number.isFinite(envWebhookTimeout) && envWebhookTimeout > 0
-        ? envWebhookTimeout
-        : 15_000;
 
     // Session spawning awaiter system
     const pidToAwaiter = new Map<number, (session: TrackedSession) => void>();
@@ -500,6 +496,9 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
       const { directory, sessionId, machineId, approvedNewDirectoryCreation = true } = options;
       const agent = options.agent ?? 'claude';
+      const webhookTimeoutMs = Number.isFinite(envWebhookTimeout) && envWebhookTimeout > 0
+        ? envWebhookTimeout
+        : sessionStartupTimeoutMs(agent, options.resumeSessionId);
       if (agent === 'gemini') {
         throw new Error('Gemini CLI is no longer supported and cannot be launched (Google sunset the consumer Gemini CLI on 2026-06-18). Existing Gemini sessions remain viewable in the web UI.');
       }
@@ -815,7 +814,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         logger.debug(`[RUNNER RUN] Waiting for session webhook for PID ${pid}`);
 
         const spawnResult = await new Promise<SpawnSessionResult>((resolve) => {
-          // Set timeout for webhook. Default is 15s but can be raised via
+          // Cold Codex resumes get 120s; other launches get 15s. Override via
           // HAPI_RUNNER_WEBHOOK_TIMEOUT_MS for users on slow models
           // (e.g. opus[1m] --resume).
           const timeout = setTimeout(() => {

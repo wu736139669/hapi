@@ -55,6 +55,7 @@ export const RPC_METHODS = {
     RewindConversation: 'rewind-conversation',
     ClearConversation: 'clear-conversation',
     ImplementCodexPlan: 'implement-codex-plan',
+    CodexGoal: 'codex-goal',
 } as const
 
 export const RPC_TARGET_MISSING_ERROR_CODE = 'rpc_target_missing' as const

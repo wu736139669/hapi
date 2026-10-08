@@ -5,6 +5,7 @@ React Mini App / PWA for monitoring and controlling hapi sessions.
 ## What it does
 
 - Session list with status, pending approvals, todos, and summaries.
+- Native Codex Goal controls in the session status panel: edit objective/token budget, pause, resume, and delete. Available to owners of active sessions advertising `capabilities.codexGoal`; native Goal notifications refresh the displayed state.
 - Chat view with streaming updates and message sending.
 - Permission approval and denial workflows.
 - Codex `request_user_input` choices honor `isOther`: **None of the above**

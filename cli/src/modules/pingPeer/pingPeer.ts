@@ -80,9 +80,14 @@ export type ListPeerSessionsOptions = {
 const DEFAULT_WAIT_ACTIVE_SECS = 60
 const POLL_ACTIVE_MS = 2_000
 const POLL_PI_READY_MS = 1_000
+const FULL_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function defaultSleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isFullSessionId(value: string): boolean {
+    return FULL_SESSION_ID_RE.test(value)
 }
 
 const AUTH_RECOVERY_HINT =
@@ -484,8 +489,12 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
     const onProgress = options.onProgress
 
     const jwt = await exchangeJwt(apiUrl, accessToken, http)
-    const sessions = await listSessions(apiUrl, jwt, http)
-    const matched = resolveSessionByPrefix(sessions, prefix)
+    // Full ids come from Copy-reference citations and are already unambiguous.
+    // Resolve them directly so a peer handoff does not fetch and sort the entire
+    // namespace before it can even inspect one session.
+    const matched = isFullSessionId(prefix)
+        ? await getSession(apiUrl, jwt, prefix, http)
+        : resolveSessionByPrefix(await listSessions(apiUrl, jwt, http), prefix)
     const name = resolvePeerSessionLabel(matched)
     onProgress?.(`resolved ${matched.id}  active=${matched.active}  name="${name}"`)
 
@@ -679,9 +688,16 @@ export async function inspectPeer(options: InspectPeerOptions): Promise<InspectP
     const http = options.http ?? axios
 
     const jwt = await exchangeJwt(apiUrl, accessToken, http)
-    const sessions = await listSessions(apiUrl, jwt, http)
-    const matched = resolveSessionByPrefix(sessions, prefix)
-    const live = await getSession(apiUrl, jwt, matched.id, http)
+    // Copy-reference citations contain the complete UUID. Avoid the expensive
+    // namespace-wide list query in that common path; prefixes still use the
+    // list endpoint to preserve ambiguity detection.
+    const hasFullSessionId = isFullSessionId(prefix)
+    const matched = hasFullSessionId
+        ? await getSession(apiUrl, jwt, prefix, http)
+        : resolveSessionByPrefix(await listSessions(apiUrl, jwt, http), prefix)
+    const live = hasFullSessionId
+        ? matched
+        : await getSession(apiUrl, jwt, matched.id, http)
     const meta = live.metadata ?? matched.metadata ?? null
     const messages = await fetchSessionMessages(apiUrl, jwt, matched.id, messageLimit, http)
 

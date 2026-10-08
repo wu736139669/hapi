@@ -32,6 +32,8 @@ if [ ! -x "$build" ]; then
     exit 1
 fi
 
+bash scripts/verify-deploy-build.sh "$build"
+
 # Sign locally with the pinned identity so the remote keeps a stable signer.
 bash scripts/sign-build.sh "$build"
 
@@ -48,7 +50,16 @@ echo "release: $stamp${tag:+-$tag}"
 
 # Upload next to the fixed path, then install by move (fresh inode + mtime).
 ssh "${ssh_opts[@]}" "$target" "mkdir -p '$remote_home/.hapi/bin/backups'"
-scp -q -C "${ssh_opts[@]}" "$build" "$target:$remote_home/.hapi/bin/.hapi.incoming"
+if command -v rsync >/dev/null 2>&1 && ssh "${ssh_opts[@]}" "$target" 'command -v rsync >/dev/null 2>&1'; then
+    # Seed the staging file from the installed binary so rsync can reuse its
+    # unchanged blocks. Only staging is modified; installation stays atomic.
+    ssh "${ssh_opts[@]}" "$target" "if [ ! -f '$remote_home/.hapi/bin/.hapi.incoming' ] && [ -f '$remote_home/.hapi/bin/hapi' ]; then cp -p '$remote_home/.hapi/bin/hapi' '$remote_home/.hapi/bin/.hapi.incoming'; fi"
+    rsync -az --no-whole-file --inplace --stats \
+        -e 'ssh -o BatchMode=yes -o ConnectTimeout=10' \
+        "$build" "$target:$remote_home/.hapi/bin/.hapi.incoming"
+else
+    scp -q -C "${ssh_opts[@]}" "$build" "$target:$remote_home/.hapi/bin/.hapi.incoming"
+fi
 
 ssh "${ssh_opts[@]}" "$target" "STAMP='$stamp' TAG='$tag' LABEL='$label' bash -s" <<'REMOTE'
 set -euo pipefail

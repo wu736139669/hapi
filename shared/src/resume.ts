@@ -1,6 +1,11 @@
 import { z } from 'zod'
 import { CodexCollaborationModeSchema, CopilotAgentModeSchema, PermissionModeSchema } from './schemas'
-import { AgentFlavorSchema } from './modes'
+import { AgentFlavorSchema, type AgentFlavor } from './modes'
+
+/** Cold Codex resumes can spend substantially longer loading native thread state. */
+export function sessionStartupTimeoutMs(flavor?: AgentFlavor, resumeSessionId?: string): number {
+    return flavor === 'codex' && resumeSessionId ? 120_000 : 15_000
+}
 
 export const LocalResumeTargetSchema = z.object({
     sessionId: z.string().min(1),

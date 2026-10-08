@@ -25,9 +25,8 @@ import {
     getUninvokedLocalMessages,
     getMatureScheduledMessages,
     getImmediateQueuedLocalMessages,
-    countFutureScheduledBySessionIds,
+    getFutureScheduledStatsBySessionIds,
     countFutureScheduledLocalMessages,
-    minFutureScheduledAtBySessionIds,
     countMessages,
     markMessagesInvoked,
     markMessagesIndeterminate,
@@ -46,6 +45,7 @@ import {
     type LookupQueuedMessageResult,
     type LocalMessageState,
     type MessagePosition,
+    type FutureScheduledMessageStats,
 } from './messages'
 
 export class MessageStore {
@@ -155,12 +155,8 @@ export class MessageStore {
         return countFutureScheduledLocalMessages(this.db, sessionId, now)
     }
 
-    countFutureScheduledBySessionIds(sessionIds: string[], now: number = Date.now()): Map<string, number> {
-        return countFutureScheduledBySessionIds(this.db, sessionIds, now)
-    }
-
-    minFutureScheduledAtBySessionIds(sessionIds: string[], now: number = Date.now()): Map<string, number> {
-        return minFutureScheduledAtBySessionIds(this.db, sessionIds, now)
+    getFutureScheduledStatsBySessionIds(sessionIds: string[], now: number = Date.now()): Map<string, FutureScheduledMessageStats> {
+        return getFutureScheduledStatsBySessionIds(this.db, sessionIds, now)
     }
 
     // ponytail: scans through leading bookkeeping; index content if that prefix becomes costly.

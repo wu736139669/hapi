@@ -1,4 +1,7 @@
 import type { Database } from 'bun:sqlite'
+import type { StoredMessage } from './types'
+import { getSession } from './sessions'
+import { parseUsageEvent, sessionModel } from './usageParser'
 
 export type UsageEventKind = 'delta' | 'cumulative'
 
@@ -82,6 +85,109 @@ function toUsageEvent(row: UsageEventRow): UsageEvent {
     }
 }
 
+export function recordUsageEvents(db: Database, namespace: string, events: UsageEvent[]): void {
+    if (events.length === 0) return
+    const statement = db.prepare(`
+        INSERT INTO usage_events (
+            namespace,
+            session_id,
+            source_key,
+            source_seq,
+            created_at,
+            agent,
+            model,
+            kind,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            last_input_tokens,
+            last_output_tokens,
+            last_cache_read_tokens,
+            last_cache_creation_tokens
+        ) VALUES (
+            @namespace,
+            @session_id,
+            @source_key,
+            @source_seq,
+            @created_at,
+            @agent,
+            @model,
+            @kind,
+            @input_tokens,
+            @output_tokens,
+            @cache_read_tokens,
+            @cache_creation_tokens,
+            @last_input_tokens,
+            @last_output_tokens,
+            @last_cache_read_tokens,
+            @last_cache_creation_tokens
+        )
+        ON CONFLICT(session_id, source_key)
+        DO UPDATE SET
+            namespace = excluded.namespace,
+            source_seq = excluded.source_seq,
+            created_at = excluded.created_at,
+            agent = excluded.agent,
+            model = excluded.model,
+            kind = excluded.kind,
+            input_tokens = MAX(usage_events.input_tokens, excluded.input_tokens),
+            output_tokens = MAX(usage_events.output_tokens, excluded.output_tokens),
+            cache_read_tokens = MAX(usage_events.cache_read_tokens, excluded.cache_read_tokens),
+            cache_creation_tokens = MAX(usage_events.cache_creation_tokens, excluded.cache_creation_tokens),
+            last_input_tokens = excluded.last_input_tokens,
+            last_output_tokens = excluded.last_output_tokens,
+            last_cache_read_tokens = excluded.last_cache_read_tokens,
+            last_cache_creation_tokens = excluded.last_cache_creation_tokens
+        WHERE usage_events.kind = 'delta'
+    `)
+    const updateCumulativeModel = db.prepare(`
+        UPDATE usage_events
+        SET model = ?
+        WHERE session_id = ?
+            AND source_key = ?
+            AND kind = 'cumulative'
+    `)
+
+    for (const event of events) {
+        statement.run({
+            namespace,
+            session_id: event.sessionId,
+            source_key: event.sourceKey,
+            source_seq: event.sourceSeq,
+            created_at: event.createdAt,
+            agent: event.agent,
+            model: event.model,
+            kind: event.kind,
+            input_tokens: event.inputTokens,
+            output_tokens: event.outputTokens,
+            cache_read_tokens: event.cacheReadTokens,
+            cache_creation_tokens: event.cacheCreationTokens,
+            last_input_tokens: event.lastInputTokens,
+            last_output_tokens: event.lastOutputTokens,
+            last_cache_read_tokens: event.lastCacheReadTokens,
+            last_cache_creation_tokens: event.lastCacheCreationTokens
+        })
+        if (event.kind === 'cumulative' && event.model !== null) {
+            updateCumulativeModel.run(event.model, event.sessionId, event.sourceKey)
+        }
+    }
+}
+
+/** Called inside the message insertion transaction; scan cursors stay unchanged for legacy backfill. */
+export function recordMessageUsage(db: Database, message: StoredMessage): void {
+    const content = message.content
+    if (!content || typeof content !== 'object' || !('role' in content) || content.role !== 'agent') return
+    const session = getSession(db, message.sessionId)
+    if (!session) return
+    const event = parseUsageEvent(session, message)
+    if (!event) return
+    const previous = db.prepare('SELECT model FROM usage_events WHERE session_id = ? AND source_key = ?')
+        .get(event.sessionId, event.sourceKey) as { model: string | null } | undefined
+    event.model ??= previous?.model ?? sessionModel(session)
+    recordUsageEvents(db, session.namespace, [event])
+}
+
 export function recordUsageScan(
     db: Database,
     sessionId: string,
@@ -89,100 +195,20 @@ export function recordUsageScan(
     messageEpoch: number,
     lastSeq: number,
     events: UsageEvent[],
-    replaceEvents: boolean
+    _replaceEvents: boolean
 ): void {
+    // Bound standalone backfill writes so live hub acknowledgements can
+    // acquire SQLite's writer lock. A surrounding delete/merge transaction
+    // still makes its entire operation atomic.
+    const batchSize = 256
+    for (let offset = 0; offset + batchSize < events.length; offset += batchSize) {
+        db.transaction(() => recordUsageEvents(db, namespace, events.slice(offset, offset + batchSize)))()
+    }
+    const finalOffset = events.length === 0 ? 0 : Math.floor((events.length - 1) / batchSize) * batchSize
     db.transaction(() => {
-        if (replaceEvents) {
-            db.prepare('DELETE FROM usage_events WHERE session_id = ?').run(sessionId)
-        }
-
-        if (events.length > 0) {
-            const statement = db.prepare(`
-                INSERT INTO usage_events (
-                    namespace,
-                    session_id,
-                    source_key,
-                    source_seq,
-                    created_at,
-                    agent,
-                    model,
-                    kind,
-                    input_tokens,
-                    output_tokens,
-                    cache_read_tokens,
-                    cache_creation_tokens,
-                    last_input_tokens,
-                    last_output_tokens,
-                    last_cache_read_tokens,
-                    last_cache_creation_tokens
-                ) VALUES (
-                    @namespace,
-                    @session_id,
-                    @source_key,
-                    @source_seq,
-                    @created_at,
-                    @agent,
-                    @model,
-                    @kind,
-                    @input_tokens,
-                    @output_tokens,
-                    @cache_read_tokens,
-                    @cache_creation_tokens,
-                    @last_input_tokens,
-                    @last_output_tokens,
-                    @last_cache_read_tokens,
-                    @last_cache_creation_tokens
-                )
-                ON CONFLICT(session_id, source_key)
-                DO UPDATE SET
-                    namespace = excluded.namespace,
-                    source_seq = excluded.source_seq,
-                    created_at = excluded.created_at,
-                    agent = excluded.agent,
-                    model = excluded.model,
-                    kind = excluded.kind,
-                    input_tokens = excluded.input_tokens,
-                    output_tokens = excluded.output_tokens,
-                    cache_read_tokens = excluded.cache_read_tokens,
-                    cache_creation_tokens = excluded.cache_creation_tokens,
-                    last_input_tokens = excluded.last_input_tokens,
-                    last_output_tokens = excluded.last_output_tokens,
-                    last_cache_read_tokens = excluded.last_cache_read_tokens,
-                    last_cache_creation_tokens = excluded.last_cache_creation_tokens
-                WHERE usage_events.kind = 'delta'
-            `)
-            const updateCumulativeModel = db.prepare(`
-                UPDATE usage_events
-                SET model = ?
-                WHERE session_id = ?
-                    AND source_key = ?
-                    AND kind = 'cumulative'
-            `)
-
-            for (const event of events) {
-                statement.run({
-                    namespace,
-                    session_id: event.sessionId,
-                    source_key: event.sourceKey,
-                    source_seq: event.sourceSeq,
-                    created_at: event.createdAt,
-                    agent: event.agent,
-                    model: event.model,
-                    kind: event.kind,
-                    input_tokens: event.inputTokens,
-                    output_tokens: event.outputTokens,
-                    cache_read_tokens: event.cacheReadTokens,
-                    cache_creation_tokens: event.cacheCreationTokens,
-                    last_input_tokens: event.lastInputTokens,
-                    last_output_tokens: event.lastOutputTokens,
-                    last_cache_read_tokens: event.lastCacheReadTokens,
-                    last_cache_creation_tokens: event.lastCacheCreationTokens
-                })
-                if (event.kind === 'cumulative' && event.model !== null) {
-                    updateCumulativeModel.run(event.model, event.sessionId, event.sourceKey)
-                }
-            }
-        }
+        // An epoch change invalidates the scan cursor, not actual consumption.
+        // Rewinds and transcript replacements cannot refund completed requests.
+        recordUsageEvents(db, namespace, events.slice(finalOffset))
 
         db.prepare(`
             INSERT INTO usage_scan_state (namespace, session_id, message_epoch, last_seq)
@@ -298,8 +324,8 @@ export function transferUsageSession(db: Database, fromSessionId: string, toSess
                 last_cache_creation_tokens
             )
             SELECT
-                ?,
                 COALESCE((SELECT namespace FROM sessions WHERE id = ?), usage_events.namespace),
+                ?,
                 source_key,
                 source_seq,
                 created_at,
@@ -318,41 +344,17 @@ export function transferUsageSession(db: Database, fromSessionId: string, toSess
             WHERE session_id = ?
         `).run(toSessionId, toSessionId, fromSessionId)
         db.prepare('DELETE FROM usage_events WHERE session_id = ?').run(fromSessionId)
-        db.prepare('DELETE FROM usage_scan_state WHERE session_id IN (?, ?)').run(fromSessionId, toSessionId)
-        db.prepare(`
-            INSERT OR REPLACE INTO usage_reconciliation (
-                namespace,
-                session_id,
-                day,
-                model,
-                agent,
-                input_tokens,
-                output_tokens,
-                cache_read_tokens,
-                cache_creation_tokens,
-                requests,
-                updated_at
-            )
-            SELECT
-                ?,
-                ?,
-                day,
-                model,
-                agent,
-                input_tokens,
-                output_tokens,
-                cache_read_tokens,
-                cache_creation_tokens,
-                requests,
-                updated_at
-            FROM usage_reconciliation
-            WHERE session_id = ?
-        `).run(
-            (db.prepare('SELECT namespace FROM sessions WHERE id = ?').get(toSessionId) as { namespace: string } | undefined)?.namespace ?? 'default',
-            toSessionId,
-            fromSessionId
-        )
-        db.prepare('DELETE FROM usage_reconciliation WHERE session_id = ?').run(fromSessionId)
+        // Preserve the source cursor: copied transcripts can remain there
+        // until deletion, and must not re-create the transferred ledger.
+        db.prepare('DELETE FROM usage_scan_state WHERE session_id = ?').run(toSessionId)
+        db.prepare(`INSERT OR IGNORE INTO usage_session_sources
+            (namespace, machine_id, agent, native_session_id, session_id)
+            SELECT COALESCE((SELECT namespace FROM sessions WHERE id = ?), namespace),
+                machine_id, agent, native_session_id, ? FROM usage_session_sources WHERE session_id = ?`)
+            .run(toSessionId, toSessionId, fromSessionId)
+        // Snapshots are already durable and source-specific. Moving them can
+        // overwrite a different native source's totals on the same day/model.
+        // Source aliases above make them cover the merged live ledger.
     })()
 }
 
@@ -365,7 +367,13 @@ export function replaceReconciledUsage(
     updatedAt: number
 ): void {
     db.transaction(() => {
-        db.prepare('DELETE FROM usage_reconciliation WHERE session_id = ?').run(sessionId)
+        const agents = [...new Set(rows.map((row) => row.agent))]
+        for (const agent of agents) {
+            db.prepare('DELETE FROM usage_reconciliation WHERE session_id = ? AND agent = ?').run(sessionId, agent)
+        }
+        if (rows.length === 0) {
+            db.prepare('DELETE FROM usage_reconciliation WHERE session_id = ?').run(sessionId)
+        }
         if (rows.length === 0) return
         const statement = db.prepare(`
             INSERT INTO usage_reconciliation (

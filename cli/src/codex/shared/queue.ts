@@ -63,6 +63,7 @@ export class SharedCodexQueue {
         });
     }
     async committed(id: string): Promise<void> {
+        if (this.entries[id]?.state === 'consumed') { this.consumed([id]); return; }
         // History may prove acceptance after execution replacement, before hub
         // redelivery. Remember it even when this generation did not enqueue it.
         const entry = this.entries[id] ??= { state: 'consumed', input: [] };

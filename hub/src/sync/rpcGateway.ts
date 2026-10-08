@@ -1,6 +1,8 @@
 import type { AgentFlavor, CodexCollaborationMode, CopilotAgentMode, PermissionMode } from '@hapi/protocol/types'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
+import { sessionStartupTimeoutMs } from '@hapi/protocol'
 import {
+    CodexGoalResponseSchema,
     ArchiveCodexSessionRpcResponseSchema,
     AgentAvailabilityResponseSchema,
     CursorChatStoreStatusSchema,
@@ -10,6 +12,8 @@ import {
     ListPiSessionsRpcResponseSchema
 } from '@hapi/protocol/apiTypes'
 import type {
+    CodexGoalRequest,
+    CodexGoalResponse,
     AgyModelsResponse,
     AgentAvailabilityResponse,
     CodexModelSummary,
@@ -242,7 +246,9 @@ export class RpcGateway {
                     startingMode,
                     forkSession: forkSession === true,
                     ...(team ? { team } : {})
-                }
+                },
+                // Allow the runner's startup deadline to settle before the RPC expires.
+                Math.max(DEFAULT_RPC_TIMEOUT_MS, sessionStartupTimeoutMs(agent, resumeSessionId) + 10_000)
             )
             if (result && typeof result === 'object') {
                 const obj = result as Record<string, unknown>
@@ -564,6 +570,10 @@ export class RpcGateway {
 
     async implementCodexPlan(sessionId: string, planId: string): Promise<ImplementCodexPlanResult> {
         return await this.sessionRpc(sessionId, RPC_METHODS.ImplementCodexPlan, { planId }, 60_000) as ImplementCodexPlanResult
+    }
+
+    async codexGoal(sessionId: string, request: CodexGoalRequest): Promise<CodexGoalResponse> {
+        return CodexGoalResponseSchema.parse(await this.sessionRpc(sessionId, RPC_METHODS.CodexGoal, request))
     }
 
     async rewindConversation(

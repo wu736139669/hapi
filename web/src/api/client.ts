@@ -45,6 +45,8 @@ import type {
 } from '@/types/api'
 import type { TeamDetail, TeamMessage, TeamSummary, TeamTask, TeamWithMembers } from '@/types/team'
 import type {
+    CodexGoalRequest,
+    CodexGoalResponse,
     AgentAvailabilityResponse,
     AgyModelsResponse,
     CodexModelsResponse,
@@ -903,6 +905,16 @@ export class ApiClient {
     async implementCodexPlan(sessionId: string, planId: string): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/codex/plan/implement`, {
             method: 'POST', body: JSON.stringify({ planId })
+        })
+    }
+
+    async getCodexGoal(sessionId: string): Promise<CodexGoalResponse> {
+        return await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/codex/goal`)
+    }
+
+    async manageCodexGoal(sessionId: string, action: CodexGoalRequest): Promise<CodexGoalResponse> {
+        return await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/codex/goal`, {
+            method: 'POST', body: JSON.stringify(action)
         })
     }
 

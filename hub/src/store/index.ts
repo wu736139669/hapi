@@ -16,6 +16,7 @@ import { UsageStore } from './usageStore'
 import { StudioStore } from './studioStore'
 import { WorkGraphStore } from './workGraphStore'
 import { SessionShareStore } from './sessionShareStore'
+import { HistorySyncStore } from './historySyncStore'
 
 export type {
     NativeDevicePlatform,
@@ -92,6 +93,7 @@ export class Store {
     readonly studios: StudioStore
     readonly workGraph: WorkGraphStore
     readonly sessionShares: SessionShareStore
+    readonly historySync: HistorySyncStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -142,12 +144,14 @@ export class Store {
         this.sessions = new SessionStore(this.db)
         this.machines = new MachineStore(this.db)
         this.messages = new MessageStore(this.db)
+        this.historySync = new HistorySyncStore(this.db)
         this.users = new UserStore(this.db)
         this.push = new PushStore(this.db)
         this.fcm = new FcmStore(this.db)
         this.scratchlist = new ScratchlistStore(this.db)
         this.chatAttachments = new ChatAttachmentsStore(this.db)
         this.usage = new UsageStore(this.db)
+        for (const session of this.sessions.getSessions()) this.usage.rememberSessionSources(session)
         this.studios = new StudioStore(this.db)
         this.workGraph = new WorkGraphStore(this.db)
         this.sessionShares = new SessionShareStore(this.db)
@@ -1303,6 +1307,14 @@ export class Store {
      */
     private ensureUsageReconciliationSchema(): void {
         this.db.exec(`
+            CREATE TABLE IF NOT EXISTS usage_session_sources (
+                namespace TEXT NOT NULL,
+                machine_id TEXT NOT NULL,
+                agent TEXT NOT NULL,
+                native_session_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                PRIMARY KEY (namespace, machine_id, agent, native_session_id, session_id)
+            );
             CREATE TABLE IF NOT EXISTS usage_reconciliation (
                 namespace TEXT NOT NULL DEFAULT 'default',
                 session_id TEXT NOT NULL,
@@ -1315,11 +1327,21 @@ export class Store {
                 cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
                 requests INTEGER NOT NULL DEFAULT 0,
                 updated_at INTEGER NOT NULL,
-                PRIMARY KEY (session_id, day, model)
+                PRIMARY KEY (session_id, agent, day, model)
             );
             CREATE INDEX IF NOT EXISTS idx_usage_reconciliation_namespace_day
                 ON usage_reconciliation(namespace, day);
         `)
+        const columns = this.db.prepare('PRAGMA table_info(usage_reconciliation)').all() as Array<{ name: string; pk: number }>
+        if (columns.find((column) => column.name === 'agent')?.pk === 0) {
+            this.db.transaction(() => {
+                this.db.exec(`ALTER TABLE usage_reconciliation RENAME TO usage_reconciliation_legacy`)
+                this.ensureUsageReconciliationSchema()
+                this.db.exec(`INSERT INTO usage_reconciliation SELECT * FROM usage_reconciliation_legacy;
+                    DROP TABLE usage_reconciliation_legacy;
+                    CREATE INDEX IF NOT EXISTS idx_usage_reconciliation_namespace_day ON usage_reconciliation(namespace, day)`)
+            })()
+        }
     }
 
     private getSessionColumnNames(): Set<string> {

@@ -38,11 +38,11 @@ export function findTestOwnedProcesses(marker: string): TestOwnedProcess[] {
 
     let output: string
     try {
-        // `-eo` (not `-axo`): procps-ng 4.x rejects `-x` with "must set
-        // personality" on some Linux builds. `e` shows the environment after
-        // the command; `ww` removes width truncation so the env dump is not
-        // cut off.
-        output = execFileSync('ps', ['eww', '-eo', 'pid=,ppid=,rss=,command='], {
+        // BSD ps needs -ax to include detached processes; `eww -eo` can exit
+        // silently on macOS. Linux procps-ng needs -e instead of -ax.
+        // `eww` includes the complete environment for marker matching only.
+        const selection = process.platform === 'darwin' ? '-axo' : '-eo'
+        output = execFileSync('ps', ['eww', selection, 'pid=,ppid=,rss=,command='], {
             encoding: 'utf8',
             maxBuffer: 64 * 1024 * 1024,
             stdio: ['ignore', 'pipe', 'pipe'],

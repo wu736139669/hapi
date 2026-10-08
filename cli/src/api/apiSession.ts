@@ -41,6 +41,8 @@ import { cleanupUploadDir, preserveUploadDirOnExit } from '../modules/common/han
 import { TerminalManager } from '@/terminal/TerminalManager'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildHubRequestHeaders, buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
+import { ConfirmedMessageQueue } from './confirmedMessageQueue'
+import { CodexHistoryStateSchema, truncateOversizedMessageContent, type CodexHistoryState, type CodexHistorySyncRequest } from '@hapi/protocol'
 
 /**
  * XML tags that Claude Code injects as `type:'user'` messages.
@@ -234,6 +236,17 @@ function hasSameJsonValue(left: unknown, right: unknown): boolean {
 export class ApiSessionClient extends EventEmitter {
     private reconnectHandler: (() => void) | null = null
     onReconnect(handler: (() => void) | null): void { this.reconnectHandler = handler }
+    async syncCodexHistory(threadId: string, commit?: CodexHistorySyncRequest['commit']): Promise<CodexHistoryState> {
+        if (!this.socket.connected) throw new Error('Hub disconnected during history synchronization')
+        const response: unknown = await this.socket.timeout(15_000).emitWithAck('codex-history-sync', { sid: this.sessionId, threadId, ...(commit ? { commit } : {}) })
+        if (typeof response !== 'object' || response === null || !('ok' in response) || response.ok !== true || !('state' in response)) {
+            throw new Error('Hub did not confirm history synchronization progress')
+        }
+        return CodexHistoryStateSchema.parse(response.state)
+    }
+    waitForMessages(localIds: string[], signal?: AbortSignal): Promise<boolean> {
+        return this.confirmedMessages.waitFor(localIds, 30_000, signal)
+    }
     private readonly token: string
     readonly sessionId: string
     private metadata: Metadata | null
@@ -281,6 +294,7 @@ export class ApiSessionClient extends EventEmitter {
     private agentStateChangedDuringAttempt = false
     private readonly pendingOutboundEvents: PendingOutboundEvent[] = []
     private didWarnPendingQueueFull = false
+    private readonly confirmedMessages: ConfirmedMessageQueue
 
     constructor(token: string, session: Session, options: ApiSessionClientOptions = {}) {
         super()
@@ -319,6 +333,17 @@ export class ApiSessionClient extends EventEmitter {
             ...buildSocketIoExtraHeaderOptions()
         })
 
+        this.confirmedMessages = new ConfirmedMessageQueue(
+            async message => {
+                const response: unknown = await this.socket.emitWithAck('message', message)
+                if (typeof response !== 'object' || response === null || !('ok' in response) || response.ok !== true) {
+                    throw new Error('Hub did not confirm transcript persistence')
+                }
+            },
+            localId => this.socket.emit('messages-consumed', { sid: this.sessionId, localIds: [localId] }),
+            error => logger.debug('[API] Transcript delivery unconfirmed; retaining for reconnect', error)
+        )
+
         this.terminalManager = new TerminalManager({
             sessionId: this.sessionId,
             getSessionPath: () => this.metadata?.path ?? null,
@@ -332,6 +357,7 @@ export class ApiSessionClient extends EventEmitter {
             logger.debug('Socket connected successfully')
             this.awaitingMaterializedConnection = false
             this.rpcHandlerManager.onSocketConnect(this.socket)
+            this.confirmedMessages.setConnected(true)
             if (this.hasConnectedOnce) {
                 this.needsBackfill = true
             }
@@ -351,6 +377,7 @@ export class ApiSessionClient extends EventEmitter {
 
         this.socket.on('disconnect', (reason) => {
             logger.debug('[API] Socket disconnected:', reason)
+            this.confirmedMessages.setConnected(false)
             this.rpcHandlerManager.onSocketDisconnect()
             this.terminalManager.closeAll()
             if (this.hasConnectedOnce) {
@@ -1027,7 +1054,7 @@ export class ApiSessionClient extends EventEmitter {
         })
     }
 
-    sendUserMessage(text: string, meta?: MessageMeta, localId?: string): void {
+    sendUserMessage(text: string, meta?: MessageMeta, localId?: string, options?: { replay?: boolean; verifyPersistence?: boolean; createdAt?: number }): void {
         if (!text) {
             return
         }
@@ -1045,6 +1072,10 @@ export class ApiSessionClient extends EventEmitter {
         }
 
         this.emitOrQueue(() => {
+            if (localId && this.metadata?.capabilities?.concurrentClients) {
+                this.confirmedMessages.enqueue({ sid: this.sessionId, message: content, localId, ...(options?.createdAt !== undefined ? { createdAt: options.createdAt } : {}) }, options?.replay, options?.verifyPersistence)
+                return
+            }
             this.socket.emit('message', {
                 sid: this.sessionId,
                 message: content,
@@ -1063,8 +1094,8 @@ export class ApiSessionClient extends EventEmitter {
         void this.materialize()
     }
 
-    sendAgentMessage(body: unknown, localId?: string): void {
-        const content = {
+    sendAgentMessage(body: unknown, localId?: string, options?: { replay?: boolean; verifyPersistence?: boolean; createdAt?: number }): void {
+        const content = truncateOversizedMessageContent({
             role: 'agent',
             content: {
                 type: AGENT_MESSAGE_PAYLOAD_TYPE,
@@ -1073,8 +1104,12 @@ export class ApiSessionClient extends EventEmitter {
             meta: {
                 sentFrom: 'cli'
             }
-        }
+        })
         this.emitOrQueue(() => {
+            if (localId && this.metadata?.capabilities?.concurrentClients) {
+                this.confirmedMessages.enqueue({ sid: this.sessionId, message: content, localId, ...(options?.createdAt !== undefined ? { createdAt: options.createdAt } : {}) }, options?.replay, options?.verifyPersistence)
+                return
+            }
             this.socket.emit('message', {
                 sid: this.sessionId,
                 message: content,
@@ -1520,6 +1555,10 @@ export class ApiSessionClient extends EventEmitter {
             }
         }
 
+        if (!await this.confirmedMessages.drain(remainingMs())) {
+            return false
+        }
+
         if (!await this.drainLock(this.metadataLock, remainingMs())) {
             return false
         }
@@ -1556,6 +1595,7 @@ export class ApiSessionClient extends EventEmitter {
         this.materializationRetryAbortController = null
         this.awaitingMaterializedConnection = false
         this.pendingOutboundEvents.length = 0
+        this.confirmedMessages.close()
         this.rpcHandlerManager.onSocketDisconnect()
         this.terminalManager.closeAll()
         this.socket.disconnect()

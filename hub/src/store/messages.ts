@@ -6,6 +6,8 @@ import { z } from 'zod'
 import { getLiveReasoningStreamId } from '@hapi/protocol/messages'
 
 import type { StoredMessage } from './types'
+import { recordMessageUsage } from './usage'
+import { bumpHistoryEpoch } from './historySyncStore'
 import { decodeMessageContent, encodeMessageContent, truncateOversizedMessageContent } from './contentCodec'
 
 type DbMessageRow = {
@@ -75,10 +77,12 @@ export function addImportedMessage(
             local_id: localId,
             invoked_at: stampedAt
         })
-        if (previousHead && stampedAt < previousHead.at) bumpMessageEpoch(db, sessionId)
+        if (previousHead && stampedAt < previousHead.at) bumpMessageEpoch(db, sessionId, false)
         const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as DbMessageRow | undefined
         if (!row) throw new Error('Failed to create imported message')
-        return { message: toStoredMessage(row), inserted: true }
+        const message = toStoredMessage(row)
+        recordMessageUsage(db, message)
+        return { message, inserted: true }
     })()
 }
 
@@ -111,8 +115,8 @@ export function addMessage(
 ): StoredMessage {
     const now = Date.now()
     // Client-provided origin timestamp (e.g. a Claude transcript entry's own
-    // `timestamp`), falling back to server-receive time when absent. Only
-    // agent-message callers (sessionHandlers' `on('message')`) pass this today.
+    // `timestamp`), falling back to server-receive time when absent. Native
+    // history callers also pass this for messages carrying stable localIds.
     const stampedAt = Number.isFinite(createdAt)
         ? Math.min(createdAt!, now)
         : now
@@ -171,10 +175,12 @@ export function addMessage(
         })
 
         const positionAt = invokedAt ?? stampedAt
-        if (previousHead && positionAt < previousHead.at) bumpMessageEpoch(db, sessionId)
+        if (previousHead && positionAt < previousHead.at) bumpMessageEpoch(db, sessionId, false)
         const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as DbMessageRow | undefined
         if (!row) throw new Error('Failed to create message')
-        return toStoredMessage(row)
+        const message = toStoredMessage(row)
+        recordMessageUsage(db, message)
+        return message
     })()
 }
 
@@ -248,7 +254,7 @@ export function copyMessageToSession(
     // Copies preserve the source display timestamp, so a new high-seq row can
     // still land behind a Web client's cached composite tail cursor. Mark the
     // target history as structurally changed so incremental readers reset.
-    bumpMessageEpoch(db, sessionId)
+    bumpMessageEpoch(db, sessionId, false)
     return toStoredMessage(row)
 }
 
@@ -303,7 +309,7 @@ export function copyMessagesToSession(
             nextSeq += 1
         }
 
-        bumpMessageEpoch(db, sessionId)
+        bumpMessageEpoch(db, sessionId, false)
         return messages.length
     })()
 }
@@ -531,12 +537,13 @@ export function getMessageEpoch(db: Database, sessionId: string): number {
     return row?.epoch ?? 0
 }
 
-export function bumpMessageEpoch(db: Database, sessionId: string): number {
+export function bumpMessageEpoch(db: Database, sessionId: string, invalidateHistory = true): number {
     db.prepare(`
         INSERT INTO message_epochs (session_id, epoch)
         VALUES (?, 1)
         ON CONFLICT(session_id) DO UPDATE SET epoch = epoch + 1
     `).run(sessionId)
+    if (invalidateHistory) bumpHistoryEpoch(db, sessionId)
     return getMessageEpoch(db, sessionId)
 }
 
@@ -665,51 +672,29 @@ export function countFutureScheduledLocalMessages(
     return row?.count ?? 0
 }
 
-/** Batch variant for GET /sessions — one query for all session IDs in a namespace. */
-export function countFutureScheduledBySessionIds(
-    db: Database,
-    sessionIds: string[],
-    now: number
-): Map<string, number> {
-    const counts = new Map<string, number>()
-    if (sessionIds.length === 0) {
-        return counts
-    }
-
-    const placeholders = sessionIds.map(() => '?').join(',')
-    const rows = db.prepare(`
-        SELECT session_id, COUNT(*) AS count
-        FROM messages
-        WHERE session_id IN (${placeholders})
-          AND invoked_at IS NULL
-          AND local_id IS NOT NULL
-          AND scheduled_at IS NOT NULL
-          AND scheduled_at > ?
-          AND delivery_state = 'queued'
-        GROUP BY session_id
-    `).all(...sessionIds, now) as { session_id: string; count: number }[]
-
-    for (const row of rows) {
-        counts.set(row.session_id, row.count)
-    }
-    return counts
+export type FutureScheduledMessageStats = {
+    count: number
+    nextScheduledAt: number
 }
 
-/** Earliest future scheduled_at per session (session-list clock tooltip). */
-export function minFutureScheduledAtBySessionIds(
+/** Session-list statistics, computed together from pending scheduled messages. */
+export function getFutureScheduledStatsBySessionIds(
     db: Database,
     sessionIds: string[],
     now: number
-): Map<string, number> {
-    const nextAt = new Map<string, number>()
+): Map<string, FutureScheduledMessageStats> {
+    const stats = new Map<string, FutureScheduledMessageStats>()
     if (sessionIds.length === 0) {
-        return nextAt
+        return stats
     }
 
     const placeholders = sessionIds.map(() => '?').join(',')
+    // Without this index, SQLite can choose idx_messages_local_id and walk all
+    // historical local messages for every session, even when none are pending.
+    // This partial index exists on fresh databases and since the V9 migration.
     const rows = db.prepare(`
-        SELECT session_id, MIN(scheduled_at) AS next_at
-        FROM messages
+        SELECT session_id, COUNT(*) AS count, MIN(scheduled_at) AS next_at
+        FROM messages INDEXED BY idx_messages_scheduled_pending
         WHERE session_id IN (${placeholders})
           AND invoked_at IS NULL
           AND local_id IS NOT NULL
@@ -717,12 +702,12 @@ export function minFutureScheduledAtBySessionIds(
           AND scheduled_at > ?
           AND delivery_state = 'queued'
         GROUP BY session_id
-    `).all(...sessionIds, now) as { session_id: string; next_at: number }[]
+    `).all(...sessionIds, now) as { session_id: string; count: number; next_at: number }[]
 
     for (const row of rows) {
-        nextAt.set(row.session_id, row.next_at)
+        stats.set(row.session_id, { count: row.count, nextScheduledAt: row.next_at })
     }
-    return nextAt
+    return stats
 }
 
 export function getMaxSeq(db: Database, sessionId: string): number {

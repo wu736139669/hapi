@@ -88,6 +88,7 @@ import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
 import { TeamPanel } from '@/components/TeamPanel'
 import { SessionStatusPanel } from '@/components/SessionStatusPanel'
 import { buildSessionStatusData } from '@/chat/sessionStatus'
+import { useCodexGoal } from '@/hooks/useCodexGoal'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { useClaudeCustomModels } from '@/hooks/queries/useClaudeCustomModels'
@@ -1370,9 +1371,21 @@ function SessionChatInner(props: SessionChatProps) {
         () => reconcileChatBlocks(reduced.blocks, blocksByIdRef.current),
         [reduced.blocks]
     )
+    const canManageGoal = !isSessionGuest && agentFlavor === 'codex' && props.session.active
+        && Boolean(props.session.metadata?.capabilities?.codexGoal) && !controlledByUser
+    const goalEventId = useMemo(() => {
+        for (let i = normalizedGoalStateMessages.length - 1; i >= 0; i--) {
+            const message = normalizedGoalStateMessages[i]
+            if (message.role === 'event' && (message.content.type === 'thread-goal-updated' || message.content.type === 'thread-goal-cleared')) {
+                return message.id
+            }
+        }
+        return null
+    }, [normalizedGoalStateMessages])
+    const codexGoal = useCodexGoal(props.api, props.session.id, canManageGoal, goalEventId)
     const sessionStatus = useMemo(
         () => buildSessionStatusData({
-            goal: reduced.latestGoal,
+            goal: codexGoal.goal === undefined ? reduced.latestGoal : codexGoal.goal,
             tasks: props.session.todos,
             blocks: reconciled.blocks,
             messages: normalizedMessages,
@@ -1380,6 +1393,7 @@ function SessionChatInner(props: SessionChatProps) {
         }),
         [
             reduced.latestGoal,
+            codexGoal.goal,
             props.session.todos,
             props.session.backgroundTaskCount,
             reconciled.blocks,
@@ -1849,7 +1863,7 @@ function SessionChatInner(props: SessionChatProps) {
 
             <CursorMigrationBanner metadata={props.session.metadata} />
 
-            {sessionStatus ? <SessionStatusPanel data={sessionStatus} /> : null}
+            {sessionStatus ? <SessionStatusPanel data={sessionStatus} onGoalAction={canManageGoal ? codexGoal.act : undefined} /> : null}
 
             <div className="flex flex-col min-h-0 flex-1">
             {props.session.teamState && (
