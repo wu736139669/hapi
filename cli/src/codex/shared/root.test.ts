@@ -79,6 +79,7 @@ async function fixture(options: { deferHistory?: boolean } = {}) {
     const updateState = vi.fn((fn: (value: AgentState) => AgentState) => { state = fn(state); });
     const rpc = new Map<string, (raw: unknown) => Promise<unknown>>();
     const send = vi.fn();
+    const sendEvent = vi.fn();
     let historyState = { epoch: 0, revision: 0, checkpoint: null as import('@hapi/protocol').CodexHistoryCheckpoint | null };
     const session = {
         sessionId: 'sid', getMetadata: () => metadata,
@@ -87,7 +88,7 @@ async function fixture(options: { deferHistory?: boolean } = {}) {
         onUserMessage() {}, onCancelQueuedMessage() {}, onRetryQueuedMessage() {},
         onReconnect: (fn: (() => void) | null) => { reconnect = fn; },
         rpcHandlerManager: { registerHandler: (name: string, handler: (raw: unknown) => Promise<unknown>) => rpc.set(name, handler) },
-        sendSessionEvent() {}, sendAgentMessage: send, emitSessionReady() {},
+        sendSessionEvent: sendEvent, sendAgentMessage: send, emitSessionReady() {},
         sendUserMessage() {}, emitMessagesConsumed() {}, emitSteerIndeterminate() {}, syncNativeQueuedMessage() {},
         sendSessionDeath() {}, async flush() {}, close() {},
         async flushMetadata() { return true; }, async waitForMessages() { return true; },
@@ -113,7 +114,7 @@ async function fixture(options: { deferHistory?: boolean } = {}) {
         notify(method: string, params: unknown): void;
         abandoned(): void;
     };
-    return { root, native, rpc, send, metadata: () => metadata, state: () => state, updateState, reconnect: () => reconnect?.(), syncHistory: () => root.syncHistory(response) };
+    return { root, native, rpc, send, sendEvent, metadata: () => metadata, state: () => state, updateState, reconnect: () => reconnect?.(), syncHistory: () => root.syncHistory(response) };
 }
 
 async function completePlan(f: Awaited<ReturnType<typeof fixture>>, status = 'completed') {
@@ -309,6 +310,39 @@ describe('shared plan actions', () => {
         f.native.queue = []; // Absence is not proof of cancellation or delivery.
         expect(await action()).toMatchObject({ ok: false, code: 'indeterminate' });
         expect(spy.mock.calls.filter(([method]) => method === 'thread/queue/add')).toHaveLength(1);
+    });
+});
+
+describe('codex retry notices', () => {
+    const capacity = { message: 'Selected model is at capacity. Please try a different model.' };
+
+    it('surfaces retryable stream errors as api-error status events', async () => {
+        const f = await fixture();
+        f.native.notify('error', { threadId: 'thread', turnId: 'turn-1', error: capacity, willRetry: true });
+        expect(f.sendEvent).toHaveBeenCalledWith({ type: 'api-error', retryAttempt: 1, maxRetries: 0,
+            error: capacity, retryScheduled: true });
+        f.native.notify('error', { threadId: 'thread', turnId: 'turn-1', error: capacity, willRetry: true });
+        expect(f.sendEvent).toHaveBeenLastCalledWith(expect.objectContaining({ retryAttempt: 2 }));
+        f.native.notify('turn/started', { threadId: 'thread', turn: { id: 'turn-2' } });
+        f.native.notify('error', { threadId: 'thread', turnId: 'turn-2', error: { message: 'stream disconnected' }, willRetry: true });
+        expect(f.sendEvent).toHaveBeenLastCalledWith(expect.objectContaining({ retryAttempt: 1,
+            error: { message: 'stream disconnected' } }));
+    });
+
+    it('ignores child-thread retries and terminal errors', async () => {
+        const f = await fixture();
+        f.native.notify('error', { threadId: 'child', turnId: 'child-turn', error: capacity, willRetry: true });
+        f.native.notify('error', { threadId: 'thread', turnId: 'turn-1', error: { message: 'fatal' }, willRetry: false });
+        f.native.notify('error', { threadId: 'thread', turnId: 'turn-1', error: { message: 'no flag' } });
+        expect(f.sendEvent).not.toHaveBeenCalled();
+    });
+
+    it('surfaces wrapped legacy retry errors', async () => {
+        const f = await fixture();
+        f.native.notify('codex/event/error', { msg: { type: 'error', thread_id: 'thread', message: 'stream disconnected', will_retry: true } });
+        expect(f.sendEvent).toHaveBeenCalledTimes(1);
+        expect(f.sendEvent).toHaveBeenCalledWith({ type: 'api-error', retryAttempt: 1, maxRetries: 0,
+            error: { message: 'stream disconnected' }, retryScheduled: true });
     });
 });
 

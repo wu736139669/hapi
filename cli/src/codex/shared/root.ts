@@ -67,6 +67,8 @@ export class SharedCodexRoot {
     private settingsRevision = 0;
     private refreshing?: Promise<void>;
     private interrupted = false;
+    private retryNoticeTurn: string | undefined;
+    private retryNoticeAttempt = 0;
     private pristineThread?: Record<string, unknown>;
     private closed = false;
     private stopping = false;
@@ -87,12 +89,16 @@ export class SharedCodexRoot {
             if (method === 'serverRequest/resolved') {
                 this.permissions?.resolved(string(record(params).threadId) ?? '', record(params).requestId); return;
             }
+            if (method === 'error' || method === 'codex/event/error') {
+                this.noticeCodexRetry(method, params);
+            }
             if (method === 'thread/settings/updated' && record(params).threadId === this.threadId) this.acceptSettings(record(record(params).threadSettings));
             if (record(params).threadId === this.threadId) {
                 if (method === 'thread/goal/updated' || method === 'thread/goal/cleared') this.goalRevision++;
                 if (method === 'turn/started') {
                     this.pristineThread = undefined;
                     this.turnRevision++; this.currentTurn = string(record(record(params).turn).id); this.interrupted = false;
+                    this.retryNoticeTurn = undefined; this.retryNoticeAttempt = 0;
                     if (this.currentTurn) this.latestTurn = { id: this.currentTurn, status: 'inProgress' };
                     this.publishSteering();
                 }
@@ -148,6 +154,28 @@ export class SharedCodexRoot {
             void this.refresh().then(() => this.refreshChildren(false)).then(() => this.queue.replay())
                 .catch(error => logger.debug('[Codex shared] hub resync', error));
         });
+    }
+
+    /** App-server stream errors that will be retried (`willRetry: true`) are
+     *  live retry state, not failures: the converter drops them and a terminal
+     *  error surfaces much later with no sign the turn was alive meanwhile.
+     *  Surface them through the shared api-error status event so every client
+     *  renders the native retry notice ("API error: Retrying..."). */
+    private noticeCodexRetry(method: string, params: unknown): void {
+        const outer = record(params);
+        const source = method === 'codex/event/error' ? record(outer.msg) : outer;
+        const threadId = string(source.threadId ?? source.thread_id) ?? string(outer.threadId ?? outer.thread_id);
+        if (threadId !== this.threadId) return;
+        const errorRecord = record(source.error);
+        const willRetry = source.willRetry ?? source.will_retry ?? errorRecord.willRetry ?? errorRecord.will_retry;
+        if (willRetry !== true) return;
+        const message = string(source.message ?? source.reason) ?? string(errorRecord.message);
+        if (!message) return;
+        const turnId = string(source.turnId ?? source.turn_id) ?? '';
+        if (this.retryNoticeTurn !== turnId) { this.retryNoticeTurn = turnId; this.retryNoticeAttempt = 0; }
+        this.retryNoticeAttempt += 1;
+        this.session.sendSessionEvent({ type: 'api-error', retryAttempt: this.retryNoticeAttempt,
+            maxRetries: 0, error: { message }, retryScheduled: true });
     }
 
     async prepare(): Promise<void> {
