@@ -26,3 +26,9 @@ Web 单测 3260 通过、35 个原有失败；本轮新增 10 个配色集成用
 浅色辅助文字与四个渐变端点的静态色值对比度均不低于 4.5:1。按仓库 Major 检查表检查需求、方案及差异；引用的 pre-push-review 技能此前已确认缺失，沿用 AGENTS 要求的机械检查和本地逻辑审查。
 
 [六套同屏对比](screenshots/macaron-variants/comparison.png)、[选择区](screenshots/macaron-variants/picker.png)。真实组件、合成数据，390×844 Chromium；未声称实机 Safari 测试。
+
+## 上线
+
+源码 `8924dba8` 已合并并推送 `local/deploy-main`，部署 mini（Hub + runner）及 k2lab（runner）。两台签名一致、固定路径与新 runner mtime 验证通过，Hub health 正常。两台前后均有 6 个 Agent 可用、Codex 7 个模型。
+
+正式 Hub 验证了 8 个选择、五种新配色的刷新保存、对应首屏颜色与渐变色值、列表完整渐变、无森林装饰、零皮肤图片请求、无横向溢出和页面错误。刷新后在「设置 → 显示 → 界面皮肤」切换。见 [上线报告](macaron-color-variants-deployment.json)。
