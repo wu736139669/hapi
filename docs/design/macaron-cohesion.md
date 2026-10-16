@@ -20,3 +20,9 @@ Web 单测 3261 通过、35 个原有失败；新增一项跨配色保留自定�
 引用的 pre-push-review 技能此前已确认缺失；执行 AGENTS 机械检查及仓库 Major 清单本地审查。未发现本次引入的 Major 问题。
 
 [列表/聊天前后对比](screenshots/macaron-cohesion/before-after.png)、[设置页](screenshots/macaron-cohesion/mint-settings.png)、[深色聊天](screenshots/macaron-cohesion/mint-chat-dark.png)、[OLED](screenshots/macaron-cohesion/blueberry-oled.png)。真实组件、合成数据、390×844 Chromium；未声称实机 Safari 测试。
+
+## 上线
+
+源码 `aa082c0f` 已合并并推送 `local/deploy-main`，部署 mini（Hub + runner）与 k2lab（runner）。两台签名相同、固定路径与新 runner mtime 验证通过，Hub health 正常；部署前后均为 6 个 Agent 可用、Codex 7 个模型。
+
+正式 Hub 逐一验证了五种新增配色的选择、刷新保存、首屏颜色和渐变色值，并确认工具栏透明、列表常态无阴影/可见描边、无皮肤图片请求、无页面错误或横向溢出。刷新已有马卡龙页面即可应用。见 [上线报告](macaron-cohesion-deployment.json)。

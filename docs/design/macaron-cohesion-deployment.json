@@ -1,0 +1,127 @@
+{
+    "status": "deployed",
+    "deployedAt": "2026-10-17T00:19:43.991228+08:00",
+    "sourceCommit": "aa082c0ff05a1517b6208dd4fcd1ae2fd6b217c9",
+    "branch": "local/deploy-main",
+    "featureBranch": "fix/macaron-cohesive-surfaces",
+    "version": "0.30.7",
+    "macaronColorwaysRefined": 6,
+    "signing": {
+        "identifier": "run.hapi.cli",
+        "teamIdentifier": "X75CUV458P",
+        "codeDirectoryHash": "308f3b766735ca674a085d0a5d0b5f31879edcb7",
+        "sameOnBothMachines": true
+    },
+    "hubHealth": "ok",
+    "before": [
+        {
+            "id": "a15888ad-d405-4884-a407-c28ddd8b397c",
+            "name": "小吴家",
+            "active": true,
+            "startedCliMtimeMs": 1792166269910.5134,
+            "availableAgents": [
+                "claude",
+                "codex",
+                "cursor",
+                "dsh",
+                "grok",
+                "opencode"
+            ],
+            "codexModelsCount": 7,
+            "codexModelsSuccess": true
+        },
+        {
+            "id": "3b5c8a65-1c73-4f8e-b7b4-c54d42084b42",
+            "name": "小吴k2lab",
+            "active": true,
+            "startedCliMtimeMs": 1792166287000,
+            "availableAgents": [
+                "claude",
+                "codex",
+                "cursor",
+                "dsh",
+                "grok",
+                "opencode"
+            ],
+            "codexModelsCount": 7,
+            "codexModelsSuccess": true
+        }
+    ],
+    "after": [
+        {
+            "id": "a15888ad-d405-4884-a407-c28ddd8b397c",
+            "name": "小吴家",
+            "active": true,
+            "startedCliMtimeMs": 1792167421218.1716,
+            "availableAgents": [
+                "claude",
+                "codex",
+                "cursor",
+                "dsh",
+                "grok",
+                "opencode"
+            ],
+            "codexModelsCount": 7,
+            "codexModelsSuccess": true
+        },
+        {
+            "id": "3b5c8a65-1c73-4f8e-b7b4-c54d42084b42",
+            "name": "小吴k2lab",
+            "active": true,
+            "startedCliMtimeMs": 1792167468000,
+            "availableAgents": [
+                "claude",
+                "codex",
+                "cursor",
+                "dsh",
+                "grok",
+                "opencode"
+            ],
+            "codexModelsCount": 7,
+            "codexModelsSuccess": true
+        }
+    ],
+    "remoteRunnerPid": 92060,
+    "remoteRunnerMtimeMatchesFile": true,
+    "backups": {
+        "mini": "/Users/wusumac/.hapi/bin/backups/hapi.20261017-001658-macaron-cohesion-aa082c0f",
+        "k2lab": "/Users/sudaxia/.hapi/bin/backups/hapi.20261017-001745-macaron-cohesion-aa082c0f"
+    },
+    "liveUi": {
+        "skinOptions": 8,
+        "checkedVariants": [
+            "macaron-peach",
+            "macaron-mint",
+            "macaron-blueberry",
+            "macaron-lemon",
+            "macaron-rose"
+        ],
+        "seamlessToolbar": true,
+        "unframedListRows": true,
+        "persistedMacaronSelection": true,
+        "initialThemeColor": "#f4fbf8",
+        "liveGradientBackground": true,
+        "skinImageRequests": 0,
+        "forestDecorationAbsent": true,
+        "viewport": [
+            390,
+            844
+        ],
+        "pageErrors": []
+    },
+    "checks": {
+        "browserVerified": 17,
+        "browserFirstRunPassed": 16,
+        "browserInitialContextStartupTimeouts": 1,
+        "browserFailedCaseRerunPassed": 1,
+        "typecheck": "passed",
+        "fixtureTypecheck": "passed",
+        "build": "passed",
+        "webPassed": 3261,
+        "webFailed": 35,
+        "cliPassed": 2886,
+        "cliFailed": 7,
+        "introducedFailureIds": [],
+        "baselineFailureIdsCompared": true
+    }
+}
