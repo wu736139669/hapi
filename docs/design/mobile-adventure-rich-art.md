@@ -45,3 +45,15 @@ python3 web/scripts/art/prepare-forest-frame.py
 - [空列表](screenshots/forest-rich-empty-light.png)
 
 这是浏览器手机视口验证，实体手机 / Safari PWA / Telegram 宿主仍未实测。
+
+## 已上线
+
+功能提交 `65887b171effe135ab26db5f3ce00ebc4dfb1555` 已快进合并并推送到 `local/deploy-main`，由完整安装包部署至 mini（Hub + runner）及 k2lab（runner），仍使用固定路径与同一签名身份。
+
+- 两台连续冷启动三次、签名验证通过；CodeDirectory hash 均为 `e98de8b8717841e23a3fb0159f6eafd64f84d77a`。
+- 两台新 runner 加载时间匹配新文件；均 active。原有 Claude / Codex / Cursor / DSH / Grok / OpenCode 六个 Agent 保持可用，Codex 模型列表均 success、7 个模型。
+- 已部署 Hub 的 15 张图片逐份 SHA-256 与发布源一致；实际设置页切换并刷新保留选择，实际列表显示小景与木框，向导为 256px、蘑菇屋为 512px，无 page error 或整页横向溢出。
+- 默认冷启动的皮肤缓存为 0；访问素材后关闭 Chrome，保留独立测试 profile、断网重开并禁用 HTTP 缓存。15 张图均由 SW 返回并解码成功，随后清理测试 profile。
+- Hub `/health` 为 ok。部署脚本保留上一版备份：mini `hapi.20261016-224934-forest-rich-65887b17`，k2lab `hapi.20261016-225025-forest-rich-65887b17`，均位于各自 `~/.hapi/bin/backups/`；本次无需回滚。
+
+[上线证据](forest-adventure-rich-art/deployment-report.json)、[离线缓存证据](forest-adventure-rich-art/offline-report.json)。刷新 HAPI 即可看到已选择的森林皮肤增强效果；入口仍为设置 → 显示 → 界面皮肤。

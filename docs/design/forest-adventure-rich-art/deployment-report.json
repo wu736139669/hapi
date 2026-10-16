@@ -1,0 +1,259 @@
+{
+    "status": "deployed",
+    "deployedAt": "2026-10-16T22:54:50+08:00",
+    "sourceCommit": "65887b171effe135ab26db5f3ce00ebc4dfb1555",
+    "branch": "local/deploy-main",
+    "version": "0.30.7",
+    "runtimeImageCount": 15,
+    "runtimeImageBytes": 397976,
+    "signing": {
+        "identifier": "run.hapi.cli",
+        "teamIdentifier": "X75CUV458P",
+        "codeDirectoryHash": "e98de8b8717841e23a3fb0159f6eafd64f84d77a",
+        "sameOnBothMachines": true
+    },
+    "hubHealth": "ok",
+    "before": [
+        {
+            "id": "a15888ad-d405-4884-a407-c28ddd8b397c",
+            "name": "小吴家",
+            "active": true,
+            "startedCliMtimeMs": 1792159855401.2363,
+            "agents": [
+                {
+                    "agent": "agy",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "claude",
+                    "available": true
+                },
+                {
+                    "agent": "codex",
+                    "available": true
+                },
+                {
+                    "agent": "copilot",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "cursor",
+                    "available": true
+                },
+                {
+                    "agent": "dsh",
+                    "available": true
+                },
+                {
+                    "agent": "grok",
+                    "available": true
+                },
+                {
+                    "agent": "kimi",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "opencode",
+                    "available": true
+                },
+                {
+                    "agent": "pi",
+                    "available": false,
+                    "reason": "not_found"
+                }
+            ],
+            "codexModelsSuccess": true,
+            "codexModelsCount": 7
+        },
+        {
+            "id": "3b5c8a65-1c73-4f8e-b7b4-c54d42084b42",
+            "name": "小吴k2lab",
+            "active": true,
+            "startedCliMtimeMs": 1792159903000,
+            "agents": [
+                {
+                    "agent": "agy",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "claude",
+                    "available": true
+                },
+                {
+                    "agent": "codex",
+                    "available": true
+                },
+                {
+                    "agent": "copilot",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "cursor",
+                    "available": true
+                },
+                {
+                    "agent": "dsh",
+                    "available": true
+                },
+                {
+                    "agent": "grok",
+                    "available": true
+                },
+                {
+                    "agent": "kimi",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "opencode",
+                    "available": true
+                },
+                {
+                    "agent": "pi",
+                    "available": false,
+                    "reason": "not_found"
+                }
+            ],
+            "codexModelsSuccess": true,
+            "codexModelsCount": 7
+        }
+    ],
+    "after": [
+        {
+            "id": "a15888ad-d405-4884-a407-c28ddd8b397c",
+            "name": "小吴家",
+            "active": true,
+            "startedCliMtimeMs": 1792162177090.4536,
+            "agents": [
+                {
+                    "agent": "agy",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "claude",
+                    "available": true
+                },
+                {
+                    "agent": "codex",
+                    "available": true
+                },
+                {
+                    "agent": "copilot",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "cursor",
+                    "available": true
+                },
+                {
+                    "agent": "dsh",
+                    "available": true
+                },
+                {
+                    "agent": "grok",
+                    "available": true
+                },
+                {
+                    "agent": "kimi",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "opencode",
+                    "available": true
+                },
+                {
+                    "agent": "pi",
+                    "available": false,
+                    "reason": "not_found"
+                }
+            ],
+            "codexModelsSuccess": true,
+            "codexModelsCount": 7
+        },
+        {
+            "id": "3b5c8a65-1c73-4f8e-b7b4-c54d42084b42",
+            "name": "小吴k2lab",
+            "active": true,
+            "startedCliMtimeMs": 1792162228000,
+            "agents": [
+                {
+                    "agent": "agy",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "claude",
+                    "available": true
+                },
+                {
+                    "agent": "codex",
+                    "available": true
+                },
+                {
+                    "agent": "copilot",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "cursor",
+                    "available": true
+                },
+                {
+                    "agent": "dsh",
+                    "available": true
+                },
+                {
+                    "agent": "grok",
+                    "available": true
+                },
+                {
+                    "agent": "kimi",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "opencode",
+                    "available": true
+                },
+                {
+                    "agent": "pi",
+                    "available": false,
+                    "reason": "not_found"
+                }
+            ],
+            "codexModelsSuccess": true,
+            "codexModelsCount": 7
+        }
+    ],
+    "liveUI": {
+        "servedImagesMatched": 15,
+        "persistedSkinSelection": true,
+        "liveLayeredScenery": true,
+        "liveWoodFrame": true,
+        "highDensityGuide": 256,
+        "highDensityCottage": 512,
+        "viewport": [
+            390,
+            844
+        ],
+        "horizontalOverflow": false,
+        "pageErrors": []
+    },
+    "offline": {
+        "decodedAssets": 15,
+        "coldBrowser": true,
+        "allResponsesFromServiceWorker": true
+    },
+    "backups": {
+        "mini": "/Users/wusumac/.hapi/bin/backups/hapi.20261016-224934-forest-rich-65887b17",
+        "k2lab": "/Users/sudaxia/.hapi/bin/backups/hapi.20261016-225025-forest-rich-65887b17"
+    }
+}

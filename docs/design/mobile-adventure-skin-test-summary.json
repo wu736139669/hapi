@@ -109,12 +109,13 @@
         "review": "Requirement, approach and changed code reviewed against repository Major checklist; no introduced Major findings. Referenced pre-push-review skill unavailable after filesystem and HAPI lookup."
     },
     "deployment": {
-        "source_commit": "eb540f80c8bdfe4f177a986a95045586a8b175f9",
+        "source_commit": "65887b171effe135ab26db5f3ce00ebc4dfb1555",
         "branch": "local/deploy-main",
         "mini": "verified",
         "k2lab": "verified",
         "live_ui": "verified",
-        "report": "forest-adventure-art/deployment-report.json"
+        "offline_assets": 15,
+        "report": "forest-adventure-rich-art/deployment-report.json"
     },
     "rich_art_verification": {
         "browser_passed": 9,
@@ -126,5 +127,13 @@
         "typecheck": "passed",
         "frame_export": "transparent center verified",
         "request_count": 2
+    },
+    "initial_deployment": {
+        "source_commit": "eb540f80c8bdfe4f177a986a95045586a8b175f9",
+        "branch": "local/deploy-main",
+        "mini": "verified",
+        "k2lab": "verified",
+        "live_ui": "verified",
+        "report": "forest-adventure-art/deployment-report.json"
     }
 }
