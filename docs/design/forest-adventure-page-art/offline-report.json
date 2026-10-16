@@ -1,0 +1,73 @@
+{
+    "defaultSkinImageCacheEntries": 0,
+    "coldBrowser": true,
+    "offline": true,
+    "httpCacheDisabled": true,
+    "decodedAssets": 16,
+    "responses": [
+        {
+            "path": "/skins/forest-adventure/forest.webp",
+            "fromServiceWorker": true
+        },
+        {
+            "path": "/skins/forest-adventure/forest-page.webp",
+            "fromServiceWorker": true
+        },
+        {
+            "path": "/skins/forest-adventure/wood-frame.webp",
+            "fromServiceWorker": true
+        },
+        {
+            "path": "/skins/forest-adventure/elements/garden-fence.webp",
+            "fromServiceWorker": true
+        },
+        {
+            "path": "/skins/forest-adventure/elements/map-compass.webp",
+            "fromServiceWorker": true
+        },
+        {
+            "path": "/skins/forest-adventure/elements/mushrooms.webp",
+            "fromServiceWorker": true
+        },
+        {
+            "path": "/skins/forest-adventure/elements/guide.webp",
+            "fromServiceWorker": true
+        },
+        {
+            "path": "/skins/forest-adventure/elements/wood-corner.webp",
+            "fromServiceWorker": true
+        },
+        {
+            "path": "/skins/forest-adventure/elements/leaf-crest.webp",
+            "fromServiceWorker": true
+        },
+        {
+            "path": "/skins/forest-adventure/elements/backpack.webp",
+            "fromServiceWorker": true
+        },
+        {
+            "path": "/skins/forest-adventure/elements/wildflowers.webp",
+            "fromServiceWorker": true
+        },
+        {
+            "path": "/skins/forest-adventure/elements/quest-scroll.webp",
+            "fromServiceWorker": true
+        },
+        {
+            "path": "/skins/forest-adventure/elements/lantern-tree.webp",
+            "fromServiceWorker": true
+        },
+        {
+            "path": "/skins/forest-adventure/elements/mushroom-cottage.webp",
+            "fromServiceWorker": true
+        },
+        {
+            "path": "/skins/forest-adventure/elements/forest-portal.webp",
+            "fromServiceWorker": true
+        },
+        {
+            "path": "/skins/forest-adventure/elements/lantern.webp",
+            "fromServiceWorker": true
+        }
+    ]
+}

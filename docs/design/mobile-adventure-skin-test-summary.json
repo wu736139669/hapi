@@ -109,13 +109,13 @@
         "review": "Requirement, approach and changed code reviewed against repository Major checklist; no introduced Major findings. Referenced pre-push-review skill unavailable after filesystem and HAPI lookup."
     },
     "deployment": {
-        "source_commit": "65887b171effe135ab26db5f3ce00ebc4dfb1555",
+        "source_commit": "08bb829e5fce7f8661319eacac0c6d2048ec8645",
         "branch": "local/deploy-main",
         "mini": "verified",
         "k2lab": "verified",
         "live_ui": "verified",
-        "offline_assets": 15,
-        "report": "forest-adventure-rich-art/deployment-report.json"
+        "offline_assets": 16,
+        "report": "forest-adventure-page-art/deployment-report.json"
     },
     "rich_art_verification": {
         "browser_passed": 9,
@@ -135,5 +135,32 @@
         "k2lab": "verified",
         "live_ui": "verified",
         "report": "forest-adventure-art/deployment-report.json"
+    },
+    "rich_art_deployment": {
+        "source_commit": "65887b171effe135ab26db5f3ce00ebc4dfb1555",
+        "branch": "local/deploy-main",
+        "mini": "verified",
+        "k2lab": "verified",
+        "live_ui": "verified",
+        "offline_assets": 15,
+        "report": "forest-adventure-rich-art/deployment-report.json"
+    },
+    "page_background_verification": {
+        "web": {
+            "failed_ids": 35,
+            "introduced": [],
+            "resolved": []
+        },
+        "cli": {
+            "failed_ids": 7,
+            "introduced": [],
+            "resolved": []
+        },
+        "browser_passed": 9,
+        "typecheck": "passed",
+        "fixture_typecheck": "passed",
+        "build": "passed",
+        "production_image_hash_matches": 16,
+        "review": "Requirement, approach and changed code checked against repository Major checklist; no introduced Major findings. Referenced pre-push-review skill remains unavailable."
     }
 }

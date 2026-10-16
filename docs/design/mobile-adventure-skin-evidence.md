@@ -4,6 +4,8 @@
 
 后续“图片太少”反馈对应的视觉增强、9 项浏览器检查与当前素材体积，见 [图片增强记录](mobile-adventure-rich-art.md)。本文保留首版验收过程。
 
+最新“顶部横幅太大”反馈已改成整页背景并部署两台机器，见 [整页背景记录](mobile-adventure-page-background.md)。
+
 已由本地 `goal-instruction-writer` 技能生成指令，创建 native Goal 并执行。生产实现、素材和开发验证完成；全仓仍有已确认的基线失败，**不能称为全仓测试全绿**。下列矩阵记录开发阶段验收；用户随后授权合并部署，已上线 mini 与 k2lab，见 [上线记录](mobile-adventure-skin-deployment.md)。
 
 ## Goal anchor

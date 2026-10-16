@@ -1,0 +1,332 @@
+{
+    "status": "deployed",
+    "deployedAt": "2026-10-16T23:13:03.706591+08:00",
+    "sourceCommit": "08bb829e5fce7f8661319eacac0c6d2048ec8645",
+    "branch": "local/deploy-main",
+    "version": "0.30.7",
+    "runtimeImageCount": 16,
+    "runtimeImageBytes": 564228,
+    "signing": {
+        "identifier": "run.hapi.cli",
+        "teamIdentifier": "X75CUV458P",
+        "codeDirectoryHash": "e8d106d5101be1e0b9740eb98d96ce6da9b9f62a",
+        "sameOnBothMachines": true
+    },
+    "hubHealth": "ok",
+    "before": [
+        {
+            "id": "a15888ad-d405-4884-a407-c28ddd8b397c",
+            "name": "小吴家",
+            "active": true,
+            "startedCliMtimeMs": 1792162177090.4536,
+            "agents": [
+                {
+                    "agent": "agy",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "claude",
+                    "available": true
+                },
+                {
+                    "agent": "codex",
+                    "available": true
+                },
+                {
+                    "agent": "copilot",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "cursor",
+                    "available": true
+                },
+                {
+                    "agent": "dsh",
+                    "available": true
+                },
+                {
+                    "agent": "grok",
+                    "available": true
+                },
+                {
+                    "agent": "kimi",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "opencode",
+                    "available": true
+                },
+                {
+                    "agent": "pi",
+                    "available": false,
+                    "reason": "not_found"
+                }
+            ],
+            "codexModelsSuccess": true,
+            "codexModelsCount": 7
+        },
+        {
+            "id": "3b5c8a65-1c73-4f8e-b7b4-c54d42084b42",
+            "name": "小吴k2lab",
+            "active": true,
+            "startedCliMtimeMs": 1792162228000,
+            "agents": [
+                {
+                    "agent": "agy",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "claude",
+                    "available": true
+                },
+                {
+                    "agent": "codex",
+                    "available": true
+                },
+                {
+                    "agent": "copilot",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "cursor",
+                    "available": true
+                },
+                {
+                    "agent": "dsh",
+                    "available": true
+                },
+                {
+                    "agent": "grok",
+                    "available": true
+                },
+                {
+                    "agent": "kimi",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "opencode",
+                    "available": true
+                },
+                {
+                    "agent": "pi",
+                    "available": false,
+                    "reason": "not_found"
+                }
+            ],
+            "codexModelsSuccess": true,
+            "codexModelsCount": 7
+        }
+    ],
+    "after": [
+        {
+            "id": "a15888ad-d405-4884-a407-c28ddd8b397c",
+            "name": "小吴家",
+            "active": true,
+            "startedCliMtimeMs": 1792163371627.822,
+            "agents": [
+                {
+                    "agent": "agy",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "claude",
+                    "available": true
+                },
+                {
+                    "agent": "codex",
+                    "available": true
+                },
+                {
+                    "agent": "copilot",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "cursor",
+                    "available": true
+                },
+                {
+                    "agent": "dsh",
+                    "available": true
+                },
+                {
+                    "agent": "grok",
+                    "available": true
+                },
+                {
+                    "agent": "kimi",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "opencode",
+                    "available": true
+                },
+                {
+                    "agent": "pi",
+                    "available": false,
+                    "reason": "not_found"
+                }
+            ],
+            "codexModelsSuccess": true,
+            "codexModelsCount": 7
+        },
+        {
+            "id": "3b5c8a65-1c73-4f8e-b7b4-c54d42084b42",
+            "name": "小吴k2lab",
+            "active": true,
+            "startedCliMtimeMs": 1792163385000,
+            "agents": [
+                {
+                    "agent": "agy",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "claude",
+                    "available": true
+                },
+                {
+                    "agent": "codex",
+                    "available": true
+                },
+                {
+                    "agent": "copilot",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "cursor",
+                    "available": true
+                },
+                {
+                    "agent": "dsh",
+                    "available": true
+                },
+                {
+                    "agent": "grok",
+                    "available": true
+                },
+                {
+                    "agent": "kimi",
+                    "available": false,
+                    "reason": "not_found"
+                },
+                {
+                    "agent": "opencode",
+                    "available": true
+                },
+                {
+                    "agent": "pi",
+                    "available": false,
+                    "reason": "not_found"
+                }
+            ],
+            "codexModelsSuccess": true,
+            "codexModelsCount": 7
+        }
+    ],
+    "remoteRunnerPid": 50862,
+    "remoteRunnerMtimeMatchesFile": true,
+    "backups": {
+        "mini": "/Users/wusumac/.hapi/bin/backups/hapi.20261016-230928-forest-page-08bb829e",
+        "k2lab": "/Users/sudaxia/.hapi/bin/backups/hapi.20261016-230942-forest-page-08bb829e"
+    },
+    "liveUi": {
+        "servedImagesMatched": 16,
+        "persistedSkinSelection": true,
+        "defaultSkinImageRequests": 0,
+        "fullPaneBackground": true,
+        "bannerRemoved": true,
+        "backgroundSize": [
+            768,
+            1661
+        ],
+        "liveWoodFrame": true,
+        "viewport": [
+            390,
+            844
+        ],
+        "pageErrors": []
+    },
+    "offline": {
+        "defaultSkinImageCacheEntries": 0,
+        "coldBrowser": true,
+        "offline": true,
+        "httpCacheDisabled": true,
+        "decodedAssets": 16,
+        "responses": [
+            {
+                "path": "/skins/forest-adventure/forest.webp",
+                "fromServiceWorker": true
+            },
+            {
+                "path": "/skins/forest-adventure/forest-page.webp",
+                "fromServiceWorker": true
+            },
+            {
+                "path": "/skins/forest-adventure/wood-frame.webp",
+                "fromServiceWorker": true
+            },
+            {
+                "path": "/skins/forest-adventure/elements/garden-fence.webp",
+                "fromServiceWorker": true
+            },
+            {
+                "path": "/skins/forest-adventure/elements/map-compass.webp",
+                "fromServiceWorker": true
+            },
+            {
+                "path": "/skins/forest-adventure/elements/mushrooms.webp",
+                "fromServiceWorker": true
+            },
+            {
+                "path": "/skins/forest-adventure/elements/guide.webp",
+                "fromServiceWorker": true
+            },
+            {
+                "path": "/skins/forest-adventure/elements/wood-corner.webp",
+                "fromServiceWorker": true
+            },
+            {
+                "path": "/skins/forest-adventure/elements/leaf-crest.webp",
+                "fromServiceWorker": true
+            },
+            {
+                "path": "/skins/forest-adventure/elements/backpack.webp",
+                "fromServiceWorker": true
+            },
+            {
+                "path": "/skins/forest-adventure/elements/wildflowers.webp",
+                "fromServiceWorker": true
+            },
+            {
+                "path": "/skins/forest-adventure/elements/quest-scroll.webp",
+                "fromServiceWorker": true
+            },
+            {
+                "path": "/skins/forest-adventure/elements/lantern-tree.webp",
+                "fromServiceWorker": true
+            },
+            {
+                "path": "/skins/forest-adventure/elements/mushroom-cottage.webp",
+                "fromServiceWorker": true
+            },
+            {
+                "path": "/skins/forest-adventure/elements/forest-portal.webp",
+                "fromServiceWorker": true
+            },
+            {
+                "path": "/skins/forest-adventure/elements/lantern.webp",
+                "fromServiceWorker": true
+            }
+        ]
+    }
+}

@@ -1,0 +1,13 @@
+{
+    "generator": "built-in image_gen",
+    "prompt": "prompt.md",
+    "styleReference": "../../../web/public/skins/forest-adventure/forest.webp",
+    "source": "source.png",
+    "sourceSha256": "a5155170f20e810cfdfe7e5954289bbd0f76610b4f91506157ae802b932a7d4d",
+    "output": "../../../web/public/skins/forest-adventure/forest-page.webp",
+    "outputSha256": "af44759b3e8e4c6c8555b42586ce5a83823f11393ef6f4d47cd26c50cf6e7084",
+    "export": "cwebp -q 82 -resize 768 0 source.png -o forest-page.webp",
+    "width": 768,
+    "height": 1661,
+    "bytes": 166252
+}

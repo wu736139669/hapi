@@ -19,3 +19,9 @@
 完整 `bun run test` 在 CLI 原有 7 项失败及 Node Vitest 无法导入 `bun:sqlite` 的套件处中止；独立 Web 3245 通过、35 失败。已逐项比对原有失败 ID，均无新增，见 [验证报告](forest-adventure-page-art/verification.json)。未改 CLI、Hub、shared、relay 或消息流水线。
 
 仓库引用的 `~/.cursor/skills/pre-push-review/` 在前次搜索后仍不可用；执行了 AGENTS 指定的机械检查，并按 `.github/prompts/codex-pr-review.md` 本地审阅需求、方案与本次差异，无新增 Major 问题。
+
+## 上线
+
+源码 `08bb829e` 已快进合并并推送 `local/deploy-main`，构建一次，部署到 mini（Hub + runner）及 k2lab（runner）。固定路径签名验证、反复冷启动、Hub health、runner 新文件 mtime 验证通过；两台 CDHash 一致（`e8d106d5101be1e0b9740eb98d96ce6da9b9f62a`）。两台部署前后均有 6 个 Agent 可用、Codex 7 个模型。
+
+正式 Hub 手机页面验证了选择持久化、移除横幅、背景覆盖整个面板、图片源文件哈希一致、默认皮肤零图片请求、无横向溢出和页面错误。独立冷浏览器关闭 HTTP 缓存后，16 份素材均由 Service Worker 离线返回。[上线报告](forest-adventure-page-art/deployment-report.json)、[离线报告](forest-adventure-page-art/offline-report.json)。
