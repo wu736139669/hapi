@@ -1,0 +1,68 @@
+{
+    "version": 1,
+    "grid": {
+        "rows": 2,
+        "columns": 2
+    },
+    "generation": {
+        "tool": "image_gen.imagegen",
+        "transparent_background": true,
+        "prompt": "docs/design/forest-adventure-rich-art/props-prompt.txt",
+        "references": [
+            "web/public/skins/forest-adventure/forest.webp",
+            "docs/design/forest-adventure-art/normalized-sheet.png"
+        ],
+        "framePrompt": "docs/design/forest-adventure-rich-art/frame-prompt.txt",
+        "plannedRequests": 2
+    },
+    "source": "docs/design/forest-adventure-rich-art/source-sheet.png",
+    "outputDirectory": "web/public/skins/forest-adventure/elements",
+    "assets": [
+        {
+            "name": "mushroom-cottage",
+            "size": 512,
+            "use": "Layered forest clearing at the bottom of the session list"
+        },
+        {
+            "name": "lantern-tree",
+            "size": 512,
+            "use": "Forest clearing and chat scene strip"
+        },
+        {
+            "name": "forest-portal",
+            "size": 320,
+            "use": "Chat scene strip and forest clearing"
+        },
+        {
+            "name": "garden-fence",
+            "size": 384,
+            "use": "Layered list and chat foreground"
+        }
+    ],
+    "sourceSha256": "27d2966e2bb04496c9213e86aa93fad291995380c8ac563e5c8f7e5d1ac644b3",
+    "provenance": {
+        "propsSource": "/Users/wusumac/.codex/generated_images/01a144bb-ba8d-70c3-bd3f-352554d3e624/exec-fd67a4d0-f563-4f1f-aab3-b8e1facf1999.png",
+        "frameSource": "/Users/wusumac/.codex/generated_images/01a144bb-ba8d-70c3-bd3f-352554d3e624/exec-60fe1e29-dc09-4fd5-866d-d1d7b4f8b1d2.png",
+        "requests": 2,
+        "cost": "Not returned by the built-in generation tool"
+    },
+    "normalization": {
+        "sourceSize": [
+            1254,
+            1254
+        ],
+        "columnBoundaries": [
+            0,
+            627,
+            1254
+        ],
+        "rowBoundaries": [
+            0,
+            627,
+            1254
+        ],
+        "cellSize": 768,
+        "contentFraction": 0.64,
+        "alphaNoiseThreshold": 8
+    }
+}

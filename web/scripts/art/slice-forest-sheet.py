@@ -15,9 +15,11 @@ PLAN_PATH = ROOT / "docs/design/forest-adventure-art/manifest.json"
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest", type=Path, default=PLAN_PATH, help="Reviewed grid manifest (relative to the repository root)")
     parser.add_argument("--dry-run", action="store_true", help="Print the asset plan without writing files")
     args = parser.parse_args()
-    plan = json.loads(PLAN_PATH.read_text())
+    plan_path = args.manifest if args.manifest.is_absolute() else ROOT / args.manifest
+    plan = json.loads(plan_path.read_text())
     rows, columns = plan["grid"]["rows"], plan["grid"]["columns"]
     if len(plan["assets"]) != rows * columns:
         raise ValueError("Each cell must have exactly one named asset")
@@ -65,10 +67,10 @@ def main():
             icon = ImageOps.contain(cell.crop(bounds), (limit, limit), Image.Resampling.LANCZOS)
             master.paste(icon, (column * size + (size - icon.width) // 2, row * size + (size - icon.height) // 2))
             calibration.append({"rawCell": list(box), "rawContentBounds": list(bounds), "rawMargins": margins})
-        master.save(PLAN_PATH.parent / "normalized-sheet.png")
+        master.save(plan_path.parent / "normalized-sheet.png")
         source = master
     output = ROOT / plan["outputDirectory"]
-    cutouts = PLAN_PATH.parent / "cutouts"
+    cutouts = plan_path.parent / "cutouts"
     output.mkdir(parents=True, exist_ok=True)
     cutouts.mkdir(exist_ok=True)
     report = {"rawSourceSize": raw_size, "normalizedSize": list(source.size), "grid": plan["grid"], "assets": []}
@@ -111,7 +113,7 @@ def main():
         previews.append((asset["name"], decoded))
 
     # Review each cutout on both paper and dark green; small samples show actual UI legibility.
-    width, height = 960, 900
+    width, height = columns * 320, rows * 300
     contact = Image.new("RGB", (width, height), "#f7f3e8")
     draw = ImageDraw.Draw(contact)
     for index, (name, icon) in enumerate(previews):
@@ -125,11 +127,11 @@ def main():
             contact.paste(small, (left + 52, y + 225), small)
         draw.text((x + 10, y + 274), name, fill="#2b3e30")
         draw.text((x + 170, y + 274), name, fill="#eeeada")
-    contact.save(PLAN_PATH.parent / "cutout-review.png")
+    contact.save(plan_path.parent / "cutout-review.png")
     report["runtimeBytes"] = sum(asset["bytes"] for asset in report["assets"])
-    (PLAN_PATH.parent / "slice-report.json").write_text(json.dumps(report, indent=2) + "\n")
+    (plan_path.parent / "slice-report.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps({"assets": len(previews), "runtimeBytes": report["runtimeBytes"],
-                      "report": str((PLAN_PATH.parent / "slice-report.json").relative_to(ROOT))}, indent=2))
+                      "report": str((plan_path.parent / "slice-report.json").relative_to(ROOT))}, indent=2))
 
 
 if __name__ == "__main__":

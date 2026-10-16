@@ -1,6 +1,7 @@
 import { useAppearanceSkin } from '@/hooks/useAppearanceSkin'
 import { useTranslation } from '@/lib/use-translation'
 import { ForestAsset } from './ForestAsset'
+import { ForestCompanion } from './ForestCompanion'
 
 export function ForestBanner() {
     const { skin } = useAppearanceSkin()
@@ -15,6 +16,8 @@ export function ForestBanner() {
             </div>
             <ForestAsset name="wood-corner" className="forest-banner__corner" />
             <ForestAsset name="mushrooms" className="forest-banner__mushrooms" />
+            <ForestCompanion className="forest-banner__guide" />
+            <ForestAsset name="lantern" className="forest-banner__lantern" />
         </div>
     )
 }

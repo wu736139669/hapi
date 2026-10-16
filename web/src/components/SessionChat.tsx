@@ -84,6 +84,7 @@ import { queryKeys } from '@/lib/query-keys'
 import type { SendMessageAcceptance, SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
 import { handoffComposerDraft, transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { SessionHeader } from '@/components/SessionHeader'
+import { ForestScenery } from '@/components/skins/ForestScenery'
 import { CursorMigrationBanner } from '@/components/CursorMigrationBanner'
 import { TeamPanel } from '@/components/TeamPanel'
 import { SessionStatusPanel } from '@/components/SessionStatusPanel'
@@ -1829,7 +1830,7 @@ function SessionChatInner(props: SessionChatProps) {
     })
 
     return (
-        <div className="flex h-full min-h-0 flex-col">
+        <div className="hapi-session-chat flex h-full min-h-0 flex-col">
             <SessionHeader
                 session={props.session}
                 serviceTier={effectiveCodexServiceTier}
@@ -1860,6 +1861,8 @@ function SessionChatInner(props: SessionChatProps) {
                     )
                 }}
             />
+
+            {!terminalVisible ? <ForestScenery variant="chat" /> : null}
 
             <CursorMigrationBanner metadata={props.session.metadata} />
 

@@ -98,7 +98,7 @@ test('reduced motion and default mode avoid decoration work', async ({ page }) =
     expect(animation).toBe('none')
 })
 
-test('transparent cutouts decode without loading unused art, and the empty-list action works', async ({ page }) => {
+test('transparent cutouts decode without loading source sheets, and the empty-list action works', async ({ page }) => {
     const images: string[] = []
     page.on('request', request => { if (request.resourceType() === 'image') images.push(request.url()) })
     await page.goto(`${fixture}?skin=forest-adventure`)
@@ -120,11 +120,33 @@ test('transparent cutouts decode without loading unused art, and the empty-list 
     })
     expect(alphaCorners.length).toBeGreaterThan(0)
     expect(alphaCorners.flat().every(alpha => alpha === 0)).toBe(true)
-    expect(images.some(url => /source-sheet|normalized-sheet|map-compass|lantern/.test(url))).toBe(false)
+    expect(images.some(url => /source-sheet|normalized-sheet/.test(url))).toBe(false)
     await page.setViewportSize({ width: 320, height: 640 })
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320)
     await page.getByRole('button', { name: 'Start a session', exact: true }).click()
     await expect(page.locator('[data-testid="composer-shell"]')).toBeVisible()
+})
+
+test('rich scenery preserves compact navigation and yields to the actual chat height', async ({ page }) => {
+    await page.goto(`${fixture}?skin=forest-adventure&compact`)
+    await expect(page.locator('.session-list-item').first()).toBeVisible()
+    await expect(page.locator('.forest-scenery')).toHaveCount(0)
+    await expect(page.locator('[data-forest-asset]')).toHaveCount(0)
+
+    await page.goto(`${fixture}?skin=forest-adventure&view=chat`)
+    const scenery = page.locator('.forest-scenery--chat')
+    await expect(scenery).toBeVisible()
+    await expect(scenery).toHaveCSS('pointer-events', 'none')
+    const editor = page.getByRole('textbox').first()
+    await editor.fill('Keep this draft while the keyboard opens')
+    // Shrink the allocated pane without shrinking the browser window (soft keyboard / split pane).
+    await page.locator('.hapi-session-chat').evaluate(element => { element.style.height = '430px' })
+    await expect(scenery).toBeHidden()
+    const chatBottom = await page.locator('.hapi-session-chat').evaluate(element => element.getBoundingClientRect().bottom)
+    expect(await page.locator('[data-testid="composer-shell"]').evaluate(element => element.getBoundingClientRect().bottom)).toBeLessThanOrEqual(chatBottom)
+    await expect.poll(() => editor.evaluate(element => element instanceof HTMLTextAreaElement ? element.value : element.textContent)).toBe('Keep this draft while the keyboard opens')
+    await page.locator('.hapi-session-chat').evaluate(element => { element.style.removeProperty('height') })
+    await expect(scenery).toBeVisible()
 })
 
 test.describe('first HTML load', () => {

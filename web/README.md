@@ -17,7 +17,7 @@ React Mini App / PWA for monitoring and controlling hapi sessions.
 - File browser and git status/diff views.
 - PWA install prompt and offline banner.
 - Optional unread-session count on the Windows taskbar when installed as an Edge/Chrome PWA (toggleable in Display settings; off by default).
-- Opt-in **Forest Adventure** skin in Display settings: an original forest scene, AI-drawn transparent companions and props, and matching chat / tool / settings surfaces. The choice stays in this browser; existing light/dark/OLED and custom colors still apply. Switch to Default to restore the original interface. Artwork caches on demand for offline reuse. Source sheets, slicing instructions and the asset inventory live in `docs/design/mobile-adventure-skin-assets.md`.
+- Opt-in **Forest Adventure** skin in Display settings: AI-drawn companions, layered forest scenery, stretchable wooden frames, and matching chat / tool / settings surfaces. The choice stays in this browser; existing light/dark/OLED and custom colors still apply. Switch to Default to restore the original interface. Artwork caches on demand for offline reuse. Source sheets, slicing instructions and the asset inventory live in `docs/design/mobile-adventure-skin-assets.md`.
 
 ## Runtime behavior
 

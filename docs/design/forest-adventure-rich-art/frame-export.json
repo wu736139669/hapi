@@ -1,0 +1,14 @@
+{
+    "source": "docs/design/forest-adventure-rich-art/frame-source.png",
+    "sourceSha256": "ceded59585137e62f27ca406a83c7406a58bb550a03208d03d838df1746a0256",
+    "file": "web/public/skins/forest-adventure/wood-frame.webp",
+    "size": [
+        512,
+        512
+    ],
+    "bytes": 31148,
+    "cssSlicePercent": 24,
+    "transparentCenter": true,
+    "alphaNoiseThreshold": 8,
+    "quality": 90
+}

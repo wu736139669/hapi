@@ -55,6 +55,7 @@ import { useToast } from '@/lib/toast-context'
 import { useSessionListToolbar } from '@/hooks/useSessionListToolbar'
 import { ForestBanner } from '@/components/skins/ForestBanner'
 import { ForestAsset, ForestEmptyIllustration } from '@/components/skins/ForestAsset'
+import { ForestScenery } from '@/components/skins/ForestScenery'
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
 
@@ -1993,6 +1994,7 @@ export function SessionList(props: {
     return (
         <div className="hapi-session-list flex min-h-0 w-full flex-1 flex-col">
             {!compact ? <ForestBanner /> : null}
+            {!compact ? <ForestScenery variant="list" /> : null}
             <div className="session-list-scrollbar-offset mx-auto w-full max-w-content shrink-0">
             {showHeaderRow ? (
                 <div className={cn('flex items-center gap-1 py-1', compact ? 'px-1' : 'px-2')}>

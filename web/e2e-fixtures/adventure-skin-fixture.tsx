@@ -117,7 +117,7 @@ function ListPage() {
     const { refresh } = useFixture()
     const navigate = useNavigate()
     return <div className="flex h-full min-h-0 flex-col">
-        <SessionList sessions={params.get('view') === 'empty' ? [] : demoSessions()} isLoading={false} api={api} onRefresh={refresh}
+        <SessionList sessions={params.get('view') === 'empty' ? [] : demoSessions()} compact={params.has('compact')} isLoading={false} api={api} onRefresh={refresh}
             onSelect={() => void navigate({ to: '/sessions/$sessionId', params: { sessionId: currentSession.id } })}
             onNewSession={() => void navigate({ to: '/sessions/$sessionId', params: { sessionId: currentSession.id } })}
             headerActions={<button type="button" aria-label="Settings" className="h-11 px-3 text-sm" onClick={() => void navigate({ to: '/settings/display' })}>⚙</button>} />

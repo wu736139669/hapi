@@ -1,0 +1,197 @@
+{
+  "rawSourceSize": [
+    1254,
+    1254
+  ],
+  "normalizedSize": [
+    1536,
+    1536
+  ],
+  "grid": {
+    "rows": 2,
+    "columns": 2
+  },
+  "assets": [
+    {
+      "name": "mushroom-cottage",
+      "size": 512,
+      "use": "Layered forest clearing at the bottom of the session list",
+      "cell": [
+        0,
+        0,
+        768,
+        768
+      ],
+      "contentBounds": [
+        138,
+        151,
+        630,
+        617
+      ],
+      "sourceMargins": [
+        138,
+        151,
+        138,
+        151
+      ],
+      "rawCell": [
+        0,
+        0,
+        627,
+        627
+      ],
+      "rawContentBounds": [
+        62,
+        89,
+        600,
+        599
+      ],
+      "rawMargins": [
+        62,
+        89,
+        27,
+        28
+      ],
+      "file": "web/public/skins/forest-adventure/elements/mushroom-cottage.webp",
+      "bytes": 59470,
+      "transparentFraction": 0.4013,
+      "cornersTransparent": true
+    },
+    {
+      "name": "lantern-tree",
+      "size": 512,
+      "use": "Forest clearing and chat scene strip",
+      "cell": [
+        768,
+        0,
+        1536,
+        768
+      ],
+      "contentBounds": [
+        138,
+        141,
+        630,
+        626
+      ],
+      "sourceMargins": [
+        138,
+        141,
+        138,
+        142
+      ],
+      "rawCell": [
+        627,
+        0,
+        1254,
+        627
+      ],
+      "rawContentBounds": [
+        33,
+        83,
+        567,
+        609
+      ],
+      "rawMargins": [
+        33,
+        83,
+        60,
+        18
+      ],
+      "file": "web/public/skins/forest-adventure/elements/lantern-tree.webp",
+      "bytes": 65238,
+      "transparentFraction": 0.425,
+      "cornersTransparent": true
+    },
+    {
+      "name": "forest-portal",
+      "size": 320,
+      "use": "Chat scene strip and forest clearing",
+      "cell": [
+        0,
+        768,
+        768,
+        1536
+      ],
+      "contentBounds": [
+        138,
+        155,
+        630,
+        612
+      ],
+      "sourceMargins": [
+        138,
+        155,
+        138,
+        156
+      ],
+      "rawCell": [
+        0,
+        627,
+        627,
+        1254
+      ],
+      "rawContentBounds": [
+        59,
+        33,
+        610,
+        545
+      ],
+      "rawMargins": [
+        59,
+        33,
+        17,
+        82
+      ],
+      "file": "web/public/skins/forest-adventure/elements/forest-portal.webp",
+      "bytes": 37066,
+      "transparentFraction": 0.5078,
+      "cornersTransparent": true
+    },
+    {
+      "name": "garden-fence",
+      "size": 384,
+      "use": "Layered list and chat foreground",
+      "cell": [
+        768,
+        768,
+        1536,
+        1536
+      ],
+      "contentBounds": [
+        138,
+        218,
+        630,
+        550
+      ],
+      "sourceMargins": [
+        138,
+        218,
+        138,
+        218
+      ],
+      "rawCell": [
+        627,
+        627,
+        1254,
+        1254
+      ],
+      "rawContentBounds": [
+        28,
+        161,
+        583,
+        535
+      ],
+      "rawMargins": [
+        28,
+        161,
+        44,
+        92
+      ],
+      "file": "web/public/skins/forest-adventure/elements/garden-fence.webp",
+      "bytes": 36166,
+      "transparentFraction": 0.5922,
+      "cornersTransparent": true
+    }
+  ],
+  "runtimeBytes": 197940
+}

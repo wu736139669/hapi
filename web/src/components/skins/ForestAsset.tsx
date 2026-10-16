@@ -1,15 +1,19 @@
 import { useAppearanceSkin } from '@/hooks/useAppearanceSkin'
 
 const ASSET_SIZES = {
-    guide: 144,
+    guide: 256,
     'quest-scroll': 128,
     backpack: 256,
     mushrooms: 192,
-    wildflowers: 192,
+    wildflowers: 256,
     'wood-corner': 128,
     'leaf-crest': 96,
     'map-compass': 192,
     lantern: 128,
+    'mushroom-cottage': 512,
+    'lantern-tree': 512,
+    'forest-portal': 320,
+    'garden-fence': 384,
 } as const
 
 /** Decorative cutouts; names, controls and state indicators remain real UI. */

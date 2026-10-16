@@ -6,7 +6,7 @@
         "failed": 0
     },
     "browser_tests": {
-        "passed": 8,
+        "passed": 9,
         "failed": 0,
         "browser": "installed Chrome via Playwright"
     },
@@ -115,5 +115,16 @@
         "k2lab": "verified",
         "live_ui": "verified",
         "report": "forest-adventure-art/deployment-report.json"
+    },
+    "rich_art_verification": {
+        "browser_passed": 9,
+        "web_passed": 3245,
+        "web_failed": 35,
+        "introduced_web_failures": [],
+        "cli_failed": 7,
+        "introduced_cli_failures": [],
+        "typecheck": "passed",
+        "frame_export": "transparent center verified",
+        "request_count": 2
     }
 }
