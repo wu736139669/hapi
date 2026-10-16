@@ -12,4 +12,4 @@
 
 `bun typecheck`、fixture 类型检查、单文件构建及部署功能守卫通过。Web 单测 3261 通过、35 个既有失败；完整测试在 CLI 的 7 个既有失败和 `bun:sqlite` 环境错误处中止。失败 ID 与原基线一致，无新增。pre-push-review 技能此前确认缺失，按 AGENTS 执行机械检查与仓库 Major 清单本地审查；未发现本次引入的 Major 问题。未改消息流水线或协议，无需重生成原生 fixtures。
 
-上线结果见 [部署报告](macaron-list-density-deployment.json)。
+源码 `e156e5b9` 已合并并推送 `local/deploy-main`，部署 mini（Hub + runner）与 k2lab（runner）。两台签名一致，新 runner mtime 与安装文件相符，Hub health 正常；部署前后均为 6 个 Agent 可用、Codex 7 个模型。正式列表抽查了 111 个条目，100% 字号下均为 54px；其中 7 个带项目说明的条目左右对齐正常。整屏背景、安全区、配色刷新验证继续通过。见 [部署报告](macaron-list-density-deployment.json)。

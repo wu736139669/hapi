@@ -1,0 +1,186 @@
+{
+    "status": "deployed",
+    "deployedAt": "2026-10-17T00:47:44.253954+08:00",
+    "sourceCommit": "e156e5b9072338d07f5b6e24efc52a7214795635",
+    "branch": "local/deploy-main",
+    "featureBranch": "fix/macaron-list-density",
+    "version": "0.30.7",
+    "macaronColorwaysFixed": 6,
+    "signing": {
+        "identifier": "run.hapi.cli",
+        "teamIdentifier": "X75CUV458P",
+        "codeDirectoryHash": "df9477b128eb219f48fdfd7d8d504b632d3da497",
+        "sameOnBothMachines": true
+    },
+    "hubHealth": "ok",
+    "before": [
+        {
+            "id": "a15888ad-d405-4884-a407-c28ddd8b397c",
+            "name": "小吴家",
+            "active": true,
+            "startedCliMtimeMs": 1792168173329.8213,
+            "codexModelsCount": 7,
+            "codexModelsSuccess": true,
+            "availableAgents": [
+                "claude",
+                "codex",
+                "cursor",
+                "dsh",
+                "grok",
+                "opencode"
+            ]
+        },
+        {
+            "id": "3b5c8a65-1c73-4f8e-b7b4-c54d42084b42",
+            "name": "小吴k2lab",
+            "active": true,
+            "startedCliMtimeMs": 1792168189000,
+            "codexModelsCount": 7,
+            "codexModelsSuccess": true,
+            "availableAgents": [
+                "claude",
+                "codex",
+                "cursor",
+                "dsh",
+                "grok",
+                "opencode"
+            ]
+        }
+    ],
+    "after": [
+        {
+            "id": "a15888ad-d405-4884-a407-c28ddd8b397c",
+            "name": "小吴家",
+            "active": true,
+            "startedCliMtimeMs": 1792169086541.3813,
+            "codexModelsCount": 7,
+            "codexModelsSuccess": true,
+            "availableAgents": [
+                "claude",
+                "codex",
+                "cursor",
+                "dsh",
+                "grok",
+                "opencode"
+            ]
+        },
+        {
+            "id": "3b5c8a65-1c73-4f8e-b7b4-c54d42084b42",
+            "name": "小吴k2lab",
+            "active": true,
+            "startedCliMtimeMs": 1792169112000,
+            "codexModelsCount": 7,
+            "codexModelsSuccess": true,
+            "availableAgents": [
+                "claude",
+                "codex",
+                "cursor",
+                "dsh",
+                "grok",
+                "opencode"
+            ]
+        }
+    ],
+    "localRunnerPid": 31540,
+    "remoteRunnerPid": 9655,
+    "remoteRunnerMtimeMatchesFile": true,
+    "backups": {
+        "mini": "/Users/wusumac/.hapi/bin/backups/hapi.20261017-004443-macaron-list-density-e156e5b9",
+        "k2lab": "/Users/sudaxia/.hapi/bin/backups/hapi.20261017-004510-macaron-list-density-e156e5b9"
+    },
+    "liveUi": {
+        "skinOptions": 8,
+        "checkedVariants": [
+            "macaron-peach",
+            "macaron-mint",
+            "macaron-blueberry",
+            "macaron-lemon",
+            "macaron-rose"
+        ],
+        "seamlessToolbar": true,
+        "unframedListRows": true,
+        "persistedMacaronSelection": true,
+        "initialThemeColor": "#f4fbf8",
+        "listLayout": {
+            "rowCount": 111,
+            "heightRange": [
+                54,
+                54
+            ],
+            "alignedDetailRows": 7,
+            "titleAndDetailAlignment": true,
+            "metadataOnSecondLine": true
+        },
+        "rootCanvasGradient": true,
+        "transparentSafeAreaShells": true,
+        "boundaryChannelJumps": [
+            0,
+            1
+        ],
+        "skinImageRequests": 0,
+        "forestDecorationAbsent": true,
+        "viewport": [
+            390,
+            844
+        ],
+        "pageErrors": []
+    },
+    "componentRowMeasurements": {
+        "beforeHeights": [
+            81,
+            81,
+            81,
+            81,
+            81
+        ],
+        "afterHeights": [
+            54,
+            54,
+            54,
+            54,
+            54
+        ],
+        "viewport": [
+            390,
+            844
+        ],
+        "fontScale": 1
+    },
+    "layoutCoverage": {
+        "viewportWidths": [
+            320,
+            390,
+            430
+        ],
+        "fontScales": [
+            0.8,
+            1,
+            1.2
+        ],
+        "syntheticRows": [
+            "pinned",
+            "shared",
+            "working",
+            "working-shared",
+            "pending-with-todos-and-long-title"
+        ],
+        "browser": "Chromium; not physical Safari"
+    },
+    "checks": {
+        "browserPassed": 19,
+        "browserFailed": 0,
+        "typecheck": "passed",
+        "fixtureTypecheck": "passed",
+        "build": "passed",
+        "releaseFeatureGuard": "passed",
+        "webPassed": 3261,
+        "webFailed": 35,
+        "cliPassed": 2886,
+        "cliFailed": 7,
+        "cliEnvironmentSuiteFailures": 1,
+        "introducedFailureIds": [],
+        "baselineFailureIdsCompared": true,
+        "protocolFixturesChanged": false
+    },
+    "prePushReview": "Referenced skill unavailable; AGENTS mechanical checks plus repository Major checklist applied."
+}
