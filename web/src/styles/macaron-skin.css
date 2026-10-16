@@ -43,7 +43,7 @@ html[data-skin="macaron-rose"], .skin-option[data-skin-option="macaron-rose"] {
     --macaron-preview-ink: #ae728b;
 }
 
-html[data-skin^="macaron-"] {
+html[data-skin^="macaron-"][data-theme] {
     --macaron-strength: 58%;
     --macaron-start: color-mix(in srgb, var(--macaron-tone-start) var(--macaron-strength), var(--app-bg));
     --macaron-middle: color-mix(in srgb, var(--macaron-tone-middle) var(--macaron-strength), var(--app-bg));
@@ -58,14 +58,20 @@ html[data-skin^="macaron-"] {
         radial-gradient(ellipse at 100% 48%, var(--macaron-middle), transparent 64%),
         radial-gradient(ellipse at 4% 100%, var(--macaron-end), transparent 62%),
         linear-gradient(145deg, var(--app-bg), var(--macaron-base));
+    /* The document canvas also paints the iOS status/home-indicator areas.
+     * Keep one viewport-sized wash behind every transparent route shell. */
+    background-color: var(--app-bg);
+    background-image: var(--macaron-wash);
+    background-size: 100% 100dvh;
+    background-repeat: no-repeat;
 }
 
 html[data-skin^="macaron-"][data-theme="dark"] { --macaron-strength: 16%; }
 html[data-skin^="macaron-"][data-theme="oled"] { --macaron-strength: 7%; }
 
-html[data-skin^="macaron-"] :is(.hapi-session-list, .hapi-session-chat, .hapi-new-session, .hapi-settings-page) {
-    background-color: var(--app-bg);
-    background-image: var(--macaron-wash);
+html[data-skin^="macaron-"] body,
+html[data-skin^="macaron-"] :is(.hapi-sessions-sidebar, .hapi-session-pane, .hapi-session-list, .hapi-session-chat, .hapi-new-session, .hapi-settings-page) {
+    background: transparent;
 }
 
 html[data-skin^="macaron-"] .hapi-skin-header,

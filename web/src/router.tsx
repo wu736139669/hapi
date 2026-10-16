@@ -281,7 +281,7 @@ function SessionsPage() {
     const sidebarCollapse = useSidebarCollapsed()
     const sidebarIsCollapsed = sidebarCollapse.sidebarCollapsed && !isSessionsIndex
     if (isSessionGuest) {
-        return <div className="flex h-full min-h-0 flex-col bg-[var(--app-bg)]"><Outlet /></div>
+        return <div className="hapi-session-pane flex h-full min-h-0 flex-col bg-[var(--app-bg)]"><Outlet /></div>
     }
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
@@ -297,7 +297,7 @@ function SessionsPage() {
         <>
             <div className="flex h-full min-h-0">
             <div
-                className={sidebarIsCollapsed ? 'sidebar-collapsed-rail hidden split:flex shrink-0 flex-col border-r border-[var(--app-divider)] bg-[var(--app-bg)]' : `${isSessionsIndex ? 'flex' : 'hidden split:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}
+                className={`hapi-sessions-sidebar ${sidebarIsCollapsed ? 'sidebar-collapsed-rail hidden split:flex shrink-0 flex-col border-r border-[var(--app-divider)] bg-[var(--app-bg)]' : `${isSessionsIndex ? 'flex' : 'hidden split:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}`}
                 style={!sidebarIsCollapsed ? { '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties : undefined}
             >
                 <div className="flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)]">
@@ -379,7 +379,7 @@ function SessionsPage() {
                 onPointerDown={sidebar.onPointerDown}
             /> : null}
 
-            <div className={`${isSessionsIndex ? 'hidden split:flex' : 'flex'} min-w-0 flex-1 flex-col bg-[var(--app-bg)]`}>
+            <div className={`hapi-session-pane ${isSessionsIndex ? 'hidden split:flex' : 'flex'} min-w-0 flex-1 flex-col bg-[var(--app-bg)]`}>
                 <div className="flex-1 min-h-0">
                     <Outlet />
                 </div>

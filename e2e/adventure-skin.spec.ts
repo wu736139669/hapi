@@ -242,7 +242,7 @@ test.describe('Macaron Gradient', () => {
         page.on('request', request => { if (request.resourceType() === 'image' && request.url().includes('/skins/')) images.push(request.url()) })
         page.on('pageerror', error => errors.push(error.message))
         await page.goto(`${fixture}?skin=macaron-gradient`)
-        await expect(page.locator('.hapi-session-list')).toHaveCSS('background-image', /radial-gradient/)
+        await expect(page.locator('html')).toHaveCSS('background-image', /radial-gradient/)
         await page.getByRole('button', { name: /把想法变成/ }).click()
         await expect(page.locator('.forest-companion, .forest-scenery')).toHaveCount(0)
         await page.getByRole('button', { name: 'Allow', exact: true }).click()
@@ -255,6 +255,41 @@ test.describe('Macaron Gradient', () => {
         expect(probe.requests).toContainEqual({ path: '/api/sessions/forest-session/abort', method: 'POST' })
         expect(images).toEqual([])
         expect(errors).toEqual([])
+    })
+
+    test('top and bottom safe-area gaps share the canvas across list, chat and settings', async ({ page }) => {
+        for (const query of ['', '&view=chat', '&view=settings', '&appearance=dark', '&appearance=oled']) {
+            await page.goto(`${fixture}?skin=macaron-mint${query}`)
+            await expect(page.locator('.hapi-session-list, .hapi-session-chat, .hapi-settings-page')).toBeVisible()
+            // Chromium has zero native safe-area insets. Reproduce the production
+            // sidebar's top padding and a home-indicator gap outside the app root.
+            await page.addStyleTag({ content: '.hapi-sessions-sidebar > div { padding-top: 59px } #root { height: calc(100% - 34px) }' })
+            await expect(page.locator('html')).toHaveCSS('background-image', /radial-gradient/)
+            await expect(page.locator('body')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+            await expect(page.locator('.hapi-session-list, .hapi-session-chat, .hapi-settings-page')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+            const screenshot = await page.screenshot()
+            const jumps = await page.evaluate(async data => {
+                const image = new Image()
+                image.src = `data:image/png;base64,${data}`
+                await image.decode()
+                const canvas = document.createElement('canvas')
+                canvas.width = image.width
+                canvas.height = image.height
+                const context = canvas.getContext('2d')!
+                context.drawImage(image, 0, 0)
+                const pixel = (y: number) => context.getImageData(image.width - 1, y, 1, 1).data
+                return [59, image.height - 34].map(y => {
+                    const before = pixel(y - 1)
+                    const after = pixel(y)
+                    return Math.max(...[0, 1, 2].map(channel => Math.abs(before[channel] - after[channel])))
+                })
+            }, screenshot.toString('base64'))
+            expect(jumps.every(jump => jump <= 2)).toBe(true)
+        }
+        for (const skin of ['default', 'forest-adventure']) {
+            await page.goto(`${fixture}?skin=${skin}`)
+            await expect(page.locator('html')).toHaveCSS('background-image', 'none')
+        }
     })
 
     test('phone widths, dark modes and the soft keyboard keep content readable and contained', async ({ page }) => {
@@ -283,7 +318,7 @@ test.describe('Macaron Gradient', () => {
             await page.goto(`${fixture}?skin=macaron-gradient&view=chat&appearance=${scheme}`)
             await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
             expect(await page.evaluate(() => document.documentElement.style.getPropertyValue('--app-bg'))).toBe(background)
-            await expect(page.locator('.hapi-session-chat')).toHaveCSS('background-image', /radial-gradient/)
+            await expect(page.locator('html')).toHaveCSS('background-image', /radial-gradient/)
             expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
         }
     })
@@ -322,7 +357,7 @@ test.describe('Macaron Gradient', () => {
                 await page.setViewportSize({ width: scheme === 'light' ? 430 : 390, height: 844 })
                 await page.goto(`${fixture}?skin=${variant.skin}&appearance=${scheme}&view=chat`)
                 await expect(page.locator('[data-testid="composer-shell"]')).toBeVisible()
-                await expect(page.locator('.hapi-session-chat')).toHaveCSS('background-image', /radial-gradient/)
+                await expect(page.locator('html')).toHaveCSS('background-image', /radial-gradient/)
                 expect(await page.evaluate(() => document.documentElement.style.getPropertyValue('--app-bg'))).toBe(scheme === 'oled' ? '#000000' : variant[scheme])
                 await expect(page.locator('.forest-scenery, .forest-companion')).toHaveCount(0)
                 expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)

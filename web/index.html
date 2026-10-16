@@ -111,6 +111,7 @@
                 document.documentElement.setAttribute('data-skin', skin)
                 document.documentElement.setAttribute('data-theme', scheme)
                 document.documentElement.setAttribute('data-color-theme', colorTheme)
+                document.documentElement.style.setProperty('--app-bg', color)
                 document.documentElement.style.backgroundColor = color
                 document.querySelector('meta[name="theme-color"]').setAttribute('content', color)
             })()
