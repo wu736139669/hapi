@@ -136,6 +136,32 @@ export async function listOpencodeSessionIds(dbPath: string): Promise<string[]> 
     }
 }
 
+/** Fold one message row's token counters into its (day, model) bucket. */
+function accumulateOpencodeUsage(
+    buckets: Map<string, OpencodeUsageReportRow>,
+    data: string
+): boolean {
+    const usage = parseOpencodeAssistantUsage(data)
+    if (!usage) return false
+    const key = `${usage.day}|${usage.model}`
+    const bucket = buckets.get(key) ?? {
+        day: usage.day,
+        model: usage.model,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        requests: 0
+    }
+    bucket.inputTokens += usage.inputTokens
+    bucket.outputTokens += usage.outputTokens
+    bucket.cacheReadTokens += usage.cacheReadTokens
+    bucket.cacheCreationTokens += usage.cacheCreationTokens
+    bucket.requests += 1
+    buckets.set(key, bucket)
+    return true
+}
+
 /**
  * Aggregate absolute per-(day, model) totals for the given OpenCode session
  * ids. Missing database or unknown session ids yield empty entries, so
@@ -163,27 +189,52 @@ export async function readOpencodeUsageForSessions(
             const buckets = new Map<string, OpencodeUsageReportRow>()
             let messages = 0
             for (const row of messageRows) {
-                const usage = parseOpencodeAssistantUsage(row.data)
-                if (!usage) continue
-                messages += 1
-                const key = `${usage.day}|${usage.model}`
-                const bucket = buckets.get(key) ?? {
-                    day: usage.day,
-                    model: usage.model,
-                    inputTokens: 0,
-                    outputTokens: 0,
-                    cacheReadTokens: 0,
-                    cacheCreationTokens: 0,
-                    requests: 0
-                }
-                bucket.inputTokens += usage.inputTokens
-                bucket.outputTokens += usage.outputTokens
-                bucket.cacheReadTokens += usage.cacheReadTokens
-                bucket.cacheCreationTokens += usage.cacheCreationTokens
-                bucket.requests += 1
-                buckets.set(key, bucket)
+                if (accumulateOpencodeUsage(buckets, row.data)) messages += 1
             }
             result.set(sessionId, { rows: Array.from(buckets.values()), messages })
+        }
+    } finally {
+        db.close()
+    }
+
+    return result
+}
+
+/**
+ * Like `readOpencodeUsageForSessions` but for every session present in the
+ * store (the machine-level runner path). Reads the message table in a single
+ * sequential pass: the per-session index queries above translate into one
+ * scattered page fetch per message across the multi-GB store, while a table
+ * scan reads the same pages in storage order.
+ */
+export async function readOpencodeUsageForAllSessions(
+    dbPath: string
+): Promise<Map<string, OpencodeSessionUsage>> {
+    const result = new Map<string, OpencodeSessionUsage>()
+    if (!existsSync(dbPath)) return result
+
+    const { Database } = await import('bun:sqlite')
+    const db = new Database(dbPath, { readonly: true })
+    try {
+        const rows = db.prepare('SELECT session_id, data FROM message').all() as Array<{
+            session_id: string
+            data: string
+        }>
+        const bucketsBySession = new Map<string, Map<string, OpencodeUsageReportRow>>()
+        const messagesBySession = new Map<string, number>()
+        for (const row of rows) {
+            if (typeof row.session_id !== 'string' || row.session_id.length === 0) continue
+            const buckets = bucketsBySession.get(row.session_id) ?? new Map<string, OpencodeUsageReportRow>()
+            if (accumulateOpencodeUsage(buckets, row.data)) {
+                messagesBySession.set(row.session_id, (messagesBySession.get(row.session_id) ?? 0) + 1)
+            }
+            bucketsBySession.set(row.session_id, buckets)
+        }
+        for (const [sessionId, buckets] of bucketsBySession) {
+            result.set(sessionId, {
+                rows: Array.from(buckets.values()),
+                messages: messagesBySession.get(sessionId) ?? 0
+            })
         }
     } finally {
         db.close()

@@ -413,7 +413,11 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         corsOrigins,
         relayMode: relayFlag.enabled,
         officialWebUrl,
-        dataDir: config.dataDir
+        dataDir: config.dataDir,
+        // The usage page refreshes OpenCode snapshots on open (debounced).
+        refreshUsage: async () => {
+            await usageReconciliation?.refresh()
+        }
     })
 
     // Start the bot if configured

@@ -1166,8 +1166,11 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     apiMachine.connect();
     // Report this machine's OpenCode usage snapshots so the hub's token
     // dashboard does not under-count tool-loop turns on non-hub machines.
-    // The scan reads the local OpenCode store; best-effort, never blocks.
-    const opencodeUsageScanner = startOpencodeUsageScanner({
+    // A runner whose hub is localhost would only rescan the store the hub
+    // already reconciles itself (see hub/src/sync/usageReconciliation.ts),
+    // so skip it there. The scan itself runs in a child process.
+    const hubIsLocal = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(configuration.apiUrl);
+    const opencodeUsageScanner = hubIsLocal ? null : startOpencodeUsageScanner({
       report: (sessions) => apiMachine.reportOpencodeUsage(sessions)
     });
     scheduleCursorModelsPrewarm();
@@ -1435,7 +1438,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         clearInterval(restartOnStaleVersionAndHeartbeat);
         logger.debug('[RUNNER RUN] Health check interval cleared');
       }
-      opencodeUsageScanner.stop();
+      opencodeUsageScanner?.stop();
 
       // Update runner state before shutting down
       await apiMachine.updateRunnerState((state: RunnerState | null) => ({

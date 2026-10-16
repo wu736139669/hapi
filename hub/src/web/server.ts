@@ -239,6 +239,7 @@ function createWebApp(options: {
     relayMode?: boolean
     officialWebUrl?: string
     dataDir: string
+    refreshUsage?: () => Promise<void>
 }): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
@@ -324,7 +325,7 @@ function createWebApp(options: {
     if (teamService) {
         app.route('/api', createTeamsRoutes(teamService))
     }
-    app.route('/api', createUsageRoutes(options.store))
+    app.route('/api', createUsageRoutes(options.store, options.refreshUsage))
     app.route('/api', createStudioRoutes({
         store: options.store,
         getSyncEngine: options.getSyncEngine
@@ -483,6 +484,7 @@ export async function startWebServer(options: {
     relayMode?: boolean
     officialWebUrl?: string
     dataDir: string
+    refreshUsage?: () => Promise<void>
 }): Promise<BunServer<WebSocketData>> {
     const isCompiled = isBunCompiled()
     const embeddedAssetMap = isCompiled ? await loadEmbeddedAssetMap() : null
@@ -498,7 +500,8 @@ export async function startWebServer(options: {
         embeddedAssetMap,
         dataDir: options.dataDir,
         relayMode: options.relayMode,
-        officialWebUrl: options.officialWebUrl
+        officialWebUrl: options.officialWebUrl,
+        refreshUsage: options.refreshUsage
     })
 
     const configuration = getConfiguration()
