@@ -17,33 +17,33 @@ describe('appearance skin preference', () => {
         expect(getStoredAppearanceSkin()).toBe('default')
     })
 
-    it('updates all same-page consumers and restores default without touching other preferences', () => {
+    it.each(['forest-adventure', 'macaron-gradient'] as const)('updates all consumers and restores default without touching preferences (%s)', skin => {
         localStorage.setItem('hapi-color-theme', 'nord')
         const first = renderHook(useAppearanceSkin)
         const second = renderHook(useAppearanceSkin)
-        act(() => first.result.current.setSkin('forest-adventure'))
-        expect(second.result.current.skin).toBe('forest-adventure')
-        expect(document.documentElement).toHaveAttribute('data-skin', 'forest-adventure')
-        expect(getStoredAppearanceSkin()).toBe('forest-adventure')
+        act(() => first.result.current.setSkin(skin))
+        expect(second.result.current.skin).toBe(skin)
+        expect(document.documentElement).toHaveAttribute('data-skin', skin)
+        expect(getStoredAppearanceSkin()).toBe(skin)
         act(() => second.result.current.setSkin('default'))
         expect(first.result.current.skin).toBe('default')
         expect(localStorage.getItem(APPEARANCE_SKIN_KEY)).toBeNull()
         expect(localStorage.getItem('hapi-color-theme')).toBe('nord')
     })
 
-    it('responds to another tab selecting a skin and clearing storage', () => {
+    it.each(['forest-adventure', 'macaron-gradient'] as const)('responds to another tab selecting a skin and clearing storage (%s)', skin => {
         const { result } = renderHook(useAppearanceSkin)
-        act(() => window.dispatchEvent(new StorageEvent('storage', { key: APPEARANCE_SKIN_KEY, newValue: 'forest-adventure' })))
-        expect(result.current.skin).toBe('forest-adventure')
+        act(() => window.dispatchEvent(new StorageEvent('storage', { key: APPEARANCE_SKIN_KEY, newValue: skin })))
+        expect(result.current.skin).toBe(skin)
         act(() => window.dispatchEvent(new StorageEvent('storage', { key: null })))
         expect(result.current.skin).toBe('default')
     })
 
-    it('keeps the current page usable when persistence is denied', () => {
+    it.each(['forest-adventure', 'macaron-gradient'] as const)('keeps the current page usable when persistence is denied (%s)', skin => {
         const { result } = renderHook(useAppearanceSkin)
         const denied = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('denied') })
-        act(() => result.current.setSkin('forest-adventure'))
-        expect(result.current.skin).toBe('forest-adventure')
+        act(() => result.current.setSkin(skin))
+        expect(result.current.skin).toBe(skin)
         denied.mockRestore()
         const unreadable = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied') })
         expect(getStoredAppearanceSkin()).toBe('default')

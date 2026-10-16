@@ -8,7 +8,7 @@ const buttonVariants = cva(
     {
         variants: {
             variant: {
-                default: 'bg-[var(--app-button)] text-[var(--app-button-text)] hover:opacity-90',
+                default: 'hapi-skin-button-primary bg-[var(--app-button)] text-[var(--app-button-text)] hover:opacity-90',
                 secondary: 'bg-[var(--app-secondary-bg)] text-[var(--app-fg)] hover:opacity-90',
                 outline: 'border border-[var(--app-border)] bg-transparent hover:bg-[var(--app-subtle-bg)]',
                 destructive: 'bg-red-600 text-white hover:bg-red-600/90'

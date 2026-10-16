@@ -18,6 +18,7 @@ React Mini App / PWA for monitoring and controlling hapi sessions.
 - PWA install prompt and offline banner.
 - Optional unread-session count on the Windows taskbar when installed as an Edge/Chrome PWA (toggleable in Display settings; off by default).
 - Opt-in **Forest Adventure** skin in Display settings: AI-drawn companions, full-page forest backgrounds behind the session list and chat, stretchable wooden frames, and matching chat / tool / settings surfaces. Decoration takes no layout space; compact navigation stays free of scenery. The choice stays in this browser; existing light/dark/OLED and custom colors still apply. Switch to Default to restore the original interface. Artwork caches on demand for offline reuse. Source sheets, slicing instructions and the asset inventory live in `docs/design/mobile-adventure-skin-assets.md`.
+- **Macaron Gradient** is a third skin: full-page pink, lilac, mint and cream gradients, soft cards, and matching settings and composer surfaces. It uses CSS without image downloads, supports light/dark/OLED, and preserves explicit palettes and custom colors. The three skin choices support keyboard navigation, browser persistence and cross-tab synchronization.
 
 ## Runtime behavior
 

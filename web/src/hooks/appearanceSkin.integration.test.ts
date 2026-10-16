@@ -7,6 +7,11 @@ import { initializeChatSurfaceColors } from './useChatSurfaceColors'
 import { useAppearanceSkin } from './useAppearanceSkin'
 import { setAppearanceSkin } from '@/lib/appearanceSkin'
 
+const SKIN_CASES = [
+    { skin: 'forest-adventure', light: '#f7f3e8', dark: '#15221c' },
+    { skin: 'macaron-gradient', light: '#fcf7fb', dark: '#1c1724' },
+] as const
+
 beforeEach(() => {
     localStorage.clear()
     document.documentElement.removeAttribute('style')
@@ -17,12 +22,12 @@ beforeEach(() => {
     initializeChatSurfaceColors()
 })
 
-it('keeps explicit palette and custom colors above skin defaults and restores them on reset', () => {
+it.each(SKIN_CASES)('keeps explicit palette and custom colors above $skin defaults and restores them on reset', ({ skin: skinId, light }) => {
     const skin = renderHook(useAppearanceSkin)
     const preset = renderHook(useColorTheme)
     const colors = renderHook(useThemeColors)
-    act(() => skin.result.current.setSkin('forest-adventure'))
-    expect(document.documentElement.style.getPropertyValue('--app-bg')).toBe('#f7f3e8')
+    act(() => skin.result.current.setSkin(skinId))
+    expect(document.documentElement.style.getPropertyValue('--app-bg')).toBe(light)
     act(() => preset.result.current.setColorTheme('nord'))
     expect(document.documentElement.style.getPropertyValue('--app-bg')).toBe('#eceff4')
     act(() => colors.result.current.setColor('background', '#dfe9dc'))
@@ -33,12 +38,12 @@ it('keeps explicit palette and custom colors above skin defaults and restores th
     expect(localStorage.getItem('hapi-theme-colors')).toContain('#dfe9dc')
 })
 
-it('follows light, dark and OLED and removes all skin palette values when reset', () => {
+it.each(SKIN_CASES)('$skin follows light, dark and OLED and removes skin palette values when reset', ({ skin, light, dark }) => {
     const appearance = renderHook(useAppearance)
-    act(() => setAppearanceSkin('forest-adventure'))
-    expect(document.documentElement.style.getPropertyValue('--app-bg')).toBe('#f7f3e8')
+    act(() => setAppearanceSkin(skin))
+    expect(document.documentElement.style.getPropertyValue('--app-bg')).toBe(light)
     act(() => appearance.result.current.setAppearance('dark'))
-    expect(document.documentElement.style.getPropertyValue('--app-bg')).toBe('#15221c')
+    expect(document.documentElement.style.getPropertyValue('--app-bg')).toBe(dark)
     act(() => appearance.result.current.setAppearance('oled'))
     expect(document.documentElement.style.getPropertyValue('--app-bg')).toBe('#000000')
     act(() => setAppearanceSkin('default'))

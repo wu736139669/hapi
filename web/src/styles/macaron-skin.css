@@ -1,0 +1,124 @@
+html[data-skin="macaron-gradient"] {
+    --macaron-pink: #f5cee2;
+    --macaron-lilac: #ded8f6;
+    --macaron-mint: #cfece1;
+    --macaron-cream: #fff0d8;
+    --macaron-paper: color-mix(in srgb, var(--app-bg) 95%, #fff);
+    --macaron-glass: color-mix(in srgb, var(--macaron-paper) 86%, transparent);
+    --macaron-border: color-mix(in srgb, var(--app-link) 16%, var(--app-border));
+    --macaron-shadow: color-mix(in srgb, var(--app-link) 9%, transparent);
+}
+
+html[data-skin="macaron-gradient"][data-theme="dark"],
+html[data-skin="macaron-gradient"][data-theme="oled"] {
+    --macaron-pink: #442d42;
+    --macaron-lilac: #34304d;
+    --macaron-mint: #233d3a;
+    --macaron-cream: #352e2c;
+    --macaron-paper: color-mix(in srgb, var(--app-bg) 94%, #c9b4d9);
+    --macaron-glass: color-mix(in srgb, var(--macaron-paper) 92%, transparent);
+    --macaron-shadow: #0003;
+}
+
+html[data-skin="macaron-gradient"][data-theme="oled"] {
+    --macaron-pink: #170e17;
+    --macaron-lilac: #14111f;
+    --macaron-mint: #0d1b18;
+    --macaron-cream: #120e0c;
+}
+
+html[data-skin="macaron-gradient"] :is(.hapi-session-list, .hapi-session-chat, .hapi-new-session, .hapi-settings-page) {
+    background-color: var(--app-bg);
+    background-image:
+        radial-gradient(ellipse at 0 0, var(--macaron-pink), transparent 62%),
+        radial-gradient(ellipse at 100% 48%, var(--macaron-lilac), transparent 64%),
+        radial-gradient(ellipse at 4% 100%, var(--macaron-mint), transparent 62%),
+        linear-gradient(145deg, var(--app-bg), var(--macaron-cream));
+}
+
+html[data-skin="macaron-gradient"] .hapi-skin-header,
+html[data-skin="macaron-gradient"] .hapi-session-list > .session-list-scrollbar-offset {
+    background: var(--macaron-glass);
+    border-bottom: 1px solid var(--macaron-border);
+    box-shadow: 0 2px 12px var(--macaron-shadow);
+}
+
+html[data-skin="macaron-gradient"] .session-list-item:not(.hapi-session-compact) {
+    margin-block: 4px;
+    padding: 10px 12px;
+    border: 1px solid var(--macaron-border);
+    border-radius: 16px;
+    background: linear-gradient(120deg, var(--macaron-paper), var(--macaron-glass));
+    box-shadow: 0 3px 12px var(--macaron-shadow), inset 0 1px 0 #ffffff45;
+}
+
+html[data-skin="macaron-gradient"] .session-list-item[aria-current="page"] {
+    border-color: var(--app-link);
+    background-image: linear-gradient(115deg, color-mix(in srgb, var(--app-link) 11%, var(--macaron-paper)), var(--macaron-paper));
+}
+
+html[data-skin="macaron-gradient"] .session-list-item:not(.hapi-session-compact) .hapi-session-summary__main {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+    opacity: 1;
+}
+html[data-skin="macaron-gradient"] .session-list-item:not(.hapi-session-compact) .hapi-session-summary__meta {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    padding-left: 24px;
+}
+
+html[data-skin="macaron-gradient"] .session-list-item:not(.hapi-session-compact):focus-visible {
+    outline: 2px solid var(--app-link);
+    outline-offset: 2px;
+}
+
+html[data-skin="macaron-gradient"] .hapi-skin-assistant {
+    padding: 16px;
+    border: 1px solid var(--macaron-border);
+    border-radius: 6px 20px 20px;
+    background: var(--macaron-paper);
+    box-shadow: 0 4px 16px var(--macaron-shadow);
+}
+
+html[data-skin="macaron-gradient"] .hapi-skin-user {
+    border: 1px solid var(--macaron-border);
+    border-radius: 20px 6px 20px 20px;
+    background-image: linear-gradient(125deg,
+        color-mix(in srgb, var(--app-chat-user-surface-bg) 80%, var(--macaron-pink)),
+        color-mix(in srgb, var(--app-chat-user-surface-bg) 80%, var(--macaron-lilac)));
+    box-shadow: 0 2px 10px var(--macaron-shadow);
+}
+
+html[data-skin="macaron-gradient"] .hapi-skin-composer {
+    border: 1px solid var(--macaron-border);
+    border-radius: 22px;
+    background-image: linear-gradient(120deg, var(--macaron-paper), color-mix(in srgb, var(--macaron-paper) 85%, var(--macaron-lilac)));
+    box-shadow: 0 4px 20px var(--macaron-shadow), inset 0 1px 0 #ffffff45;
+}
+
+html[data-skin="macaron-gradient"] :is(.hapi-skin-panel, .hapi-skin-dialog) {
+    border: 1px solid var(--macaron-border);
+    border-radius: 18px;
+    background-image: linear-gradient(135deg, color-mix(in srgb, var(--macaron-lilac) 12%, transparent), transparent 64%);
+    box-shadow: 0 4px 18px var(--macaron-shadow);
+}
+
+html[data-skin="macaron-gradient"] .hapi-skin-button { border-radius: 12px; }
+html[data-skin="macaron-gradient"] .hapi-skin-button-primary {
+    background-image: linear-gradient(120deg,
+        color-mix(in srgb, var(--app-button) 94%, var(--macaron-pink)),
+        color-mix(in srgb, var(--app-button) 94%, var(--macaron-mint)));
+    box-shadow: 0 3px 9px var(--macaron-shadow);
+}
+
+.skin-option__preview--macaron-gradient {
+    background: radial-gradient(ellipse at 0 0, #f5cee2, transparent 70%), linear-gradient(135deg, #fff0d8, #ded8f6 55%, #cfece1);
+}
+.skin-option__preview--macaron-gradient .skin-option__sample {
+    background: #fff9;
+    border: 1px solid #fff9;
+    border-radius: 9px;
+}
+.skin-option__preview--macaron-gradient .skin-option__sample i { background: #b8a6c9; }
+.skin-option__preview--macaron-gradient .skin-option__sample i:nth-child(2) { background: #9f82ba; }

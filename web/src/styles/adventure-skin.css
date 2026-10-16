@@ -133,7 +133,7 @@ html[data-skin="forest-adventure"] .hapi-skin-button {
 html[data-skin="forest-adventure"] .hapi-skin-button:active:not(:disabled) { transform: translateY(1px); }
 html[data-skin="forest-adventure"] .hapi-new-session { background-image: linear-gradient(135deg, var(--forest-inset), transparent 65%); }
 
-.skin-option { display: flex; min-width: 0; flex-direction: column; overflow: hidden; text-align: left; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-bg); color: var(--app-fg); }
+.skin-option { position: relative; display: flex; min-width: 0; flex-direction: column; overflow: hidden; text-align: left; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-bg); color: var(--app-fg); }
 .skin-option[aria-checked="true"] { outline: 2px solid var(--app-link); outline-offset: 2px; }
 .skin-option:focus-visible { outline: 3px solid var(--app-link); outline-offset: 3px; }
 .skin-option__preview { display: flex; align-items: flex-end; height: 68px; padding: 7px 10px; background: var(--app-secondary-bg); }
@@ -142,8 +142,8 @@ html[data-skin="forest-adventure"] .hapi-new-session { background-image: linear-
 .skin-option__sample { display: flex; flex-direction: column; gap: 5px; width: 80%; height: 45px; padding: 7px; border-radius: 6px; background: var(--app-bg); box-shadow: 0 1px 4px #0001; }
 .skin-option__sample i { display: block; height: 5px; width: 80%; background: var(--app-border); border-radius: 2px; }
 .skin-option__sample i:nth-child(2) { width: 60%; background: var(--app-link); opacity: .5; }
-.skin-option__label { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-height: 44px; padding: 8px 10px; font-size: 13px; font-weight: 600; }
-.skin-option__check { flex-shrink: 0; color: var(--app-link); }
+.skin-option__label { display: flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 4px; font-size: 12px; font-weight: 600; line-height: 1.4; text-align: center; }
+.skin-option__check { position: absolute; top: 5px; right: 5px; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--app-bg); color: var(--app-link); font-size: 12px; box-shadow: 0 1px 3px #0002; }
 
 /* Animate only the single visible conversation guide, never every list row. */
 @media (prefers-reduced-motion: no-preference) {

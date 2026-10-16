@@ -80,7 +80,8 @@
                 try {
                     var storedColorTheme = localStorage.getItem('hapi-color-theme')
                     if (storedColorTheme && themeBackgrounds[storedColorTheme]) colorTheme = storedColorTheme
-                    if (localStorage.getItem('hapi-appearance-skin') === 'forest-adventure') skin = 'forest-adventure'
+                    var storedSkin = localStorage.getItem('hapi-appearance-skin')
+                    if (storedSkin === 'forest-adventure' || storedSkin === 'macaron-gradient') skin = storedSkin
                 } catch (error) {
                     // Ignore storage errors.
                 }
@@ -88,8 +89,11 @@
                 var color = colorTheme === 'default'
                     ? (scheme === 'oled' ? oledColor : (scheme === 'dark' ? darkColor : lightColor))
                     : themeBackgrounds[colorTheme][paletteScheme]
-                if (skin === 'forest-adventure' && colorTheme === 'default') {
-                    color = { light: '#f7f3e8', dark: '#15221c', oled: '#000000' }[scheme]
+                if (skin !== 'default' && colorTheme === 'default') {
+                    color = {
+                        'forest-adventure': { light: '#f7f3e8', dark: '#15221c', oled: '#000000' },
+                        'macaron-gradient': { light: '#fcf7fb', dark: '#1c1724', oled: '#000000' },
+                    }[skin][scheme]
                 }
                 try {
                     var customColors = JSON.parse(localStorage.getItem('hapi-theme-colors') || '{}')

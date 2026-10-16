@@ -2,6 +2,13 @@ import { useAppearanceSkin } from '@/hooks/useAppearanceSkin'
 import { useTranslation } from '@/lib/use-translation'
 import { SettingsFieldLabel } from '@/components/settings/SettingsPrimitives'
 import { ForestCompanion } from './ForestCompanion'
+import { APPEARANCE_SKINS } from '@/lib/appearanceSkin'
+
+const LABEL_KEYS = {
+    default: 'settings.display.skin.default',
+    'forest-adventure': 'settings.display.skin.forest',
+    'macaron-gradient': 'settings.display.skin.macaron',
+} as const
 
 export function AppearanceSkinPicker() {
     const { skin, setSkin } = useAppearanceSkin()
@@ -9,8 +16,8 @@ export function AppearanceSkinPicker() {
     return (
         <div className="px-3 py-3">
             <SettingsFieldLabel description={t('settings.display.skin.description')}>{t('settings.display.skin')}</SettingsFieldLabel>
-            <div role="radiogroup" aria-label={t('settings.display.skin')} className="grid grid-cols-2 gap-3">
-                {(['default', 'forest-adventure'] as const).map(option => (
+            <div role="radiogroup" aria-label={t('settings.display.skin')} className="grid grid-cols-3 gap-2">
+                {APPEARANCE_SKINS.map((option, index) => (
                     <button
                         key={option}
                         type="button"
@@ -22,8 +29,10 @@ export function AppearanceSkinPicker() {
                         onKeyDown={event => {
                             if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
                             event.preventDefault()
-                            const next = event.key === 'Home' ? 'default' : event.key === 'End' ? 'forest-adventure'
-                                : option === 'default' ? 'forest-adventure' : 'default'
+                            const direction = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1
+                            const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? APPEARANCE_SKINS.length - 1
+                                : (index + direction + APPEARANCE_SKINS.length) % APPEARANCE_SKINS.length
+                            const next = APPEARANCE_SKINS[nextIndex]!
                             setSkin(next)
                             event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`[data-skin-option="${next}"]`)?.focus()
                         }}
@@ -33,9 +42,9 @@ export function AppearanceSkinPicker() {
                             {option === 'forest-adventure' ? <ForestCompanion preview /> : <span className="skin-option__sample"><i /><i /><i /></span>}
                         </span>
                         <span className="skin-option__label">
-                            {t(option === 'default' ? 'settings.display.skin.default' : 'settings.display.skin.forest')}
-                            <span className="skin-option__check" aria-hidden="true">{skin === option ? '✓' : ''}</span>
+                            {t(LABEL_KEYS[option])}
                         </span>
+                        {skin === option ? <span className="skin-option__check" aria-hidden="true">✓</span> : null}
                     </button>
                 ))}
             </div>

@@ -1,10 +1,11 @@
-export type AppearanceSkin = 'default' | 'forest-adventure'
+export const APPEARANCE_SKINS = ['default', 'forest-adventure', 'macaron-gradient'] as const
+export type AppearanceSkin = typeof APPEARANCE_SKINS[number]
 
 export const APPEARANCE_SKIN_KEY = 'hapi-appearance-skin'
 export const APPEARANCE_SKIN_EVENT = 'hapi-appearance-skin-change'
 
 export function parseAppearanceSkin(value: string | null): AppearanceSkin {
-    return value === 'forest-adventure' ? value : 'default'
+    return APPEARANCE_SKINS.find(skin => skin === value) ?? 'default'
 }
 
 export function getStoredAppearanceSkin(): AppearanceSkin {
@@ -65,4 +66,10 @@ export const FOREST_BASE_COLORS = {
     light: { accent: '#3c7451', background: '#f7f3e8', foreground: '#2b3e30', hint: '#65715d', secondary: '#eeead9' },
     dark: { accent: '#b3d58b', background: '#15221c', foreground: '#eeeada', hint: '#a7b49b', secondary: '#23372b' },
     oled: { accent: '#b3d58b', background: '#000000', foreground: '#eeeada', hint: '#a7b49b', secondary: '#13241a' },
+} as const
+
+export const MACARON_BASE_COLORS = {
+    light: { accent: '#79569c', background: '#fcf7fb', foreground: '#3e344b', hint: '#685772', secondary: '#f1eaf6' },
+    dark: { accent: '#d4b7ed', background: '#1c1724', foreground: '#f2eaf7', hint: '#bdb0c9', secondary: '#302638' },
+    oled: { accent: '#d4b7ed', background: '#000000', foreground: '#f2eaf7', hint: '#bdb0c9', secondary: '#211927' },
 } as const

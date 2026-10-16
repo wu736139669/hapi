@@ -196,3 +196,98 @@ test('a real question card remains selectable and submits its own request ID', a
     await page.getByRole('button', { name: 'Submit', exact: true }).click()
     await expect.poll(() => page.evaluate(() => window.__adventure.requests.some(request => request.path.endsWith('/question-1/approve') && request.method === 'POST'))).toBe(true)
 })
+
+test.describe('Macaron Gradient', () => {
+    test('three skins cycle with the keyboard, persist, and synchronize across tabs', async ({ page, context }) => {
+        await page.goto(`${fixture}?view=settings`)
+        const choices = page.getByRole('radiogroup', { name: 'Interface skin' })
+        await expect(choices.getByRole('radio')).toHaveCount(3)
+        const macaron = choices.getByRole('radio', { name: 'Macaron Gradient', exact: true })
+        await choices.getByRole('radio', { name: 'Default', exact: true }).press('End')
+        await expect(macaron).toBeFocused()
+        await expect(page.locator('html')).toHaveAttribute('data-skin', 'macaron-gradient')
+        await macaron.press('ArrowRight')
+        await expect(choices.getByRole('radio', { name: 'Default', exact: true })).toBeFocused()
+        await choices.getByRole('radio', { name: 'Default', exact: true }).press('ArrowUp')
+        await expect(macaron).toBeFocused()
+        await macaron.press('Home')
+        await choices.getByRole('radio', { name: 'Default', exact: true }).press('ArrowRight')
+        await expect(choices.getByRole('radio', { name: 'Forest Adventure', exact: true })).toBeFocused()
+        await macaron.click()
+        await page.reload()
+        await expect(macaron).toHaveAttribute('aria-checked', 'true')
+        const second = await context.newPage()
+        await second.goto(`${fixture}?view=settings`)
+        await expect(second.getByRole('radio', { name: 'Macaron Gradient', exact: true })).toHaveAttribute('aria-checked', 'true')
+        await second.getByRole('radio', { name: 'Forest Adventure', exact: true }).click()
+        await expect(page.locator('html')).toHaveAttribute('data-skin', 'forest-adventure')
+        await second.getByRole('radio', { name: 'Default', exact: true }).first().click()
+        await expect(page.locator('html')).toHaveAttribute('data-skin', 'default')
+        expect(await page.evaluate(() => document.documentElement.style.getPropertyValue('--app-bg'))).toBe('')
+        await second.close()
+    })
+
+    test('the real approval, send and stop actions work without forest decoration', async ({ page }) => {
+        const images: string[] = []
+        const errors: string[] = []
+        page.on('request', request => { if (request.resourceType() === 'image' && request.url().includes('/skins/')) images.push(request.url()) })
+        page.on('pageerror', error => errors.push(error.message))
+        await page.goto(`${fixture}?skin=macaron-gradient`)
+        await expect(page.locator('.hapi-session-list')).toHaveCSS('background-image', /radial-gradient/)
+        await page.getByRole('button', { name: /把想法变成/ }).click()
+        await expect(page.locator('.forest-companion, .forest-scenery')).toHaveCount(0)
+        await page.getByRole('button', { name: 'Allow', exact: true }).click()
+        await page.getByRole('textbox').first().fill('Check the macaron skin')
+        await page.getByRole('button', { name: 'Send', exact: true }).click()
+        await page.getByRole('button', { name: 'Abort', exact: true }).click()
+        const probe = await page.evaluate(() => window.__adventure)
+        expect(probe.sent).toContain('Check the macaron skin')
+        expect(probe.requests).toContainEqual({ path: '/api/sessions/forest-session/permissions/approval-1/approve', method: 'POST' })
+        expect(probe.requests).toContainEqual({ path: '/api/sessions/forest-session/abort', method: 'POST' })
+        expect(images).toEqual([])
+        expect(errors).toEqual([])
+    })
+
+    test('phone widths, dark modes and the soft keyboard keep content readable and contained', async ({ page }) => {
+        await page.goto(`${fixture}?skin=macaron-gradient&dense`)
+        for (const width of [320, 360, 390, 430, 1280]) {
+            await page.setViewportSize({ width, height: 844 })
+            await expect(page.locator('.session-list-item').first()).toBeVisible()
+            expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+        }
+        await page.setViewportSize({ width: 390, height: 844 })
+        await page.goto(`${fixture}?skin=macaron-gradient&view=chat`)
+        const editor = page.getByRole('textbox').first()
+        await editor.fill('Keep my macaron draft')
+        await page.getByRole('button', { name: 'Expand message editor', exact: true }).click()
+        await expect(page.locator('[data-testid="composer-shell"]')).toHaveAttribute('data-expanded', 'true')
+        await page.getByRole('button', { name: 'Collapse message editor', exact: true }).click()
+        await page.locator('.hapi-session-chat').evaluate(element => { element.style.height = '430px' })
+        expect(await page.locator('[data-testid="composer-shell"]').evaluate(element => element.getBoundingClientRect().bottom)).toBeLessThanOrEqual(430)
+        await expect.poll(() => editor.evaluate(element => element instanceof HTMLTextAreaElement ? element.value : element.textContent)).toBe('Keep my macaron draft')
+        for (const [scheme, background] of [['dark', '#1c1724'], ['oled', '#000000']]) {
+            await page.goto(`${fixture}?skin=macaron-gradient&view=chat&appearance=${scheme}`)
+            await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
+            expect(await page.evaluate(() => document.documentElement.style.getPropertyValue('--app-bg'))).toBe(background)
+            await expect(page.locator('.hapi-session-chat')).toHaveCSS('background-image', /radial-gradient/)
+            expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
+        }
+    })
+
+    test.describe('first HTML load', () => {
+        test.use({ serviceWorkers: 'block' })
+        for (const [scheme, background] of [['light', '#fcf7fb'], ['dark', '#1c1724'], ['oled', '#000000']]) {
+            test(`resolves ${scheme} before React loads`, async ({ page }) => {
+                await page.addInitScript(({ scheme }) => {
+                    localStorage.setItem('hapi-appearance-skin', 'macaron-gradient')
+                    localStorage.setItem('hapi-appearance', scheme)
+                }, { scheme })
+                await page.route('**/src/main.tsx*', route => route.fulfill({ contentType: 'text/javascript', body: '' }))
+                await page.goto('/')
+                await expect(page.locator('html')).toHaveAttribute('data-skin', 'macaron-gradient')
+                await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
+                await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', background)
+            })
+        }
+    })
+})
