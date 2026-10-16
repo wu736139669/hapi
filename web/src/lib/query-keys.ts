@@ -15,6 +15,7 @@ export const queryKeys = {
     machineDshModels: (machineId: string) => ['machine-dsh-models', machineId] as const,
     sessionDshModels: (sessionId: string) => ['session-dsh-models', sessionId] as const,
     gitStatus: (sessionId: string) => ['git-status', sessionId] as const,
+    gitBranch: (sessionId: string) => ['git-branch', sessionId] as const,
     sessionFiles: (sessionId: string, query: string) => ['session-files', sessionId, query] as const,
     sessionDirectory: (sessionId: string, path: string) => ['session-directory', sessionId, path] as const,
     sessionFile: (sessionId: string, path: string) => ['session-file', sessionId, path] as const,

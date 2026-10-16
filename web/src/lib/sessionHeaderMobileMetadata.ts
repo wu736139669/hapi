@@ -6,6 +6,7 @@ export type SessionHeaderSecondaryMetadataKey =
     | 'updatedAt'
     | 'createdAt'
     | 'worktree'
+    | 'branch'
     | 'fastMode'
 
 const MOBILE_SECONDARY_PRIORITY: ReadonlyArray<SessionHeaderSecondaryMetadataKey> = [
@@ -17,6 +18,7 @@ const MOBILE_SECONDARY_PRIORITY: ReadonlyArray<SessionHeaderSecondaryMetadataKey
     'createdAt',
     'updatedAt',
     'worktree',
+    'branch',
 ]
 
 export function selectMobileSessionHeaderSecondary(

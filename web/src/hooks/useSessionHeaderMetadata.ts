@@ -11,6 +11,7 @@ export type SessionHeaderMetadataKey =
     | 'createdAt'
     | 'updatedAt'
     | 'worktree'
+    | 'branch'
 
 export type SessionHeaderMetadataPreferences = Record<SessionHeaderMetadataKey, boolean>
 
@@ -25,6 +26,7 @@ export const DEFAULT_SESSION_HEADER_METADATA: SessionHeaderMetadataPreferences =
     createdAt: false,
     updatedAt: false,
     worktree: true,
+    branch: true,
 }
 
 const STORAGE_KEY = 'hapi-session-header-metadata'

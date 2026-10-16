@@ -111,6 +111,67 @@ describe('SessionHeader', () => {
         expect(screen.queryByRole('button', { name: 'Generate' })).not.toBeInTheDocument()
     })
 
+    it('shows the live git branch for an active session', async () => {
+        const getGitStatus = vi.fn().mockResolvedValue({
+            success: true,
+            stdout: '# branch.oid 1234567\n# branch.head local/deploy-main\n'
+        })
+        const api = {
+            getMachines: vi.fn().mockResolvedValue({ machines: [] }),
+            getScratchlist: vi.fn().mockResolvedValue({ entries: [] }),
+            getGitStatus
+        } as unknown as ApiClient
+
+        render(
+            <QueryClientProvider client={new QueryClient()}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader session={baseSession()} onBack={vi.fn()} api={api} />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        await waitFor(() => {
+            expect(screen.getByTestId('session-header-branch')).toHaveTextContent('branch: local/deploy-main')
+        })
+        expect(getGitStatus).toHaveBeenCalledWith('session-1')
+    })
+
+    it('keeps the worktree chip and skips the branch fetch for worktree sessions', async () => {
+        const getGitStatus = vi.fn()
+        const api = {
+            getMachines: vi.fn().mockResolvedValue({ machines: [] }),
+            getScratchlist: vi.fn().mockResolvedValue({ entries: [] }),
+            getGitStatus
+        } as unknown as ApiClient
+
+        render(
+            <QueryClientProvider client={new QueryClient()}>
+                <ToastProvider>
+                    <I18nProvider>
+                        <SessionHeader
+                            session={baseSession({
+                                metadata: {
+                                    flavor: 'codex',
+                                    path: '/repo/.hapi-worktrees/feat-x',
+                                    host: 'machine',
+                                    worktree: { basePath: '/repo', branch: 'feat-x', name: 'feat-x' }
+                                }
+                            })}
+                            onBack={vi.fn()}
+                            api={api}
+                        />
+                    </I18nProvider>
+                </ToastProvider>
+            </QueryClientProvider>
+        )
+
+        expect(await screen.findByText(/worktree: feat-x/)).toBeInTheDocument()
+        expect(screen.queryByTestId('session-header-branch')).not.toBeInTheDocument()
+        expect(getGitStatus).not.toHaveBeenCalled()
+    })
+
     it('manually syncs an inactive Pi session through its owning machine', async () => {
         const importPiSessions = vi.fn().mockResolvedValue({
             success: true,

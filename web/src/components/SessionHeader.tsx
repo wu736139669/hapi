@@ -21,6 +21,7 @@ import { useToast } from '@/lib/toast-context'
 import { queryKeys } from '@/lib/query-keys'
 import { markCodexSessionsImported } from '@/lib/codexImportedSessions'
 import { useMachines } from '@/hooks/queries/useMachines'
+import { useGitBranch } from '@/hooks/queries/useGitBranch'
 import { useMachineLabels } from '@/hooks/useMachineLabels'
 import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relativeTime'
 import { useSessionHeaderMetadata } from '@/hooks/useSessionHeaderMetadata'
@@ -166,6 +167,14 @@ export function SessionHeader(props: {
     const title = useMemo(() => getSessionTitle(session), [session])
     const worktreeBranch = session.metadata?.worktree?.branch?.trim() || null
     const { preferences: headerMetadata } = useSessionHeaderMetadata()
+    // Live branch of the session's working directory. Worktree sessions skip
+    // the fetch — their branch is already surfaced through the worktree item.
+    const gitBranch = useGitBranch(
+        isSessionGuest ? null : api,
+        session.id,
+        !isSessionGuest && session.active === true && !worktreeBranch && headerMetadata.branch
+    )
+    const branchLabel = worktreeBranch ? null : gitBranch
     const modelLabel = getSessionModelLabel(session)
     const isModelChanging = useIsMutating({
         mutationKey: sessionModelMutationKey(session.id),
@@ -218,6 +227,7 @@ export function SessionHeader(props: {
         updatedAt: updatedAtLabel !== null,
         createdAt: createdAtLabel !== null,
         worktree: headerMetadata.worktree && Boolean(worktreeBranch),
+        branch: headerMetadata.branch && branchLabel !== null,
         fastMode: headerMetadata.fastMode && showFastBadge,
     })
     // Collaborative guests only need the session title and controls for
@@ -588,6 +598,7 @@ export function SessionHeader(props: {
                                 {mobileSecondary === 'updatedAt' && updatedAtLabel ? <span className="truncate">{headerMetadata.showLabels ? `${t('session.header.updatedAt')}: ` : ''}{updatedAtLabel}</span> : null}
                                 {mobileSecondary === 'createdAt' && createdAtLabel ? <span className="truncate">{headerMetadata.showLabels ? `${t('session.header.createdAt')}: ` : ''}{createdAtLabel}</span> : null}
                                 {mobileSecondary === 'worktree' && worktreeBranch ? <span className="truncate">{headerMetadata.showLabels ? `${t('session.item.worktree')}: ` : ''}{worktreeBranch}</span> : null}
+                                {mobileSecondary === 'branch' && branchLabel ? <span className="truncate">{headerMetadata.showLabels ? `${t('session.item.branch')}: ` : ''}{branchLabel}</span> : null}
                                 {mobileSecondary === 'fastMode' ? <span className="truncate text-[#34C759]">fast</span> : null}
                             </div>
                         ) : null}
@@ -629,6 +640,11 @@ export function SessionHeader(props: {
                                 {updatedAtLabel ? <span>{headerMetadata.showLabels ? `${t('session.header.updatedAt')}: ` : ''}{updatedAtLabel}</span> : null}
                                 {headerMetadata.worktree && worktreeBranch ? (
                                     <span>{headerMetadata.showLabels ? `${t('session.item.worktree')}: ` : ''}{worktreeBranch}</span>
+                                ) : null}
+                                {headerMetadata.branch && branchLabel ? (
+                                    <span data-testid="session-header-branch" className="max-w-[16rem] truncate" title={branchLabel}>
+                                        {headerMetadata.showLabels ? `${t('session.item.branch')}: ` : ''}{branchLabel}
+                                    </span>
                                 ) : null}
                             </div>
                         ) : null}

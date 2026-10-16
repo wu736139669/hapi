@@ -18,4 +18,9 @@ describe('selectMobileSessionHeaderSecondary', () => {
     it('returns no secondary detail when none are available', () => {
         expect(selectMobileSessionHeaderSecondary({})).toBeNull()
     })
+
+    it('falls back to the branch after the worktree item', () => {
+        expect(selectMobileSessionHeaderSecondary({ worktree: true, branch: true })).toBe('worktree')
+        expect(selectMobileSessionHeaderSecondary({ branch: true })).toBe('branch')
+    })
 })
