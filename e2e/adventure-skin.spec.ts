@@ -257,6 +257,43 @@ test.describe('Macaron Gradient', () => {
         expect(errors).toEqual([])
     })
 
+    test('session rows keep title, project and time aligned in two lines at phone widths and font scales', async ({ page }) => {
+        await page.addInitScript(() => localStorage.setItem('hapi-pin-in-progress-sessions', 'true'))
+        await page.goto(`${fixture}?skin=macaron-mint&view=rows`)
+        await expect(page.locator('.session-list-item')).toHaveCount(5)
+        await expect(page.getByText('Shared', { exact: true })).toHaveCount(2)
+        for (const width of [320, 390, 430]) {
+            await page.setViewportSize({ width, height: 844 })
+            for (const scale of [0.8, 1, 1.2]) {
+                await page.evaluate(scale => document.documentElement.style.setProperty('--app-font-scale', String(scale)), scale)
+                const rows = await page.locator('.session-list-item').evaluateAll(elements => elements.map(element => {
+                    const title = element.querySelector('.hapi-session-summary__title')!.getBoundingClientRect()
+                    const details = element.querySelector('.hapi-session-summary__details')!
+                    const detailsBox = details.getBoundingClientRect()
+                    const meta = element.querySelector('.hapi-session-summary__meta')!.getBoundingClientRect()
+                    const firstLine = element.querySelector('.hapi-session-summary__title-row')!.getBoundingClientRect()
+                    return {
+                        height: element.getBoundingClientRect().height,
+                        lineHeights: firstLine.height + Math.max(detailsBox.height, meta.height),
+                        textIndentDifference: Math.abs(title.left - detailsBox.left - parseFloat(getComputedStyle(details).paddingLeft)),
+                        secondLineDifference: Math.abs(meta.top - detailsBox.top),
+                        secondLineGap: meta.left - detailsBox.right,
+                        titleAboveDetails: title.bottom <= detailsBox.top,
+                    }
+                }))
+                for (const row of rows) {
+                    expect(row.height).toBeGreaterThanOrEqual(44)
+                    expect(row.height).toBeLessThanOrEqual(row.lineHeights + 20)
+                    expect(row.textIndentDifference).toBeLessThan(1)
+                    expect(row.secondLineDifference).toBeLessThan(1)
+                    expect(row.secondLineGap).toBeGreaterThanOrEqual(0)
+                    expect(row.titleAboveDetails).toBe(true)
+                }
+                expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+            }
+        }
+    })
+
     test('top and bottom safe-area gaps share the canvas across list, chat and settings', async ({ page }) => {
         for (const query of ['', '&view=chat', '&view=settings', '&appearance=dark', '&appearance=oled']) {
             await page.goto(`${fixture}?skin=macaron-mint${query}`)

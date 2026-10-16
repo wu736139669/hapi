@@ -81,6 +81,22 @@ window.fetch = async (input, init) => {
 const api = new ApiClient('synthetic-fixture-token', { baseUrl: location.origin })
 
 function demoSessions() {
+    if (params.get('view') === 'rows') {
+        const idle: Session = { ...currentSession, todos: [], agentState: null, thinking: false }
+        const rows: Session[] = [
+            { ...idle, id: 'row-pinned', globalPinned: true,
+                metadata: { ...idle.metadata!, flavor: 'codex', name: 'K2Lab 近期上线功能分析', path: '/workspace/K2Lab' } },
+            { ...idle, id: 'row-shared', globalPinned: true,
+                metadata: { ...idle.metadata!, flavor: 'grok', name: '数据官', path: '/workspace/research' } },
+            { ...idle, id: 'row-working', thinking: true,
+                metadata: { ...idle.metadata!, name: '整理项目界面与移动端交互细节', path: '/workspace/hapi' } },
+            { ...idle, id: 'row-working-shared', thinking: true,
+                metadata: { ...idle.metadata!, name: '一起检查代码与交互', path: '/workspace/collaboration' } },
+            { ...currentSession, id: 'row-pending',
+                metadata: { ...currentSession.metadata!, name: '一个很长的中文会话标题，用来检查状态和时间不会挤到第三行', path: '/workspace/long-project-name/packages/application' } },
+        ]
+        return rows.map(toSessionSummary)
+    }
     return [
         toSessionSummary(currentSession),
         ...(params.has('dense') ? Array.from({ length: 10 }, (_, index) => toSessionSummary({
@@ -128,6 +144,8 @@ function ListPage() {
             <SessionList sessions={params.get('view') === 'empty' ? [] : demoSessions()} compact={params.has('compact')} isLoading={false} api={api} onRefresh={refresh}
                 onSelect={() => void navigate({ to: '/sessions/$sessionId', params: { sessionId: currentSession.id } })}
                 onNewSession={() => void navigate({ to: '/sessions/$sessionId', params: { sessionId: currentSession.id } })}
+                sharedSessionIds={params.get('view') === 'rows' ? new Set(['row-shared', 'row-working-shared']) : undefined}
+                machineLabelsById={params.get('view') === 'rows' ? { 'fixture-machine': '开发机' } : undefined}
                 headerActions={<button type="button" aria-label="Settings" className="h-11 px-3 text-sm" onClick={() => void navigate({ to: '/settings/display' })}>⚙</button>} />
         </div>
     </div>

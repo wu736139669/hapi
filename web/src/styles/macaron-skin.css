@@ -93,8 +93,8 @@ html[data-skin^="macaron-"] .hapi-session-group-header.sticky {
 }
 
 html[data-skin^="macaron-"] .session-list-item:not(.hapi-session-compact) {
-    margin-block: 4px;
-    padding: 10px 12px;
+    margin-block: 2px;
+    padding: 7px 10px;
     border: 1px solid transparent;
     border-radius: 12px;
     background: var(--macaron-row-surface);
@@ -108,15 +108,28 @@ html[data-skin^="macaron-"] .session-list-item[aria-current="page"] {
     box-shadow: inset 3px 0 var(--app-link);
 }
 
+html[data-skin^="macaron-"] .session-list-item:not(.hapi-session-compact) .hapi-session-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) fit-content(55%);
+    grid-template-areas: "title title" "details meta";
+    gap: 2px 8px;
+}
 html[data-skin^="macaron-"] .session-list-item:not(.hapi-session-compact) .hapi-session-summary__main {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 3px;
+    display: contents;
     opacity: 1;
 }
+html[data-skin^="macaron-"] .session-list-item:not(.hapi-session-compact) .hapi-session-summary__title-row {
+    grid-area: title;
+}
 html[data-skin^="macaron-"] .session-list-item:not(.hapi-session-compact) .hapi-session-summary__meta {
-    flex-wrap: wrap;
-    justify-content: flex-start;
-    padding-left: 24px;
+    grid-area: meta;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 6px;
+}
+html[data-skin^="macaron-"] .session-list-item:not(.hapi-session-compact) .hapi-session-summary__details {
+    grid-area: details;
+    padding-left: 1.5rem;
 }
 html[data-skin^="macaron-"] .session-list-item:not(.hapi-session-compact):focus-visible {
     outline: 2px solid var(--app-link);

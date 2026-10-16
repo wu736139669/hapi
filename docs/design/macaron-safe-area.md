@@ -1,5 +1,7 @@
 # 马卡龙上下安全区色差修复
 
+后续调整：[列表高度与文字对齐](macaron-list-density.md)。
+
 2026-10-17；分支 `fix/macaron-safe-area-background`，在原目录开发，未使用 worktree。
 
 用户的 iPhone 截图显示，顶部状态栏与列表渐变之间存在浅色横条，底部也有同类色差。列表的顶部安全区 padding 位于绘制渐变的组件外层；外层、body 和文档画布仍保留纯色背景。仅调整列表工具栏无法覆盖这些区域。
