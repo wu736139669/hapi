@@ -26,3 +26,9 @@
 - [列表](screenshots/macaron-list-light.png)、[密集会话](screenshots/macaron-list-dense.png)、[深色列表](screenshots/macaron-list-dark.png)。
 - [聊天](screenshots/macaron-chat-light.png)、[深色聊天](screenshots/macaron-chat-dark.png)、[空列表](screenshots/macaron-empty-light.png)。
 - [三套皮肤设置](screenshots/macaron-settings-light.png)。
+
+## 上线
+
+源码 `1bb12c86` 已合并并推送到 `local/deploy-main`，部署 mini（Hub + runner）与 k2lab（runner）。两台固定路径签名和新 runner 文件 mtime 验证通过，CDHash 一致；Hub health 正常。部署前后两台均有 6 个 Agent 可用、Codex 7 个模型。
+
+正式 Hub 的 390×844 页面确认三选项、马卡龙选择持久化、首屏颜色、整页渐变、无森林装饰、零皮肤图片请求、无横向溢出和页面错误。刷新后在「设置 → 显示 → 界面皮肤」选择「马卡龙渐变」。见 [上线报告](macaron-gradient-deployment.json)。
