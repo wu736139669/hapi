@@ -83,6 +83,13 @@ const api = new ApiClient('synthetic-fixture-token', { baseUrl: location.origin 
 function demoSessions() {
     return [
         toSessionSummary(currentSession),
+        ...(params.has('dense') ? Array.from({ length: 10 }, (_, index) => toSessionSummary({
+            ...currentSession,
+            id: `forest-extra-${index}`,
+            agentState: null,
+            thinking: index < 4,
+            metadata: { ...currentSession.metadata!, name: ['整理项目与功能', '检查界面和测试', '继续今天的开发'][index % 3], path: `/workspace/project-${index + 1}` },
+        })) : []),
         toSessionSummary({ ...currentSession, id: 'forest-working', thinking: true, agentState: null,
             metadata: { ...currentSession.metadata!, flavor: 'codex', name: '为首页添加一点森林的气息', path: '/workspace/garden' } }),
         toSessionSummary({ ...currentSession, id: 'forest-idle', agentState: null,

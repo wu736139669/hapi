@@ -1831,6 +1831,7 @@ function SessionChatInner(props: SessionChatProps) {
 
     return (
         <div className="hapi-session-chat flex h-full min-h-0 flex-col">
+            {!terminalVisible ? <ForestScenery variant="chat" /> : null}
             <SessionHeader
                 session={props.session}
                 serviceTier={effectiveCodexServiceTier}
@@ -1861,8 +1862,6 @@ function SessionChatInner(props: SessionChatProps) {
                     )
                 }}
             />
-
-            {!terminalVisible ? <ForestScenery variant="chat" /> : null}
 
             <CursorMigrationBanner metadata={props.session.metadata} />
 

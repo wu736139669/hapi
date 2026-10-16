@@ -1,0 +1,18 @@
+{
+    "web": {
+        "failed_ids": 35,
+        "introduced": [],
+        "resolved": []
+    },
+    "cli": {
+        "failed_ids": 7,
+        "introduced": [],
+        "resolved": []
+    },
+    "browser_passed": 9,
+    "typecheck": "passed",
+    "fixture_typecheck": "passed",
+    "build": "passed",
+    "production_image_hash_matches": 16,
+    "review": "Requirement, approach and changed code checked against repository Major checklist; no introduced Major findings. Referenced pre-push-review skill remains unavailable."
+}

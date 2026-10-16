@@ -63,7 +63,8 @@ test('phone sizes, short viewport, dark modes, and desktop keep the page contain
     await page.goto(`${fixture}?skin=forest-adventure`)
     for (const width of [320, 360, 390, 430, 1280]) {
         await page.setViewportSize({ width, height: 800 })
-        await expect(page.locator('.forest-banner')).toBeVisible()
+        await expect(page.locator('.forest-scenery--list')).toBeVisible()
+        await expect(page.locator('.forest-banner')).toHaveCount(0)
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
     }
     await page.setViewportSize({ width: 360, height: 800 })
@@ -127,21 +128,36 @@ test('transparent cutouts decode without loading source sheets, and the empty-li
     await expect(page.locator('[data-testid="composer-shell"]')).toBeVisible()
 })
 
-test('rich scenery preserves compact navigation and yields to the actual chat height', async ({ page }) => {
+test('full-page scenery stays behind scrolling content and never reserves chat space', async ({ page }) => {
     await page.goto(`${fixture}?skin=forest-adventure&compact`)
     await expect(page.locator('.session-list-item').first()).toBeVisible()
     await expect(page.locator('.forest-scenery')).toHaveCount(0)
     await expect(page.locator('[data-forest-asset]')).toHaveCount(0)
 
+    await page.goto(`${fixture}?skin=forest-adventure&dense`)
+    const listScenery = page.locator('.forest-scenery--list')
+    await expect(listScenery).toHaveCSS('position', 'absolute')
+    await expect(page.locator('.forest-banner')).toHaveCount(0)
+    const listBox = await page.locator('.hapi-session-list').boundingBox()
+    expect(await listScenery.boundingBox()).toEqual(listBox)
+    expect((await page.locator('.session-list-item').first().boundingBox())!.y).toBeLessThan(180)
+    await page.locator('.session-list-scrollbar-left').evaluate(element => { element.scrollTop = 450 })
+    await expect.poll(() => page.locator('.session-list-scrollbar-left').evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+    expect(await listScenery.boundingBox()).toEqual(listBox)
+    await expect(page.locator('.forest-scenery__world')).toHaveCSS('background-image', /forest-page\.webp/)
+
     await page.goto(`${fixture}?skin=forest-adventure&view=chat`)
     const scenery = page.locator('.forest-scenery--chat')
     await expect(scenery).toBeVisible()
+    await expect(scenery).toHaveCSS('position', 'absolute')
     await expect(scenery).toHaveCSS('pointer-events', 'none')
+    expect(await scenery.boundingBox()).toEqual(await page.locator('.hapi-session-chat').boundingBox())
     const editor = page.getByRole('textbox').first()
     await editor.fill('Keep this draft while the keyboard opens')
     // Shrink the allocated pane without shrinking the browser window (soft keyboard / split pane).
     await page.locator('.hapi-session-chat').evaluate(element => { element.style.height = '430px' })
-    await expect(scenery).toBeHidden()
+    await expect(scenery).toBeVisible()
+    expect(await scenery.boundingBox()).toEqual(await page.locator('.hapi-session-chat').boundingBox())
     const chatBottom = await page.locator('.hapi-session-chat').evaluate(element => element.getBoundingClientRect().bottom)
     expect(await page.locator('[data-testid="composer-shell"]').evaluate(element => element.getBoundingClientRect().bottom)).toBeLessThanOrEqual(chatBottom)
     await expect.poll(() => editor.evaluate(element => element instanceof HTMLTextAreaElement ? element.value : element.textContent)).toBe('Keep this draft while the keyboard opens')
