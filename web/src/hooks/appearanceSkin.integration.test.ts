@@ -56,3 +56,16 @@ it.each(SKIN_CASES)('$skin follows light, dark and OLED and removes skin palette
     expect(document.documentElement.style.getPropertyValue('--app-button')).toBe('')
     expect(document.documentElement).toHaveAttribute('data-theme', 'oled')
 })
+
+it('keeps explicit surface and border choices when the shared Macaron material changes hue', () => {
+    const colors = renderHook(useThemeColors)
+    act(() => setAppearanceSkin('macaron-mint'))
+    act(() => colors.result.current.setColor('surface', '#e9efed'))
+    act(() => colors.result.current.setColor('border', '#a3b3ad'))
+    act(() => setAppearanceSkin('macaron-blueberry'))
+    expect(document.documentElement.style.getPropertyValue('--app-tool-card-bg')).toBe('#e9efed')
+    expect(document.documentElement.style.getPropertyValue('--app-border')).toBe('#a3b3ad')
+    act(() => setAppearanceSkin('default'))
+    expect(document.documentElement.style.getPropertyValue('--app-tool-card-bg')).toBe('#e9efed')
+    expect(document.documentElement.style.getPropertyValue('--app-border')).toBe('#a3b3ad')
+})

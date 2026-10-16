@@ -1585,7 +1585,7 @@ export function SessionList(props: {
         return (
             <div key={sectionKey}>
                 <div
-                    className="group/running flex min-w-0 w-full select-none cursor-pointer items-center gap-2 rounded-lg py-1.5 pl-2 pr-2 transition-colors hover:bg-[var(--app-secondary-bg)]"
+                    className="hapi-session-group-header group/running flex min-w-0 w-full select-none cursor-pointer items-center gap-2 rounded-lg py-1.5 pl-2 pr-2 transition-colors hover:bg-[var(--app-secondary-bg)]"
                     role="button"
                     tabIndex={0}
                     aria-expanded={!collapsed || isFiltering}
@@ -1659,7 +1659,7 @@ export function SessionList(props: {
         return (
             <div key={group.key}>
                 <div
-                    className="group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-secondary-bg)] min-w-0 w-full select-none"
+                    className="hapi-session-group-header group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-secondary-bg)] min-w-0 w-full select-none"
                     title={group.directory}
                 >
                     <span className="font-medium text-sm truncate flex-1">
@@ -1714,7 +1714,7 @@ export function SessionList(props: {
             <div key={group.key}>
                 <div
                     className={cn(
-                        'group/project sticky top-0 z-10 flex items-center bg-[var(--app-bg)] text-left rounded-lg transition-colors hover:bg-[var(--app-secondary-bg)] cursor-pointer min-w-0 w-full select-none',
+                        'hapi-session-group-header group/project sticky top-0 z-10 flex items-center bg-[var(--app-bg)] text-left rounded-lg transition-colors hover:bg-[var(--app-secondary-bg)] cursor-pointer min-w-0 w-full select-none',
                         compact ? 'gap-1' : 'gap-2',
                         compact ? 'py-1 pl-1.5 pr-1' : 'py-1.5 pl-2 pr-2'
                     )}
@@ -2128,7 +2128,7 @@ export function SessionList(props: {
                 {personalPinnedSessions.length > 0 ? (
                     <div key="personal-pinned-section">
                         <div
-                            className="group/personal-pinned flex min-w-0 w-full select-none cursor-pointer items-center gap-2 rounded-lg py-1.5 pl-2 pr-2 transition-colors hover:bg-[var(--app-secondary-bg)]"
+                            className="hapi-session-group-header group/personal-pinned flex min-w-0 w-full select-none cursor-pointer items-center gap-2 rounded-lg py-1.5 pl-2 pr-2 transition-colors hover:bg-[var(--app-secondary-bg)]"
                             role="button"
                             tabIndex={0}
                             aria-expanded={!personalSectionCollapsed || isFiltering}
@@ -2185,7 +2185,7 @@ export function SessionList(props: {
                 {globalPinnedSessions.length > 0 ? (
                     <div key="pinned-section">
                         <div
-                            className="group/pinned flex min-w-0 w-full select-none cursor-pointer items-center gap-2 rounded-lg py-1.5 pl-2 pr-2 transition-colors hover:bg-[var(--app-secondary-bg)]"
+                            className="hapi-session-group-header group/pinned flex min-w-0 w-full select-none cursor-pointer items-center gap-2 rounded-lg py-1.5 pl-2 pr-2 transition-colors hover:bg-[var(--app-secondary-bg)]"
                             role="button"
                             tabIndex={0}
                             aria-expanded={!pinnedSectionCollapsed || isFiltering}

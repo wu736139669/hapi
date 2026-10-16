@@ -45,7 +45,7 @@ export function SessionStatusPanel({ data, onGoalAction }: {
     }, [hasLiveElapsed])
 
     return (
-        <details className="group mx-3 mt-3 rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)]">
+        <details className="hapi-session-status group mx-3 mt-3 rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)]">
             <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-semibold text-[var(--app-fg)] [&::-webkit-details-marker]:hidden">
                 {t('session.status.title')}
                 {data.goal ? <span className="min-w-0 truncate font-normal text-[var(--app-hint)]">· {t('session.status.goal')} {t(`session.status.goal.${data.goal.status}`)}</span> : null}

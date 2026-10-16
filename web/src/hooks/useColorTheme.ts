@@ -286,7 +286,18 @@ function resolveThemePalette(theme: ColorThemePreset, scheme: ColorScheme): Them
         : skin === 'default' ? null : MACARON_SKIN_COLORS[skin]
     if (!colors) return null
     const base = colors[scheme]
-    return palette(base.accent, base.background, base.foreground, base.hint, base.secondary)
+    const values = palette(base.accent, base.background, base.foreground, base.hint, base.secondary)
+    if (skin === 'forest-adventure') return values
+    const isDark = scheme !== 'light'
+    return {
+        ...values,
+        dialog: mix(base.background, base.accent, isDark ? 0.045 : 0.015),
+        surface: mix(base.background, base.accent, isDark ? 0.10 : 0.035),
+        surfaceHover: mix(base.background, base.accent, isDark ? 0.16 : 0.07),
+        code: mix(base.background, base.accent, isDark ? 0.12 : 0.055),
+        border: withAlpha(base.hint, isDark ? 0.13 : 0.09),
+        subtle: withAlpha(base.accent, isDark ? 0.07 : 0.035),
+    }
 }
 
 function removeThemeProperties(root: HTMLElement): void {

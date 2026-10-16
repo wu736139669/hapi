@@ -44,73 +44,62 @@ html[data-skin="macaron-rose"], .skin-option[data-skin-option="macaron-rose"] {
 }
 
 html[data-skin^="macaron-"] {
-    --macaron-start: var(--macaron-tone-start);
-    --macaron-middle: var(--macaron-tone-middle);
-    --macaron-end: var(--macaron-tone-end);
-    --macaron-base: var(--macaron-tone-base);
-    --macaron-paper: color-mix(in srgb, var(--app-bg) 95%, #fff);
-    --macaron-glass: color-mix(in srgb, var(--macaron-paper) 86%, transparent);
-    --macaron-border: color-mix(in srgb, var(--app-link) 16%, var(--app-border));
-    --macaron-shadow: color-mix(in srgb, var(--app-link) 9%, transparent);
-}
-
-html[data-skin^="macaron-"][data-theme="dark"],
-html[data-skin^="macaron-"][data-theme="oled"] {
-    --macaron-start: #442d42;
-    --macaron-middle: #34304d;
-    --macaron-end: #233d3a;
-    --macaron-base: #352e2c;
-    --macaron-paper: color-mix(in srgb, var(--app-bg) 94%, #c9b4d9);
-    --macaron-glass: color-mix(in srgb, var(--macaron-paper) 92%, transparent);
-    --macaron-shadow: #0003;
-}
-
-html[data-skin^="macaron-"][data-theme="oled"] {
-    --macaron-start: #170e17;
-    --macaron-middle: #14111f;
-    --macaron-end: #0d1b18;
-    --macaron-base: #120e0c;
-}
-
-html[data-skin^="macaron-"]:not([data-skin="macaron-gradient"]):is([data-theme="dark"], [data-theme="oled"]) {
-    --macaron-night-strength: 17%;
-    --macaron-start: color-mix(in srgb, var(--macaron-tone-start) var(--macaron-night-strength), var(--app-bg));
-    --macaron-middle: color-mix(in srgb, var(--macaron-tone-middle) var(--macaron-night-strength), var(--app-bg));
-    --macaron-end: color-mix(in srgb, var(--macaron-tone-end) var(--macaron-night-strength), var(--app-bg));
-    --macaron-base: color-mix(in srgb, var(--macaron-tone-base) var(--macaron-night-strength), var(--app-bg));
-}
-html[data-skin^="macaron-"]:not([data-skin="macaron-gradient"])[data-theme="oled"] {
-    --macaron-night-strength: 9%;
-}
-
-html[data-skin^="macaron-"] :is(.hapi-session-list, .hapi-session-chat, .hapi-new-session, .hapi-settings-page) {
-    background-color: var(--app-bg);
-    background-image:
+    --macaron-strength: 58%;
+    --macaron-start: color-mix(in srgb, var(--macaron-tone-start) var(--macaron-strength), var(--app-bg));
+    --macaron-middle: color-mix(in srgb, var(--macaron-tone-middle) var(--macaron-strength), var(--app-bg));
+    --macaron-end: color-mix(in srgb, var(--macaron-tone-end) var(--macaron-strength), var(--app-bg));
+    --macaron-base: color-mix(in srgb, var(--macaron-tone-base) var(--macaron-strength), var(--app-bg));
+    --macaron-surface: color-mix(in srgb, var(--app-bg) 88%, var(--macaron-start));
+    --macaron-row-surface: color-mix(in srgb, var(--macaron-surface) 54%, transparent);
+    --macaron-panel-surface: color-mix(in srgb, var(--macaron-surface) 82%, transparent);
+    --macaron-header-surface: color-mix(in srgb, var(--macaron-surface) 12%, transparent);
+    --macaron-wash:
         radial-gradient(ellipse at 0 0, var(--macaron-start), transparent 62%),
         radial-gradient(ellipse at 100% 48%, var(--macaron-middle), transparent 64%),
         radial-gradient(ellipse at 4% 100%, var(--macaron-end), transparent 62%),
         linear-gradient(145deg, var(--app-bg), var(--macaron-base));
 }
 
+html[data-skin^="macaron-"][data-theme="dark"] { --macaron-strength: 16%; }
+html[data-skin^="macaron-"][data-theme="oled"] { --macaron-strength: 7%; }
+
+html[data-skin^="macaron-"] :is(.hapi-session-list, .hapi-session-chat, .hapi-new-session, .hapi-settings-page) {
+    background-color: var(--app-bg);
+    background-image: var(--macaron-wash);
+}
+
 html[data-skin^="macaron-"] .hapi-skin-header,
 html[data-skin^="macaron-"] .hapi-session-list > .session-list-scrollbar-offset {
-    background: var(--macaron-glass);
-    border-bottom: 1px solid var(--macaron-border);
-    box-shadow: 0 2px 12px var(--macaron-shadow);
+    background: transparent;
+    border-bottom-color: transparent;
+    box-shadow: none;
+}
+
+html[data-skin^="macaron-"] .hapi-session-group-header {
+    background: transparent;
+    border-radius: 0;
+}
+/* Sticky titles retain a quiet surface when session rows scroll underneath. */
+html[data-skin^="macaron-"] .hapi-session-group-header.sticky {
+    background: var(--macaron-header-surface);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
 }
 
 html[data-skin^="macaron-"] .session-list-item:not(.hapi-session-compact) {
     margin-block: 4px;
     padding: 10px 12px;
-    border: 1px solid var(--macaron-border);
-    border-radius: 16px;
-    background: linear-gradient(120deg, var(--macaron-paper), var(--macaron-glass));
-    box-shadow: 0 3px 12px var(--macaron-shadow), inset 0 1px 0 #ffffff45;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    background: var(--macaron-row-surface);
+    box-shadow: none;
 }
-
+html[data-skin^="macaron-"] .session-list-item:not(.hapi-session-compact):hover {
+    background: var(--macaron-panel-surface);
+}
 html[data-skin^="macaron-"] .session-list-item[aria-current="page"] {
-    border-color: var(--app-link);
-    background-image: linear-gradient(115deg, color-mix(in srgb, var(--app-link) 11%, var(--macaron-paper)), var(--macaron-paper));
+    background: var(--app-subtle-bg);
+    box-shadow: inset 3px 0 var(--app-link);
 }
 
 html[data-skin^="macaron-"] .session-list-item:not(.hapi-session-compact) .hapi-session-summary__main {
@@ -123,58 +112,73 @@ html[data-skin^="macaron-"] .session-list-item:not(.hapi-session-compact) .hapi-
     justify-content: flex-start;
     padding-left: 24px;
 }
-
 html[data-skin^="macaron-"] .session-list-item:not(.hapi-session-compact):focus-visible {
     outline: 2px solid var(--app-link);
     outline-offset: 2px;
 }
 
 html[data-skin^="macaron-"] .hapi-skin-assistant {
-    padding: 16px;
-    border: 1px solid var(--macaron-border);
-    border-radius: 6px 20px 20px;
-    background: var(--macaron-paper);
-    box-shadow: 0 4px 16px var(--macaron-shadow);
+    padding: 4px 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
 }
-
 html[data-skin^="macaron-"] .hapi-skin-user {
-    border: 1px solid var(--macaron-border);
-    border-radius: 20px 6px 20px 20px;
-    background-image: linear-gradient(125deg,
-        color-mix(in srgb, var(--app-chat-user-surface-bg) 80%, var(--macaron-start)),
-        color-mix(in srgb, var(--app-chat-user-surface-bg) 80%, var(--macaron-middle)));
-    box-shadow: 0 2px 10px var(--macaron-shadow);
+    border: 0;
+    border-radius: 18px 6px 18px 18px;
+    background-color: color-mix(in srgb, var(--app-chat-user-surface-bg) 85%, var(--macaron-start));
+    background-image: none;
+    box-shadow: none;
 }
 
+html[data-skin^="macaron-"] .hapi-session-status {
+    margin-top: 2px;
+    border-color: transparent;
+    background: transparent;
+}
+html[data-skin^="macaron-"] .hapi-session-status[open] {
+    background: var(--macaron-panel-surface);
+}
+
+html[data-skin^="macaron-"] .hapi-composer-shell:not([data-expanded="true"]) { background: transparent; }
+html[data-skin^="macaron-"] .hapi-composer-shell[data-expanded="true"] {
+    background-color: var(--app-bg);
+    background-image: var(--macaron-wash);
+}
 html[data-skin^="macaron-"] .hapi-skin-composer {
-    border: 1px solid var(--macaron-border);
-    border-radius: 22px;
-    background-image: linear-gradient(120deg, var(--macaron-paper), color-mix(in srgb, var(--macaron-paper) 85%, var(--macaron-middle)));
-    box-shadow: 0 4px 20px var(--macaron-shadow), inset 0 1px 0 #ffffff45;
-}
-
-html[data-skin^="macaron-"] :is(.hapi-skin-panel, .hapi-skin-dialog) {
-    border: 1px solid var(--macaron-border);
+    border: 1px solid var(--app-border);
     border-radius: 18px;
-    background-image: linear-gradient(135deg, color-mix(in srgb, var(--macaron-middle) 12%, transparent), transparent 64%);
-    box-shadow: 0 4px 18px var(--macaron-shadow);
+    background: var(--macaron-panel-surface);
+    box-shadow: none;
 }
 
-html[data-skin^="macaron-"] .hapi-skin-button { border-radius: 12px; }
-html[data-skin^="macaron-"] .hapi-skin-button-primary {
-    background-image: linear-gradient(120deg,
-        color-mix(in srgb, var(--app-button) 94%, var(--macaron-start)),
-        color-mix(in srgb, var(--app-button) 94%, var(--macaron-end)));
-    box-shadow: 0 3px 9px var(--macaron-shadow);
+html[data-skin^="macaron-"] .hapi-skin-panel {
+    border-radius: 12px;
+    background-image: none;
+    box-shadow: none;
 }
+html[data-skin^="macaron-"] .hapi-settings-page .hapi-skin-panel { background-color: var(--macaron-panel-surface); }
+html[data-skin^="macaron-"] .hapi-skin-dialog {
+    border: 1px solid var(--app-border);
+    border-radius: 14px;
+    background-color: var(--app-dialog-bg);
+    background-image: none;
+    box-shadow: 0 12px 40px #0002;
+}
+html[data-skin^="macaron-"] .hapi-skin-button { border-radius: 10px; }
+html[data-skin^="macaron-"] .hapi-skin-button-primary { background-image: none; box-shadow: none; }
 
 .skin-option[data-skin-option^="macaron-"] .skin-option__preview {
-    background: radial-gradient(ellipse at 0 0, var(--macaron-tone-start), transparent 70%), linear-gradient(135deg, var(--macaron-tone-base), var(--macaron-tone-middle) 55%, var(--macaron-tone-end));
+    background:
+        radial-gradient(ellipse at 0 0, color-mix(in srgb, var(--macaron-tone-start) 58%, #fff), transparent 70%),
+        linear-gradient(135deg, #fffaf8, color-mix(in srgb, var(--macaron-tone-middle) 58%, #fff) 55%, color-mix(in srgb, var(--macaron-tone-end) 58%, #fff));
 }
 .skin-option[data-skin-option^="macaron-"] .skin-option__preview .skin-option__sample {
-    background: #fff9;
-    border: 1px solid #fff9;
-    border-radius: 9px;
+    background: #ffffff70;
+    border: 0;
+    border-radius: 6px;
+    box-shadow: none;
 }
 .skin-option[data-skin-option^="macaron-"] .skin-option__preview .skin-option__sample i { background: var(--macaron-preview-ink); opacity: .65; }
 .skin-option[data-skin-option^="macaron-"] .skin-option__preview .skin-option__sample i:nth-child(2) { background: var(--macaron-preview-ink); }
