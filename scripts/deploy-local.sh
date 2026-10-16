@@ -87,13 +87,22 @@ echo "health ok"
 # The runner also inherits this shell's environment. Keep the full login PATH;
 # scope temporary transfer-tool PATH overrides to the remote deploy command.
 # A healthy hub does not prove the runner can resolve installed agent binaries.
+# Optional runner env overrides (e.g. Claude provider routing for HAPI sessions).
+# Refresh the runner from a clean login environment plus these overrides: the
+# runner's environment is inherited by every spawned agent session, so
+# session-scoped vars from the invoking shell (HAPI_SESSION_ID, CODEX_*,
+# OPENCODE_*) must not leak in — deploys may run from a HAPI session.
 runner_state="$HOME/.hapi/runner.state.json"
 runner_pid=$(sed -n 's/.*"pid": *\([0-9][0-9]*\).*/\1/p' "$runner_state" 2>/dev/null | head -n 1 || true)
 if [ -n "${runner_pid:-}" ] && kill -0 "$runner_pid" 2>/dev/null; then
-    if HAPI_CLI_EXECUTABLE="$stable" "$stable" runner start; then
+    # cd "$HOME": the refresh inherits this shell's cwd, and deploys are
+    # sometimes run from a throwaway worktree — the runner must not end up
+    # with a deleted directory as its cwd.
+    if (cd "$HOME" && env -i HOME="$HOME" USER="${USER:-$(id -un)}" TERM="${TERM:-xterm-256color}" \
+        /bin/zsh -lic 'source "$HOME/.hapi/runner.env.local" 2>/dev/null; export HAPI_CLI_EXECUTABLE="$HOME/.hapi/bin/hapi"; exec "$HOME/.hapi/bin/hapi" runner start'); then
         echo "runner refreshed"
     else
-        echo "warning: runner refresh failed; run '$stable runner start' manually" >&2
+        echo "warning: runner refresh failed; run '$HOME/.hapi/bin/restart-runner.sh' manually" >&2
         exit 1
     fi
 else
