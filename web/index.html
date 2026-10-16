@@ -77,11 +77,20 @@
                 var scheme = getInitialScheme()
                 var colorTheme = 'default'
                 var skin = 'default'
+                var skinBackgrounds = {
+                    'forest-adventure': { light: '#f7f3e8', dark: '#15221c', oled: '#000000' },
+                    'macaron-gradient': { light: '#fcf7fb', dark: '#1c1724', oled: '#000000' },
+                    'macaron-peach': { light: '#fff8f2', dark: '#241b18', oled: '#000000' },
+                    'macaron-mint': { light: '#f4fbf8', dark: '#15221f', oled: '#000000' },
+                    'macaron-blueberry': { light: '#f7f8ff', dark: '#191e2c', oled: '#000000' },
+                    'macaron-lemon': { light: '#fffcef', dark: '#242117', oled: '#000000' },
+                    'macaron-rose': { light: '#fff7fb', dark: '#251923', oled: '#000000' },
+                }
                 try {
                     var storedColorTheme = localStorage.getItem('hapi-color-theme')
                     if (storedColorTheme && themeBackgrounds[storedColorTheme]) colorTheme = storedColorTheme
                     var storedSkin = localStorage.getItem('hapi-appearance-skin')
-                    if (storedSkin === 'forest-adventure' || storedSkin === 'macaron-gradient') skin = storedSkin
+                    if (storedSkin && Object.prototype.hasOwnProperty.call(skinBackgrounds, storedSkin)) skin = storedSkin
                 } catch (error) {
                     // Ignore storage errors.
                 }
@@ -90,10 +99,7 @@
                     ? (scheme === 'oled' ? oledColor : (scheme === 'dark' ? darkColor : lightColor))
                     : themeBackgrounds[colorTheme][paletteScheme]
                 if (skin !== 'default' && colorTheme === 'default') {
-                    color = {
-                        'forest-adventure': { light: '#f7f3e8', dark: '#15221c', oled: '#000000' },
-                        'macaron-gradient': { light: '#fcf7fb', dark: '#1c1724', oled: '#000000' },
-                    }[skin][scheme]
+                    color = skinBackgrounds[skin][scheme]
                 }
                 try {
                     var customColors = JSON.parse(localStorage.getItem('hapi-theme-colors') || '{}')

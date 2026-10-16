@@ -8,6 +8,11 @@ const LABEL_KEYS = {
     default: 'settings.display.skin.default',
     'forest-adventure': 'settings.display.skin.forest',
     'macaron-gradient': 'settings.display.skin.macaron',
+    'macaron-peach': 'settings.display.skin.macaronPeach',
+    'macaron-mint': 'settings.display.skin.macaronMint',
+    'macaron-blueberry': 'settings.display.skin.macaronBlueberry',
+    'macaron-lemon': 'settings.display.skin.macaronLemon',
+    'macaron-rose': 'settings.display.skin.macaronRose',
 } as const
 
 export function AppearanceSkinPicker() {
@@ -16,7 +21,7 @@ export function AppearanceSkinPicker() {
     return (
         <div className="px-3 py-3">
             <SettingsFieldLabel description={t('settings.display.skin.description')}>{t('settings.display.skin')}</SettingsFieldLabel>
-            <div role="radiogroup" aria-label={t('settings.display.skin')} className="grid grid-cols-3 gap-2">
+            <div role="radiogroup" aria-label={t('settings.display.skin')} className="grid grid-cols-3 gap-2 sm:grid-cols-4">
                 {APPEARANCE_SKINS.map((option, index) => (
                     <button
                         key={option}

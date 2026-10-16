@@ -10,6 +10,11 @@ import { setAppearanceSkin } from '@/lib/appearanceSkin'
 const SKIN_CASES = [
     { skin: 'forest-adventure', light: '#f7f3e8', dark: '#15221c' },
     { skin: 'macaron-gradient', light: '#fcf7fb', dark: '#1c1724' },
+    { skin: 'macaron-peach', light: '#fff8f2', dark: '#241b18' },
+    { skin: 'macaron-mint', light: '#f4fbf8', dark: '#15221f' },
+    { skin: 'macaron-blueberry', light: '#f7f8ff', dark: '#191e2c' },
+    { skin: 'macaron-lemon', light: '#fffcef', dark: '#242117' },
+    { skin: 'macaron-rose', light: '#fff7fb', dark: '#251923' },
 ] as const
 
 beforeEach(() => {

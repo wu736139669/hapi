@@ -1,49 +1,105 @@
-html[data-skin="macaron-gradient"] {
-    --macaron-pink: #f5cee2;
-    --macaron-lilac: #ded8f6;
-    --macaron-mint: #cfece1;
-    --macaron-cream: #fff0d8;
+html[data-skin^="macaron-"],
+.skin-option[data-skin-option^="macaron-"] {
+    --macaron-tone-start: #f5cee2;
+    --macaron-tone-middle: #ded8f6;
+    --macaron-tone-end: #cfece1;
+    --macaron-tone-base: #fff0d8;
+    --macaron-preview-ink: #9f82ba;
+}
+
+html[data-skin="macaron-peach"], .skin-option[data-skin-option="macaron-peach"] {
+    --macaron-tone-start: #ffd9c7;
+    --macaron-tone-middle: #ffeac8;
+    --macaron-tone-end: #f7d9db;
+    --macaron-tone-base: #fff4df;
+    --macaron-preview-ink: #ad755f;
+}
+html[data-skin="macaron-mint"], .skin-option[data-skin-option="macaron-mint"] {
+    --macaron-tone-start: #caece2;
+    --macaron-tone-middle: #d5ecf6;
+    --macaron-tone-end: #d3eee1;
+    --macaron-tone-base: #f3f5d5;
+    --macaron-preview-ink: #4c8a7a;
+}
+html[data-skin="macaron-blueberry"], .skin-option[data-skin-option="macaron-blueberry"] {
+    --macaron-tone-start: #d3ddfa;
+    --macaron-tone-middle: #ded6f6;
+    --macaron-tone-end: #cee9f4;
+    --macaron-tone-base: #f0e8ff;
+    --macaron-preview-ink: #697eb3;
+}
+html[data-skin="macaron-lemon"], .skin-option[data-skin-option="macaron-lemon"] {
+    --macaron-tone-start: #fff0b9;
+    --macaron-tone-middle: #f5e6ca;
+    --macaron-tone-end: #dbedca;
+    --macaron-tone-base: #fff7e5;
+    --macaron-preview-ink: #9a8448;
+}
+html[data-skin="macaron-rose"], .skin-option[data-skin-option="macaron-rose"] {
+    --macaron-tone-start: #f7cfe0;
+    --macaron-tone-middle: #f2dae4;
+    --macaron-tone-end: #ffe2d2;
+    --macaron-tone-base: #fff0e7;
+    --macaron-preview-ink: #ae728b;
+}
+
+html[data-skin^="macaron-"] {
+    --macaron-start: var(--macaron-tone-start);
+    --macaron-middle: var(--macaron-tone-middle);
+    --macaron-end: var(--macaron-tone-end);
+    --macaron-base: var(--macaron-tone-base);
     --macaron-paper: color-mix(in srgb, var(--app-bg) 95%, #fff);
     --macaron-glass: color-mix(in srgb, var(--macaron-paper) 86%, transparent);
     --macaron-border: color-mix(in srgb, var(--app-link) 16%, var(--app-border));
     --macaron-shadow: color-mix(in srgb, var(--app-link) 9%, transparent);
 }
 
-html[data-skin="macaron-gradient"][data-theme="dark"],
-html[data-skin="macaron-gradient"][data-theme="oled"] {
-    --macaron-pink: #442d42;
-    --macaron-lilac: #34304d;
-    --macaron-mint: #233d3a;
-    --macaron-cream: #352e2c;
+html[data-skin^="macaron-"][data-theme="dark"],
+html[data-skin^="macaron-"][data-theme="oled"] {
+    --macaron-start: #442d42;
+    --macaron-middle: #34304d;
+    --macaron-end: #233d3a;
+    --macaron-base: #352e2c;
     --macaron-paper: color-mix(in srgb, var(--app-bg) 94%, #c9b4d9);
     --macaron-glass: color-mix(in srgb, var(--macaron-paper) 92%, transparent);
     --macaron-shadow: #0003;
 }
 
-html[data-skin="macaron-gradient"][data-theme="oled"] {
-    --macaron-pink: #170e17;
-    --macaron-lilac: #14111f;
-    --macaron-mint: #0d1b18;
-    --macaron-cream: #120e0c;
+html[data-skin^="macaron-"][data-theme="oled"] {
+    --macaron-start: #170e17;
+    --macaron-middle: #14111f;
+    --macaron-end: #0d1b18;
+    --macaron-base: #120e0c;
 }
 
-html[data-skin="macaron-gradient"] :is(.hapi-session-list, .hapi-session-chat, .hapi-new-session, .hapi-settings-page) {
+html[data-skin^="macaron-"]:not([data-skin="macaron-gradient"]):is([data-theme="dark"], [data-theme="oled"]) {
+    --macaron-night-strength: 17%;
+    --macaron-start: color-mix(in srgb, var(--macaron-tone-start) var(--macaron-night-strength), var(--app-bg));
+    --macaron-middle: color-mix(in srgb, var(--macaron-tone-middle) var(--macaron-night-strength), var(--app-bg));
+    --macaron-end: color-mix(in srgb, var(--macaron-tone-end) var(--macaron-night-strength), var(--app-bg));
+    --macaron-base: color-mix(in srgb, var(--macaron-tone-base) var(--macaron-night-strength), var(--app-bg));
+}
+html[data-skin^="macaron-"]:not([data-skin="macaron-gradient"])[data-theme="oled"] {
+    --macaron-night-strength: 9%;
+}
+
+html[data-skin^="macaron-"] :is(.hapi-session-list, .hapi-session-chat, .hapi-new-session, .hapi-settings-page) {
     background-color: var(--app-bg);
     background-image:
-        radial-gradient(ellipse at 0 0, var(--macaron-pink), transparent 62%),
-        radial-gradient(ellipse at 100% 48%, var(--macaron-lilac), transparent 64%),
-        radial-gradient(ellipse at 4% 100%, var(--macaron-mint), transparent 62%),
-        linear-gradient(145deg, var(--app-bg), var(--macaron-cream));
+        radial-gradient(ellipse at 0 0, var(--macaron-start), transparent 62%),
+        radial-gradient(ellipse at 100% 48%, var(--macaron-middle), transparent 64%),
+        radial-gradient(ellipse at 4% 100%, var(--macaron-end), transparent 62%),
+        linear-gradient(145deg, var(--app-bg), var(--macaron-base));
 }
 
-html[data-skin="macaron-gradient"] .hapi-skin-header,
-html[data-skin="macaron-gradient"] .hapi-session-list > .session-list-scrollbar-offset {
+html[data-skin^="macaron-"] .hapi-skin-header,
+html[data-skin^="macaron-"] .hapi-session-list > .session-list-scrollbar-offset {
     background: var(--macaron-glass);
     border-bottom: 1px solid var(--macaron-border);
     box-shadow: 0 2px 12px var(--macaron-shadow);
 }
 
-html[data-skin="macaron-gradient"] .session-list-item:not(.hapi-session-compact) {
+html[data-skin^="macaron-"] .session-list-item:not(.hapi-session-compact) {
     margin-block: 4px;
     padding: 10px 12px;
     border: 1px solid var(--macaron-border);
@@ -52,28 +108,28 @@ html[data-skin="macaron-gradient"] .session-list-item:not(.hapi-session-compact)
     box-shadow: 0 3px 12px var(--macaron-shadow), inset 0 1px 0 #ffffff45;
 }
 
-html[data-skin="macaron-gradient"] .session-list-item[aria-current="page"] {
+html[data-skin^="macaron-"] .session-list-item[aria-current="page"] {
     border-color: var(--app-link);
     background-image: linear-gradient(115deg, color-mix(in srgb, var(--app-link) 11%, var(--macaron-paper)), var(--macaron-paper));
 }
 
-html[data-skin="macaron-gradient"] .session-list-item:not(.hapi-session-compact) .hapi-session-summary__main {
+html[data-skin^="macaron-"] .session-list-item:not(.hapi-session-compact) .hapi-session-summary__main {
     grid-template-columns: minmax(0, 1fr);
     gap: 3px;
     opacity: 1;
 }
-html[data-skin="macaron-gradient"] .session-list-item:not(.hapi-session-compact) .hapi-session-summary__meta {
+html[data-skin^="macaron-"] .session-list-item:not(.hapi-session-compact) .hapi-session-summary__meta {
     flex-wrap: wrap;
     justify-content: flex-start;
     padding-left: 24px;
 }
 
-html[data-skin="macaron-gradient"] .session-list-item:not(.hapi-session-compact):focus-visible {
+html[data-skin^="macaron-"] .session-list-item:not(.hapi-session-compact):focus-visible {
     outline: 2px solid var(--app-link);
     outline-offset: 2px;
 }
 
-html[data-skin="macaron-gradient"] .hapi-skin-assistant {
+html[data-skin^="macaron-"] .hapi-skin-assistant {
     padding: 16px;
     border: 1px solid var(--macaron-border);
     border-radius: 6px 20px 20px;
@@ -81,44 +137,44 @@ html[data-skin="macaron-gradient"] .hapi-skin-assistant {
     box-shadow: 0 4px 16px var(--macaron-shadow);
 }
 
-html[data-skin="macaron-gradient"] .hapi-skin-user {
+html[data-skin^="macaron-"] .hapi-skin-user {
     border: 1px solid var(--macaron-border);
     border-radius: 20px 6px 20px 20px;
     background-image: linear-gradient(125deg,
-        color-mix(in srgb, var(--app-chat-user-surface-bg) 80%, var(--macaron-pink)),
-        color-mix(in srgb, var(--app-chat-user-surface-bg) 80%, var(--macaron-lilac)));
+        color-mix(in srgb, var(--app-chat-user-surface-bg) 80%, var(--macaron-start)),
+        color-mix(in srgb, var(--app-chat-user-surface-bg) 80%, var(--macaron-middle)));
     box-shadow: 0 2px 10px var(--macaron-shadow);
 }
 
-html[data-skin="macaron-gradient"] .hapi-skin-composer {
+html[data-skin^="macaron-"] .hapi-skin-composer {
     border: 1px solid var(--macaron-border);
     border-radius: 22px;
-    background-image: linear-gradient(120deg, var(--macaron-paper), color-mix(in srgb, var(--macaron-paper) 85%, var(--macaron-lilac)));
+    background-image: linear-gradient(120deg, var(--macaron-paper), color-mix(in srgb, var(--macaron-paper) 85%, var(--macaron-middle)));
     box-shadow: 0 4px 20px var(--macaron-shadow), inset 0 1px 0 #ffffff45;
 }
 
-html[data-skin="macaron-gradient"] :is(.hapi-skin-panel, .hapi-skin-dialog) {
+html[data-skin^="macaron-"] :is(.hapi-skin-panel, .hapi-skin-dialog) {
     border: 1px solid var(--macaron-border);
     border-radius: 18px;
-    background-image: linear-gradient(135deg, color-mix(in srgb, var(--macaron-lilac) 12%, transparent), transparent 64%);
+    background-image: linear-gradient(135deg, color-mix(in srgb, var(--macaron-middle) 12%, transparent), transparent 64%);
     box-shadow: 0 4px 18px var(--macaron-shadow);
 }
 
-html[data-skin="macaron-gradient"] .hapi-skin-button { border-radius: 12px; }
-html[data-skin="macaron-gradient"] .hapi-skin-button-primary {
+html[data-skin^="macaron-"] .hapi-skin-button { border-radius: 12px; }
+html[data-skin^="macaron-"] .hapi-skin-button-primary {
     background-image: linear-gradient(120deg,
-        color-mix(in srgb, var(--app-button) 94%, var(--macaron-pink)),
-        color-mix(in srgb, var(--app-button) 94%, var(--macaron-mint)));
+        color-mix(in srgb, var(--app-button) 94%, var(--macaron-start)),
+        color-mix(in srgb, var(--app-button) 94%, var(--macaron-end)));
     box-shadow: 0 3px 9px var(--macaron-shadow);
 }
 
-.skin-option__preview--macaron-gradient {
-    background: radial-gradient(ellipse at 0 0, #f5cee2, transparent 70%), linear-gradient(135deg, #fff0d8, #ded8f6 55%, #cfece1);
+.skin-option[data-skin-option^="macaron-"] .skin-option__preview {
+    background: radial-gradient(ellipse at 0 0, var(--macaron-tone-start), transparent 70%), linear-gradient(135deg, var(--macaron-tone-base), var(--macaron-tone-middle) 55%, var(--macaron-tone-end));
 }
-.skin-option__preview--macaron-gradient .skin-option__sample {
+.skin-option[data-skin-option^="macaron-"] .skin-option__preview .skin-option__sample {
     background: #fff9;
     border: 1px solid #fff9;
     border-radius: 9px;
 }
-.skin-option__preview--macaron-gradient .skin-option__sample i { background: #b8a6c9; }
-.skin-option__preview--macaron-gradient .skin-option__sample i:nth-child(2) { background: #9f82ba; }
+.skin-option[data-skin-option^="macaron-"] .skin-option__preview .skin-option__sample i { background: var(--macaron-preview-ink); opacity: .65; }
+.skin-option[data-skin-option^="macaron-"] .skin-option__preview .skin-option__sample i:nth-child(2) { background: var(--macaron-preview-ink); }

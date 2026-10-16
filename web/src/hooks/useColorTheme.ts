@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ThemeColorKeyId } from './useThemeColors'
-import { FOREST_BASE_COLORS, MACARON_BASE_COLORS, getAppearanceSkin } from '@/lib/appearanceSkin'
+import { FOREST_BASE_COLORS, MACARON_SKIN_COLORS, getAppearanceSkin } from '@/lib/appearanceSkin'
 
 export type ColorScheme = 'light' | 'dark' | 'oled'
 export type ColorThemePreset =
@@ -283,7 +283,7 @@ function resolveThemePalette(theme: ColorThemePreset, scheme: ColorScheme): Them
     if (theme !== 'default') return PALETTES[theme][toPaletteScheme(scheme)]
     const skin = getAppearanceSkin()
     const colors = skin === 'forest-adventure' ? FOREST_BASE_COLORS
-        : skin === 'macaron-gradient' ? MACARON_BASE_COLORS : null
+        : skin === 'default' ? null : MACARON_SKIN_COLORS[skin]
     if (!colors) return null
     const base = colors[scheme]
     return palette(base.accent, base.background, base.foreground, base.hint, base.secondary)

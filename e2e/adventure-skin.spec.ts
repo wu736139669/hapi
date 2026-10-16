@@ -2,6 +2,14 @@ import { expect, test } from '@playwright/test'
 
 const fixture = '/e2e-fixtures/adventure-skin-fixture.html'
 
+const macaronVariants = [
+    { skin: 'macaron-peach', name: 'Peach Cream', light: '#fff8f2', dark: '#241b18', tone: '#ffd9c7' },
+    { skin: 'macaron-mint', name: 'Mint Sea Salt', light: '#f4fbf8', dark: '#15221f', tone: '#caece2' },
+    { skin: 'macaron-blueberry', name: 'Blueberry Cream', light: '#f7f8ff', dark: '#191e2c', tone: '#d3ddfa' },
+    { skin: 'macaron-lemon', name: 'Lemon Sorbet', light: '#fffcef', dark: '#242117', tone: '#fff0b9' },
+    { skin: 'macaron-rose', name: 'Rose Lychee', light: '#fff7fb', dark: '#251923', tone: '#f7cfe0' },
+] as const
+
 test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.addInitScript(() => {
@@ -198,19 +206,20 @@ test('a real question card remains selectable and submits its own request ID', a
 })
 
 test.describe('Macaron Gradient', () => {
-    test('three skins cycle with the keyboard, persist, and synchronize across tabs', async ({ page, context }) => {
+    test('all skins cycle with the keyboard, persist, and synchronize across tabs', async ({ page, context }) => {
         await page.goto(`${fixture}?view=settings`)
         const choices = page.getByRole('radiogroup', { name: 'Interface skin' })
-        await expect(choices.getByRole('radio')).toHaveCount(3)
+        await expect(choices.getByRole('radio')).toHaveCount(8)
         const macaron = choices.getByRole('radio', { name: 'Macaron Gradient', exact: true })
+        const last = choices.getByRole('radio', { name: 'Rose Lychee', exact: true })
         await choices.getByRole('radio', { name: 'Default', exact: true }).press('End')
-        await expect(macaron).toBeFocused()
-        await expect(page.locator('html')).toHaveAttribute('data-skin', 'macaron-gradient')
-        await macaron.press('ArrowRight')
+        await expect(last).toBeFocused()
+        await expect(page.locator('html')).toHaveAttribute('data-skin', 'macaron-rose')
+        await last.press('ArrowRight')
         await expect(choices.getByRole('radio', { name: 'Default', exact: true })).toBeFocused()
         await choices.getByRole('radio', { name: 'Default', exact: true }).press('ArrowUp')
-        await expect(macaron).toBeFocused()
-        await macaron.press('Home')
+        await expect(last).toBeFocused()
+        await last.press('Home')
         await choices.getByRole('radio', { name: 'Default', exact: true }).press('ArrowRight')
         await expect(choices.getByRole('radio', { name: 'Forest Adventure', exact: true })).toBeFocused()
         await macaron.click()
@@ -289,5 +298,49 @@ test.describe('Macaron Gradient', () => {
                 await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', background)
             })
         }
+    })
+
+    test('all five color variants select, persist, and adapt to phone widths and dark modes', async ({ page }) => {
+        await page.goto(`${fixture}?view=settings`)
+        await page.setViewportSize({ width: 320, height: 844 })
+        for (const variant of macaronVariants) {
+            const option = page.getByRole('radio', { name: variant.name, exact: true })
+            await option.click()
+            await page.reload()
+            await expect(option).toHaveAttribute('aria-checked', 'true')
+            await expect(page.locator('html')).toHaveAttribute('data-skin', variant.skin)
+            expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--macaron-tone-start').trim())).toBe(variant.tone)
+            expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320)
+        }
+        for (const variant of macaronVariants) {
+            for (const scheme of ['light', 'dark', 'oled'] as const) {
+                await page.setViewportSize({ width: scheme === 'light' ? 430 : 390, height: 844 })
+                await page.goto(`${fixture}?skin=${variant.skin}&appearance=${scheme}&view=chat`)
+                await expect(page.locator('[data-testid="composer-shell"]')).toBeVisible()
+                await expect(page.locator('.hapi-session-chat')).toHaveCSS('background-image', /radial-gradient/)
+                expect(await page.evaluate(() => document.documentElement.style.getPropertyValue('--app-bg'))).toBe(scheme === 'oled' ? '#000000' : variant[scheme])
+                await expect(page.locator('.forest-scenery, .forest-companion')).toHaveCount(0)
+                expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)
+            }
+        }
+    })
+
+    test.describe('variant first HTML load', () => {
+        test.use({ serviceWorkers: 'block' })
+        test('all variant backgrounds resolve in every appearance before React loads', async ({ page }) => {
+            await page.addInitScript(() => {
+                const params = new URLSearchParams(location.search)
+                localStorage.setItem('hapi-appearance-skin', params.get('bootSkin')!)
+                localStorage.setItem('hapi-appearance', params.get('bootScheme')!)
+            })
+            await page.route('**/src/main.tsx*', route => route.fulfill({ contentType: 'text/javascript', body: '' }))
+            for (const variant of macaronVariants) {
+                for (const scheme of ['light', 'dark', 'oled'] as const) {
+                    await page.goto(`/?bootSkin=${variant.skin}&bootScheme=${scheme}`)
+                    await expect(page.locator('html')).toHaveAttribute('data-skin', variant.skin)
+                    await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', scheme === 'oled' ? '#000000' : variant[scheme])
+                }
+            }
+        })
     })
 })

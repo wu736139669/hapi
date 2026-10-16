@@ -1,5 +1,7 @@
 # 马卡龙渐变皮肤
 
+本文记录首版。后续新增五种配色，现有六种马卡龙风格，见 [多配色记录](macaron-color-variants.md)。
+
 2026-10-16；用户要求新增一套马卡龙渐变色皮肤。分支 `feat/macaron-gradient-skin`，原目录开发，未使用 worktree。新增第三种 `macaron-gradient`，默认和森林冒险继续保留。
 
 ## 设计与实现
