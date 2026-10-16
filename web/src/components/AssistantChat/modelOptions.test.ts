@@ -64,7 +64,7 @@ describe('getModelOptionsForFlavor', () => {
         expect(options.some((o) => o.value === 'opus')).toBe(true)
     })
 
-    it('keeps Claude presets when explicit options only include Sonnet models', () => {
+    it('shows only Default plus the configured custom Claude options, not the built-in presets', () => {
         const options = getModelOptionsForFlavor('claude', null, [
             { value: null, label: 'Default' },
             { value: 'sonnet', label: 'Sonnet' },
@@ -73,40 +73,30 @@ describe('getModelOptionsForFlavor', () => {
         expect(options).toEqual([
             { value: null, label: 'Default' },
             { value: 'sonnet', label: 'Sonnet' },
-            { value: 'sonnet[1m]', label: 'Sonnet 1M' },
-            { value: 'opus', label: 'Opus' },
-            { value: 'opus[1m]', label: 'Opus 1M' },
-            { value: 'fable', label: 'Fable' },
-            { value: 'fable[1m]', label: 'Fable 1M' }
+            { value: 'sonnet[1m]', label: 'Sonnet 1M' }
         ])
     })
 
-    it('adds non-preset Claude options without hiding Opus presets', () => {
+    it('does not show built-in presets next to non-preset custom Claude options', () => {
         const options = getModelOptionsForFlavor('claude', null, [
             { value: 'claude-opus-4-1-20250805', label: 'Claude Opus 4.1' }
         ])
         expect(options).toEqual([
             { value: null, label: 'Default' },
-            { value: 'claude-opus-4-1-20250805', label: 'Claude Opus 4.1' },
-            { value: 'sonnet', label: 'Sonnet' },
-            { value: 'sonnet[1m]', label: 'Sonnet 1M' },
-            { value: 'opus', label: 'Opus' },
-            { value: 'opus[1m]', label: 'Opus 1M' },
-            { value: 'fable', label: 'Fable' },
-            { value: 'fable[1m]', label: 'Fable 1M' }
+            { value: 'claude-opus-4-1-20250805', label: 'Claude Opus 4.1' }
         ])
     })
 
-    it('offers configured DeepSeek models in existing Claude sessions', () => {
+    it('offers only Default plus the configured DeepSeek models in existing Claude sessions', () => {
         const options = getModelOptionsForFlavor('claude', 'deepseek-v4-flash[1m]', [
             { value: 'deepseek-v4-flash[1m]', label: 'deepseek-v4-flash[1m]' },
             { value: 'deepseek-v4-pro[1m]', label: 'deepseek-v4-pro[1m]' }
         ])
 
-        expect(options.slice(0, 3)).toEqual([
+        expect(options).toEqual([
             { value: null, label: 'Default' },
-            { value: 'deepseek-v4-pro[1m]', label: 'deepseek-v4-pro[1m]' },
-            { value: 'deepseek-v4-flash[1m]', label: 'deepseek-v4-flash[1m]' }
+            { value: 'deepseek-v4-flash[1m]', label: 'deepseek-v4-flash[1m]' },
+            { value: 'deepseek-v4-pro[1m]', label: 'deepseek-v4-pro[1m]' }
         ])
     })
 
@@ -270,12 +260,12 @@ describe('getNextModelForFlavor', () => {
         expect(next).not.toBeNull()
     })
 
-    it('cycles through Claude presets when explicit options only include Sonnet models', () => {
+    it('cycles through the configured custom Claude options and the default entry', () => {
         const next = getNextModelForFlavor('claude', 'sonnet[1m]', [
             { value: 'sonnet', label: 'Sonnet' },
             { value: 'sonnet[1m]', label: 'Sonnet 1M' }
         ])
-        expect(next).toBe('opus')
+        expect(next).toBeNull()
     })
 
     it('cycles explicit model options', () => {

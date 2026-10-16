@@ -418,12 +418,12 @@ export function NewSession(props: {
         }
     }, [props.api])
     const claudeModelOptions = useMemo(() => {
-        const options = [...MODEL_OPTIONS.claude]
-        for (const modelName of claudeCustomModels) {
-            if (!options.some((option) => option.value === modelName)) {
-                options.push({ value: modelName, label: modelName })
-            }
-        }
+        // Custom Claude models are configured (e.g. a custom ANTHROPIC_BASE_URL
+        // endpoint): offer exactly those. The built-in Anthropic alias presets
+        // would be noise the configured endpoint does not serve.
+        const options = claudeCustomModels.length > 0
+            ? claudeCustomModels.map((modelName) => ({ value: modelName, label: modelName }))
+            : [...MODEL_OPTIONS.claude]
         if (
             agent === 'claude'
             && model !== 'auto'
@@ -435,7 +435,9 @@ export function NewSession(props: {
     }, [agent, claudeCustomModels, model])
     const claudePreferredModelValues = useMemo(
         () => agent === 'claude'
-            ? [...MODEL_OPTIONS.claude.map((option) => option.value), ...claudeCustomModels]
+            ? (claudeCustomModels.length > 0
+                ? [...claudeCustomModels]
+                : MODEL_OPTIONS.claude.map((option) => option.value))
             : null,
         [agent, claudeCustomModels]
     )
@@ -953,7 +955,12 @@ export function NewSession(props: {
             claudePreferredModelValues ?? undefined
         )
 
-        setModel(agent === 'opencode' ? 'auto' : preferred.model)
+        // With custom Claude models configured there is no "auto": fall back to
+        // the first configured model instead of a default the picker cannot show.
+        const fallbackCustomModel = agent === 'claude' && preferred.model === 'auto'
+            ? claudeCustomModels[0]
+            : undefined
+        setModel(agent === 'opencode' ? 'auto' : (fallbackCustomModel ?? preferred.model))
         setCursorSelectedBase(preferred.cursorSelectedBase)
         setEffort(preferred.effort)
         setModelReasoningEffort(preferred.modelReasoningEffort)
@@ -966,7 +973,7 @@ export function NewSession(props: {
         setAgySelectedModel(
             agent === 'agy' && preferred.model !== 'auto' ? preferred.model : null
         )
-    }, [agent, claudePreferredModelValues, legacyCodexYolo, machineId, preferredModelCatalogReady])
+    }, [agent, claudeCustomModels, claudePreferredModelValues, legacyCodexYolo, machineId, preferredModelCatalogReady])
 
     useEffect(() => {
         if (

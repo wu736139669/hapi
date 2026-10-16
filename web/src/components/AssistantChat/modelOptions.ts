@@ -53,32 +53,22 @@ function getClaudeModelOptions(currentModel?: string | null, customOptions?: Mod
         return getClaudeComposerModelOptions(currentModel)
     }
 
-    const options = getClaudeComposerModelOptions(currentModel)
-    const nextOptions = [...options]
-    let insertIndex = Math.max(1, nextOptions.findIndex((option) => option.value !== null))
-
+    // Custom Claude models are configured (e.g. a custom ANTHROPIC_BASE_URL
+    // endpoint): show those plus the default entry. Merging the built-in
+    // Anthropic alias presets here would offer models the endpoint may not
+    // serve, and a "default" choice must stay available for unset models.
+    const options: ModelOption[] = [{ value: null, label: 'Default' }]
     for (const option of customOptions) {
         const normalizedValue = normalizeCurrentModel(option.value)
-        if (!normalizedValue) {
+        if (!normalizedValue || options.some((existing) => existing.value === normalizedValue)) {
             continue
         }
-
-        const existingIndex = nextOptions.findIndex((nextOption) => nextOption.value === normalizedValue)
-        if (existingIndex >= 0) {
-            if (nextOptions[existingIndex]?.label === normalizedValue) {
-                nextOptions[existingIndex] = option
-            }
-            continue
-        }
-
-        nextOptions.splice(insertIndex, 0, {
-            value: normalizedValue,
-            label: option.label
-        })
-        insertIndex += 1
+        options.push({ value: normalizedValue, label: option.label })
     }
 
-    return nextOptions
+    // A session can be running a model that is no longer configured; keep it
+    // selectable so the switcher can still display the current value.
+    return withCurrentModelOption(options, currentModel)
 }
 
 function getAgyModelOptions(currentModel?: string | null, customOptions?: ModelOption[]): ModelOption[] {
