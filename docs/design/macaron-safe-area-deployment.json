@@ -1,0 +1,149 @@
+{
+    "status": "deployed",
+    "deployedAt": "2026-10-17T00:31:46.184522+08:00",
+    "sourceCommit": "f7fde1b963d0a71d769cc67e57cf57c431fd58f3",
+    "branch": "local/deploy-main",
+    "featureBranch": "fix/macaron-safe-area-background",
+    "version": "0.30.7",
+    "macaronColorwaysFixed": 6,
+    "signing": {
+        "identifier": "run.hapi.cli",
+        "teamIdentifier": "X75CUV458P",
+        "codeDirectoryHash": "083b1aa21d28b971f4f1716da0a87012ec793058",
+        "sameOnBothMachines": true
+    },
+    "hubHealth": "ok",
+    "before": [
+        {
+            "id": "a15888ad-d405-4884-a407-c28ddd8b397c",
+            "name": "小吴家",
+            "active": true,
+            "startedCliMtimeMs": 1792167421218.1716,
+            "codexModelsCount": 7,
+            "codexModelsSuccess": true,
+            "availableAgents": [
+                "claude",
+                "codex",
+                "cursor",
+                "dsh",
+                "grok",
+                "opencode"
+            ]
+        },
+        {
+            "id": "3b5c8a65-1c73-4f8e-b7b4-c54d42084b42",
+            "name": "小吴k2lab",
+            "active": true,
+            "startedCliMtimeMs": 1792167468000,
+            "codexModelsCount": 7,
+            "codexModelsSuccess": true,
+            "availableAgents": [
+                "claude",
+                "codex",
+                "cursor",
+                "dsh",
+                "grok",
+                "opencode"
+            ]
+        }
+    ],
+    "after": [
+        {
+            "id": "a15888ad-d405-4884-a407-c28ddd8b397c",
+            "name": "小吴家",
+            "active": true,
+            "startedCliMtimeMs": 1792168173329.8213,
+            "codexModelsCount": 7,
+            "codexModelsSuccess": true,
+            "availableAgents": [
+                "claude",
+                "codex",
+                "cursor",
+                "dsh",
+                "grok",
+                "opencode"
+            ]
+        },
+        {
+            "id": "3b5c8a65-1c73-4f8e-b7b4-c54d42084b42",
+            "name": "小吴k2lab",
+            "active": true,
+            "startedCliMtimeMs": 1792168189000,
+            "codexModelsCount": 7,
+            "codexModelsSuccess": true,
+            "availableAgents": [
+                "claude",
+                "codex",
+                "cursor",
+                "dsh",
+                "grok",
+                "opencode"
+            ]
+        }
+    ],
+    "remoteRunnerPid": 387,
+    "remoteRunnerMtimeMatchesFile": true,
+    "backups": {
+        "mini": "/Users/wusumac/.hapi/bin/backups/hapi.20261017-002930-macaron-safe-area-f7fde1b9",
+        "k2lab": "/Users/sudaxia/.hapi/bin/backups/hapi.20261017-002946-macaron-safe-area-f7fde1b9"
+    },
+    "liveUi": {
+        "skinOptions": 8,
+        "checkedVariants": [
+            "macaron-peach",
+            "macaron-mint",
+            "macaron-blueberry",
+            "macaron-lemon",
+            "macaron-rose"
+        ],
+        "seamlessToolbar": true,
+        "unframedListRows": true,
+        "persistedMacaronSelection": true,
+        "initialThemeColor": "#f4fbf8",
+        "rootCanvasGradient": true,
+        "transparentSafeAreaShells": true,
+        "boundaryChannelJumps": [
+            0,
+            1
+        ],
+        "skinImageRequests": 0,
+        "forestDecorationAbsent": true,
+        "viewport": [
+            390,
+            844
+        ],
+        "pageErrors": []
+    },
+    "simulatedSafeArea": {
+        "topPx": 59,
+        "bottomPx": 34,
+        "boundaryChannelJumps": {
+            "before": [
+                5,
+                20
+            ],
+            "after": [
+                0,
+                1
+            ]
+        },
+        "device": "390x844 Chromium; synthetic fixtures, not physical Safari"
+    },
+    "checks": {
+        "browserPassed": 18,
+        "browserFailed": 0,
+        "typecheck": "passed",
+        "fixtureTypecheck": "passed",
+        "build": "passed",
+        "releaseFeatureGuard": "passed",
+        "webPassed": 3261,
+        "webFailed": 35,
+        "cliPassed": 2886,
+        "cliFailed": 7,
+        "cliEnvironmentSuiteFailures": 1,
+        "introducedFailureIds": [],
+        "baselineFailureIdsCompared": true,
+        "protocolFixturesChanged": false
+    },
+    "prePushReview": "Referenced skill unavailable; AGENTS mechanical checks plus repository Major checklist applied."
+}
