@@ -12,6 +12,7 @@ import { getCodexImportedAt } from '@/lib/codexImportedSessions'
 import { getSessionTitle } from '@/lib/sessionTitle'
 import { useTranslation } from '@/lib/use-translation'
 import { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
+import { SessionForestCompanion } from '@/components/skins/ForestCompanion'
 
 function LoaderIcon(props: { className?: string }) {
     return (
@@ -169,8 +170,9 @@ export function SessionRowSummary(props: {
 
     return (
         <div className={`flex w-full min-w-0 flex-col ${compact ? 'gap-0' : 'gap-1'} ${className ?? ''}`}>
-            <div className={`grid min-w-0 items-center ${compact ? 'grid-cols-[minmax(0,1fr)] gap-1' : 'grid-cols-[minmax(9rem,1fr)_minmax(0,max-content)] gap-2'} ${!s.active ? 'opacity-50' : ''}`}>
+            <div className={`hapi-session-summary__main grid min-w-0 items-center ${compact ? 'grid-cols-[minmax(0,1fr)] gap-1' : 'grid-cols-[minmax(9rem,1fr)_minmax(0,max-content)] gap-2'} ${!s.active ? 'opacity-50' : ''}`}>
                 <div className={`flex min-w-0 items-center ${compact ? 'gap-1' : 'gap-2'}`}>
+                    <SessionForestCompanion session={s} compact={compact} />
                     <AgentFlavorIcon flavor={s.metadata?.flavor} className={compact ? 'h-3.5 w-3.5 shrink-0 -translate-y-px' : 'h-4 w-4 shrink-0 -translate-y-px'} />
                     <div
                         className={`min-w-0 flex-1 truncate font-medium ${compact ? 'text-xs' : 'text-sm'} ${s.active ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}
@@ -271,7 +273,7 @@ export function SessionRowSummary(props: {
                         </span>
                     ) : null}
                 </div>
-                {!compact ? <div className="flex min-w-0 items-center justify-end gap-2 overflow-hidden text-xs">
+                {!compact ? <div className="hapi-session-summary__meta flex min-w-0 items-center justify-end gap-2 overflow-hidden text-xs">
                     {todoProgress ? (
                         <span className="flex shrink-0 items-center gap-1 text-[var(--app-hint)]">
                             <BulbIcon className="h-3 w-3" />

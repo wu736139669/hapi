@@ -53,6 +53,8 @@ import { Spinner } from '@/components/Spinner'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { useToast } from '@/lib/toast-context'
 import { useSessionListToolbar } from '@/hooks/useSessionListToolbar'
+import { ForestBanner } from '@/components/skins/ForestBanner'
+import { ForestAsset, ForestEmptyIllustration } from '@/components/skins/ForestAsset'
 
 export { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
 
@@ -123,6 +125,7 @@ function SessionsEmptyState(props: {
     const { t } = useTranslation()
     return (
         <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+            <ForestEmptyIllustration />
             <svg
                 xmlns="http://www.w3.org/2000/svg"
                 width="44"
@@ -133,7 +136,8 @@ function SessionsEmptyState(props: {
                 strokeWidth="1.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                className="text-[var(--app-hint)] opacity-60"
+                className="hapi-sessions-empty-icon text-[var(--app-hint)] opacity-60"
+                aria-hidden="true"
             >
                 <rect x="3" y="4" width="18" height="16" rx="2" />
                 <path d="M3 9h18" />
@@ -1074,7 +1078,7 @@ function SessionItem(props: {
             <button
                 type="button"
                 {...longPressHandlers}
-                className={`session-list-item group/session-row flex w-full flex-col text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg ${compact ? 'gap-0 py-1 pl-1.5 pr-1' : 'gap-1 py-2 pl-2.5 pr-2'} ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
+                className={`session-list-item ${compact ? 'hapi-session-compact' : ''} group/session-row flex w-full flex-col text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg ${compact ? 'gap-0 py-1 pl-1.5 pr-1' : 'gap-1 py-2 pl-2.5 pr-2'} ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
                 style={{ WebkitTouchCallout: 'none' }}
                 aria-current={selected ? 'page' : undefined}
                 aria-describedby={describedBy}
@@ -1718,6 +1722,7 @@ export function SessionList(props: {
                     title={group.directory}
                 >
                     <ChevronIcon className={compact ? 'h-3 w-3 text-[var(--app-hint)] shrink-0' : 'h-3.5 w-3.5 text-[var(--app-hint)] shrink-0'} collapsed={isCollapsed} />
+                    {!compact ? <ForestAsset name="leaf-crest" className="forest-project-mark" /> : null}
                     <span className={cn('font-medium truncate flex-1 min-w-0', compact ? 'text-[10px]' : 'text-sm')}>
                         {groupTitle}
                     </span>
@@ -1986,7 +1991,8 @@ export function SessionList(props: {
     }, [])
 
     return (
-        <div className="flex min-h-0 w-full flex-1 flex-col">
+        <div className="hapi-session-list flex min-h-0 w-full flex-1 flex-col">
+            {!compact ? <ForestBanner /> : null}
             <div className="session-list-scrollbar-offset mx-auto w-full max-w-content shrink-0">
             {showHeaderRow ? (
                 <div className={cn('flex items-center gap-1 py-1', compact ? 'px-1' : 'px-2')}>

@@ -1,0 +1,422 @@
+{
+  "rawSourceSize": [
+    1254,
+    1254
+  ],
+  "normalizedSize": [
+    1536,
+    1536
+  ],
+  "grid": {
+    "rows": 3,
+    "columns": 3
+  },
+  "assets": [
+    {
+      "name": "guide",
+      "size": 144,
+      "use": "Session companion and skin preview; state badges remain live HTML",
+      "cell": [
+        0,
+        0,
+        512,
+        512
+      ],
+      "contentBounds": [
+        148,
+        92,
+        364,
+        420
+      ],
+      "sourceMargins": [
+        148,
+        92,
+        148,
+        92
+      ],
+      "rawCell": [
+        0,
+        0,
+        418,
+        484
+      ],
+      "rawContentBounds": [
+        81,
+        51,
+        355,
+        468
+      ],
+      "rawMargins": [
+        81,
+        51,
+        63,
+        16
+      ],
+      "file": "web/public/skins/forest-adventure/elements/guide.webp",
+      "bytes": 6910,
+      "transparentFraction": 0.6438,
+      "cornersTransparent": true
+    },
+    {
+      "name": "quest-scroll",
+      "size": 128,
+      "use": "Adventure-log banner heading",
+      "cell": [
+        512,
+        0,
+        1024,
+        512
+      ],
+      "contentBounds": [
+        94,
+        92,
+        418,
+        420
+      ],
+      "sourceMargins": [
+        94,
+        92,
+        94,
+        92
+      ],
+      "rawCell": [
+        418,
+        0,
+        836,
+        484
+      ],
+      "rawContentBounds": [
+        34,
+        96,
+        380,
+        446
+      ],
+      "rawMargins": [
+        34,
+        96,
+        38,
+        38
+      ],
+      "file": "web/public/skins/forest-adventure/elements/quest-scroll.webp",
+      "bytes": 6852,
+      "transparentFraction": 0.4579,
+      "cornersTransparent": true
+    },
+    {
+      "name": "backpack",
+      "size": 256,
+      "use": "Empty session-list illustration",
+      "cell": [
+        1024,
+        0,
+        1536,
+        512
+      ],
+      "contentBounds": [
+        92,
+        95,
+        420,
+        417
+      ],
+      "sourceMargins": [
+        92,
+        95,
+        92,
+        95
+      ],
+      "rawCell": [
+        836,
+        0,
+        1254,
+        484
+      ],
+      "rawContentBounds": [
+        34,
+        114,
+        366,
+        440
+      ],
+      "rawMargins": [
+        34,
+        114,
+        52,
+        44
+      ],
+      "file": "web/public/skins/forest-adventure/elements/backpack.webp",
+      "bytes": 19556,
+      "transparentFraction": 0.3745,
+      "cornersTransparent": true
+    },
+    {
+      "name": "mushrooms",
+      "size": 192,
+      "use": "Banner foreground and empty-list illustration",
+      "cell": [
+        0,
+        512,
+        512,
+        1024
+      ],
+      "contentBounds": [
+        92,
+        111,
+        420,
+        401
+      ],
+      "sourceMargins": [
+        92,
+        111,
+        92,
+        111
+      ],
+      "rawCell": [
+        0,
+        484,
+        418,
+        850
+      ],
+      "rawContentBounds": [
+        65,
+        45,
+        401,
+        342
+      ],
+      "rawMargins": [
+        65,
+        45,
+        17,
+        24
+      ],
+      "file": "web/public/skins/forest-adventure/elements/mushrooms.webp",
+      "bytes": 11958,
+      "transparentFraction": 0.5007,
+      "cornersTransparent": true
+    },
+    {
+      "name": "wildflowers",
+      "size": 192,
+      "use": "Empty-list illustration",
+      "cell": [
+        512,
+        512,
+        1024,
+        1024
+      ],
+      "contentBounds": [
+        92,
+        133,
+        420,
+        378
+      ],
+      "sourceMargins": [
+        92,
+        133,
+        92,
+        134
+      ],
+      "rawCell": [
+        418,
+        484,
+        836,
+        850
+      ],
+      "rawContentBounds": [
+        53,
+        94,
+        373,
+        333
+      ],
+      "rawMargins": [
+        53,
+        94,
+        45,
+        33
+      ],
+      "file": "web/public/skins/forest-adventure/elements/wildflowers.webp",
+      "bytes": 12178,
+      "transparentFraction": 0.5856,
+      "cornersTransparent": true
+    },
+    {
+      "name": "wood-corner",
+      "size": 128,
+      "use": "Banner frame accent, independent of live text",
+      "cell": [
+        1024,
+        512,
+        1536,
+        1024
+      ],
+      "contentBounds": [
+        92,
+        92,
+        420,
+        419
+      ],
+      "sourceMargins": [
+        92,
+        92,
+        92,
+        93
+      ],
+      "rawCell": [
+        836,
+        484,
+        1254,
+        850
+      ],
+      "rawContentBounds": [
+        49,
+        16,
+        367,
+        333
+      ],
+      "rawMargins": [
+        49,
+        16,
+        51,
+        33
+      ],
+      "file": "web/public/skins/forest-adventure/elements/wood-corner.webp",
+      "bytes": 3702,
+      "transparentFraction": 0.7255,
+      "cornersTransparent": true
+    },
+    {
+      "name": "leaf-crest",
+      "size": 96,
+      "use": "Noncompact project-group header decoration",
+      "cell": [
+        0,
+        1024,
+        512,
+        1536
+      ],
+      "contentBounds": [
+        99,
+        92,
+        413,
+        420
+      ],
+      "sourceMargins": [
+        99,
+        92,
+        99,
+        92
+      ],
+      "rawCell": [
+        0,
+        850,
+        418,
+        1254
+      ],
+      "rawContentBounds": [
+        66,
+        22,
+        368,
+        337
+      ],
+      "rawMargins": [
+        66,
+        22,
+        50,
+        67
+      ],
+      "file": "web/public/skins/forest-adventure/elements/leaf-crest.webp",
+      "bytes": 4792,
+      "transparentFraction": 0.5041,
+      "cornersTransparent": true
+    },
+    {
+      "name": "map-compass",
+      "size": 192,
+      "use": "Reserved for a later file/project surface; not loaded at runtime yet",
+      "cell": [
+        512,
+        1024,
+        1024,
+        1536
+      ],
+      "contentBounds": [
+        92,
+        112,
+        420,
+        400
+      ],
+      "sourceMargins": [
+        92,
+        112,
+        92,
+        112
+      ],
+      "rawCell": [
+        418,
+        850,
+        836,
+        1254
+      ],
+      "rawContentBounds": [
+        42,
+        37,
+        378,
+        332
+      ],
+      "rawMargins": [
+        42,
+        37,
+        40,
+        72
+      ],
+      "file": "web/public/skins/forest-adventure/elements/map-compass.webp",
+      "bytes": 11878,
+      "transparentFraction": 0.5315,
+      "cornersTransparent": true
+    },
+    {
+      "name": "lantern",
+      "size": 128,
+      "use": "Reserved for a later tools surface; not loaded at runtime yet",
+      "cell": [
+        1024,
+        1024,
+        1536,
+        1536
+      ],
+      "contentBounds": [
+        126,
+        92,
+        385,
+        420
+      ],
+      "sourceMargins": [
+        126,
+        92,
+        127,
+        92
+      ],
+      "rawCell": [
+        836,
+        850,
+        1254,
+        1254
+      ],
+      "rawContentBounds": [
+        104,
+        21,
+        357,
+        341
+      ],
+      "rawMargins": [
+        104,
+        21,
+        61,
+        63
+      ],
+      "file": "web/public/skins/forest-adventure/elements/lantern.webp",
+      "bytes": 7126,
+      "transparentFraction": 0.5891,
+      "cornersTransparent": true
+    }
+  ],
+  "runtimeBytes": 84952
+}

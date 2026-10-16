@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { applyColorTheme, getColorThemePickerValue, getColorThemeStorageKey, getStoredColorTheme, type ColorScheme } from './useColorTheme'
+import { APPEARANCE_SKIN_EVENT } from '@/lib/appearanceSkin'
 
 /**
  * Per-appearance "key color" customization.
@@ -265,6 +266,9 @@ export function applyThemeColors(): void {
             }
         }
     }
+    const background = rootStyle.getPropertyValue('--app-bg').trim()
+    const meta = document.querySelector('meta[name="theme-color"]')
+    if (background && meta) meta.setAttribute('content', background)
 }
 
 export function getThemeColorPickerValue(scheme: ThemeScheme, id: ThemeColorKeyId): string {
@@ -284,6 +288,7 @@ export function initializeThemeColors(): void {
         if (event.key === STORAGE_KEY || event.key === getColorThemeStorageKey()) applyThemeColors()
     })
     window.addEventListener('hapi-color-theme-change', applyThemeColors)
+    window.addEventListener(APPEARANCE_SKIN_EVENT, applyThemeColors)
 
     const themeObserver = new MutationObserver(() => {
         applyThemeColors()
@@ -330,11 +335,13 @@ export function useThemeColors(): {
         const onColorThemeChange = () => refresh()
         window.addEventListener('storage', onStorage)
         window.addEventListener('hapi-color-theme-change', onColorThemeChange)
+        window.addEventListener(APPEARANCE_SKIN_EVENT, onColorThemeChange)
 
         return () => {
             themeObserver.disconnect()
             window.removeEventListener('storage', onStorage)
             window.removeEventListener('hapi-color-theme-change', onColorThemeChange)
+            window.removeEventListener(APPEARANCE_SKIN_EVENT, onColorThemeChange)
         }
     }, [])
 

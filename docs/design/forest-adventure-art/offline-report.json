@@ -1,0 +1,89 @@
+{
+  "defaultSkinCacheEntries": 0,
+  "offlineColdBrowser": true,
+  "httpCacheDisabled": true,
+  "offlineDecoded": [
+    [
+      1024,
+      342
+    ],
+    [
+      144,
+      144
+    ],
+    [
+      128,
+      128
+    ],
+    [
+      256,
+      256
+    ],
+    [
+      192,
+      192
+    ],
+    [
+      192,
+      192
+    ],
+    [
+      128,
+      128
+    ],
+    [
+      96,
+      96
+    ],
+    [
+      192,
+      192
+    ],
+    [
+      128,
+      128
+    ]
+  ],
+  "responses": [
+    {
+      "path": "/skins/forest-adventure/elements/guide.webp",
+      "serviceWorker": true
+    },
+    {
+      "path": "/skins/forest-adventure/elements/quest-scroll.webp",
+      "serviceWorker": true
+    },
+    {
+      "path": "/skins/forest-adventure/elements/backpack.webp",
+      "serviceWorker": true
+    },
+    {
+      "path": "/skins/forest-adventure/elements/mushrooms.webp",
+      "serviceWorker": true
+    },
+    {
+      "path": "/skins/forest-adventure/forest.webp",
+      "serviceWorker": true
+    },
+    {
+      "path": "/skins/forest-adventure/elements/wildflowers.webp",
+      "serviceWorker": true
+    },
+    {
+      "path": "/skins/forest-adventure/elements/wood-corner.webp",
+      "serviceWorker": true
+    },
+    {
+      "path": "/skins/forest-adventure/elements/leaf-crest.webp",
+      "serviceWorker": true
+    },
+    {
+      "path": "/skins/forest-adventure/elements/map-compass.webp",
+      "serviceWorker": true
+    },
+    {
+      "path": "/skins/forest-adventure/elements/lantern.webp",
+      "serviceWorker": true
+    }
+  ]
+}

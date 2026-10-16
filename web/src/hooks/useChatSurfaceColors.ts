@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { APPEARANCE_SKIN_EVENT } from '@/lib/appearanceSkin'
 
 type ThemeMode = 'light' | 'dark' | 'oled'
 type SurfaceKey = 'tool-group' | 'user-message'
@@ -217,6 +218,7 @@ export function initializeChatSurfaceColors(): void {
     initialized = true
 
     window.addEventListener('storage', applyChatSurfaceVariables)
+    window.addEventListener(APPEARANCE_SKIN_EVENT, applyChatSurfaceVariables)
 
     const themeObserver = new MutationObserver(() => {
         applyChatSurfaceVariables()

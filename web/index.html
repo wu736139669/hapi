@@ -76,9 +76,11 @@
 
                 var scheme = getInitialScheme()
                 var colorTheme = 'default'
+                var skin = 'default'
                 try {
                     var storedColorTheme = localStorage.getItem('hapi-color-theme')
                     if (storedColorTheme && themeBackgrounds[storedColorTheme]) colorTheme = storedColorTheme
+                    if (localStorage.getItem('hapi-appearance-skin') === 'forest-adventure') skin = 'forest-adventure'
                 } catch (error) {
                     // Ignore storage errors.
                 }
@@ -86,6 +88,17 @@
                 var color = colorTheme === 'default'
                     ? (scheme === 'oled' ? oledColor : (scheme === 'dark' ? darkColor : lightColor))
                     : themeBackgrounds[colorTheme][paletteScheme]
+                if (skin === 'forest-adventure' && colorTheme === 'default') {
+                    color = { light: '#f7f3e8', dark: '#15221c', oled: '#000000' }[scheme]
+                }
+                try {
+                    var customColors = JSON.parse(localStorage.getItem('hapi-theme-colors') || '{}')
+                    var customBackground = customColors && customColors[scheme] && customColors[scheme].background
+                    if (typeof customBackground === 'string' && /^#[0-9a-f]{6}$/i.test(customBackground)) color = customBackground
+                } catch (error) {
+                    // Invalid or unavailable customization uses the resolved base.
+                }
+                document.documentElement.setAttribute('data-skin', skin)
                 document.documentElement.setAttribute('data-theme', scheme)
                 document.documentElement.setAttribute('data-color-theme', colorTheme)
                 document.documentElement.style.backgroundColor = color

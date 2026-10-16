@@ -1,0 +1,160 @@
+/* Explicit surfaces keep the default UI and nested editors untouched. */
+html[data-skin="forest-adventure"] {
+    --forest-frame: color-mix(in srgb, #957343 48%, var(--app-border));
+    --forest-inset: color-mix(in srgb, #fff6cf 35%, transparent);
+    --forest-shadow: color-mix(in srgb, #5b573a 13%, transparent);
+    --forest-paper: color-mix(in srgb, var(--app-bg) 93%, #ecca7b);
+    --forest-radius: 12px;
+}
+
+html[data-skin="forest-adventure"][data-theme="dark"],
+html[data-skin="forest-adventure"][data-theme="oled"] {
+    --forest-frame: color-mix(in srgb, #b49c63 35%, var(--app-border));
+    --forest-inset: color-mix(in srgb, #c1dca6 9%, transparent);
+    --forest-paper: color-mix(in srgb, var(--app-bg) 96%, #a9c480);
+    --forest-shadow: #0003;
+}
+
+.forest-banner {
+    position: relative;
+    isolation: isolate;
+    flex-shrink: 0;
+    height: 78px;
+    margin: 4px 8px 6px;
+    overflow: hidden;
+    border: 2px solid #91b071;
+    border-radius: 14px 14px 9px 9px;
+    background: #b9e8e8 url('/skins/forest-adventure/forest.webp') center 66% / cover;
+    box-shadow: 0 2px 0 #68814a55, inset 0 0 0 1px #ffffff8c;
+}
+
+.forest-banner::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, #eaf8e8eb, #edfaeab8 38%, transparent 75%);
+    z-index: -1;
+}
+
+.forest-banner__copy { padding: 9px 13px; color: #2c4c34; }
+.forest-banner__eyebrow { display: block; font-size: 8px; font-weight: 800; letter-spacing: .13em; }
+.forest-banner__title { display: flex; align-items: center; gap: 5px; margin-top: 1px; font-size: 21px; font-weight: 800; letter-spacing: .05em; line-height: 1.35; }
+.forest-banner__title .forest-asset { width: 25px; height: 28px; }
+.forest-banner__caption { font-size: 10px; font-weight: 500; }
+.forest-banner__corner { position: absolute; top: -2px; right: -2px; width: 39px; height: 39px; transform: rotate(90deg); }
+.forest-banner__mushrooms { position: absolute; bottom: -1px; right: 8px; width: 43px; height: 40px; }
+
+.forest-asset { display: block; flex-shrink: 0; object-fit: contain; pointer-events: none; user-select: none; }
+.forest-project-mark { width: 18px; height: 20px; }
+.forest-empty-illustration { position: relative; width: 174px; height: 112px; }
+.forest-empty-illustration .forest-asset { position: absolute; }
+.forest-empty-illustration__backpack { width: 104px; height: 104px; bottom: 7px; left: 38px; }
+.forest-empty-illustration__mushrooms { width: 58px; height: 58px; bottom: 0; left: 0; }
+.forest-empty-illustration__flowers { width: 58px; height: 58px; bottom: 0; right: 0; }
+html[data-skin="forest-adventure"] .hapi-sessions-empty-icon { display: none; }
+
+html[data-skin="forest-adventure"][data-theme="dark"] .forest-banner,
+html[data-skin="forest-adventure"][data-theme="oled"] .forest-banner {
+    border-color: #637d56;
+    background-blend-mode: multiply;
+    background-color: #748d9e;
+}
+html[data-skin="forest-adventure"][data-theme="dark"] .forest-banner::before,
+html[data-skin="forest-adventure"][data-theme="oled"] .forest-banner::before {
+    background: linear-gradient(90deg, #193628f5, #1a3828cf 38%, transparent 85%);
+}
+html[data-skin="forest-adventure"][data-theme="dark"] .forest-banner__copy,
+html[data-skin="forest-adventure"][data-theme="oled"] .forest-banner__copy { color: #f5edc9; }
+
+.forest-companion { position: relative; display: inline-flex; width: 30px; height: 32px; flex-shrink: 0; vertical-align: middle; }
+.forest-companion__sprite { width: 100%; height: 100%; }
+.forest-companion[data-companion-state="inactive"] { filter: saturate(.55); }
+.forest-companion__notice {
+    position: absolute; top: -4px; right: -2px; display: grid; place-items: center;
+    width: 15px; height: 17px; border: 1px solid #895b20; border-radius: 7px 7px 7px 1px;
+    background: #ffe095; color: #6e4218; font: 800 12px/1 system-ui;
+}
+.forest-companion[data-companion-state="input"] .forest-companion__notice { background: #d6edff; color: #244f77; border-color: #5f8ea5; }
+.forest-companion__spark { position: absolute; top: -1px; right: -4px; color: var(--app-link); font-size: 14px; }
+
+html[data-skin="forest-adventure"] .hapi-skin-header {
+    border-bottom: 1px solid var(--forest-frame);
+    background-color: var(--forest-paper);
+    box-shadow: inset 0 -3px 0 var(--forest-inset), 0 2px 6px var(--forest-shadow);
+}
+html[data-skin="forest-adventure"] .hapi-skin-panel,
+html[data-skin="forest-adventure"] .hapi-skin-dialog {
+    border: 1px solid var(--forest-frame);
+    border-radius: var(--forest-radius);
+    box-shadow: inset 0 0 0 3px var(--forest-inset), 0 3px 0 var(--forest-shadow);
+}
+html[data-skin="forest-adventure"] .hapi-skin-dialog { background-color: var(--forest-paper); }
+html[data-skin="forest-adventure"] .hapi-session-list { background-image: linear-gradient(180deg, var(--forest-inset), transparent 220px); }
+html[data-skin="forest-adventure"] .session-list-item:not(.hapi-session-compact) {
+    margin-block: 2px;
+    padding: 9px 10px;
+    border: 1px solid var(--forest-frame);
+    border-radius: 10px;
+    background-color: var(--forest-paper);
+    box-shadow: inset 0 0 0 2px var(--forest-inset), 0 2px 0 var(--forest-shadow);
+}
+html[data-skin="forest-adventure"] .session-list-item[aria-current="page"] {
+    border-color: var(--app-link);
+    background-image: linear-gradient(110deg, color-mix(in srgb, var(--app-link) 11%, transparent), transparent);
+}
+html[data-skin="forest-adventure"] .session-list-item:not(.hapi-session-compact) .hapi-session-summary__main {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+    opacity: 1;
+}
+html[data-skin="forest-adventure"] .session-list-item:not(.hapi-session-compact) .hapi-session-summary__meta {
+    flex-wrap: wrap;
+    padding-left: 38px;
+    justify-content: flex-start;
+}
+html[data-skin="forest-adventure"] .hapi-skin-assistant {
+    padding: 12px;
+    border: 1px solid var(--forest-frame);
+    border-radius: 4px 14px 14px;
+    background: var(--forest-paper);
+    box-shadow: inset 0 0 0 3px var(--forest-inset), 0 2px 0 var(--forest-shadow);
+}
+html[data-skin="forest-adventure"] .hapi-skin-user {
+    border: 1px solid color-mix(in srgb, var(--app-link) 30%, var(--app-border));
+    border-radius: 14px 4px 14px 14px;
+    box-shadow: inset 0 1px 0 var(--forest-inset);
+}
+html[data-skin="forest-adventure"] .hapi-skin-composer {
+    border: 1px solid var(--forest-frame);
+    border-radius: 14px;
+    box-shadow: inset 0 0 0 3px var(--forest-inset), 0 3px 0 var(--forest-shadow);
+}
+html[data-skin="forest-adventure"] .hapi-skin-button {
+    box-shadow: inset 0 1px 0 #ffffff35, 0 2px 0 var(--forest-shadow);
+    border-radius: 8px;
+}
+html[data-skin="forest-adventure"] .hapi-skin-button:active:not(:disabled) { transform: translateY(1px); }
+html[data-skin="forest-adventure"] .hapi-new-session { background-image: linear-gradient(135deg, var(--forest-inset), transparent 65%); }
+
+.skin-option { display: flex; min-width: 0; flex-direction: column; overflow: hidden; text-align: left; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-bg); color: var(--app-fg); }
+.skin-option[aria-checked="true"] { outline: 2px solid var(--app-link); outline-offset: 2px; }
+.skin-option:focus-visible { outline: 3px solid var(--app-link); outline-offset: 3px; }
+.skin-option__preview { display: flex; align-items: flex-end; height: 68px; padding: 7px 10px; background: var(--app-secondary-bg); }
+.skin-option__preview--forest-adventure { background: #b9e8e8 url('/skins/forest-adventure/forest.webp') right 60% / cover; }
+.skin-option__preview .forest-companion { width: 39px; height: 40px; filter: drop-shadow(0 1px 1px #34553044); }
+.skin-option__sample { display: flex; flex-direction: column; gap: 5px; width: 80%; height: 45px; padding: 7px; border-radius: 6px; background: var(--app-bg); box-shadow: 0 1px 4px #0001; }
+.skin-option__sample i { display: block; height: 5px; width: 80%; background: var(--app-border); border-radius: 2px; }
+.skin-option__sample i:nth-child(2) { width: 60%; background: var(--app-link); opacity: .5; }
+.skin-option__label { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-height: 44px; padding: 8px 10px; font-size: 13px; font-weight: 600; }
+.skin-option__check { flex-shrink: 0; color: var(--app-link); }
+
+/* Animate only the single visible conversation guide, never every list row. */
+@media (prefers-reduced-motion: no-preference) {
+    html[data-skin="forest-adventure"] .hapi-skin-header .forest-companion[data-companion-state="working"] .forest-companion__sprite {
+        animation: forest-guide-work 1.2s steps(2, end) infinite;
+    }
+}
+html[data-skin-motion="paused"] .forest-companion__sprite { animation-play-state: paused; }
+@keyframes forest-guide-work { 50% { transform: translateY(-2px) rotate(-3deg); } }
+
+@media (max-height: 550px) { .forest-banner { height: 62px; } .forest-banner__caption { display: none; } }

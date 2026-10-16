@@ -32,6 +32,7 @@ import { useOptionalAppContext } from '@/lib/app-context'
 import { SessionShareDialog } from '@/components/SessionShareDialog'
 import type { SessionShare } from '@/types/api'
 import { ApiError } from '@/api/client'
+import { SessionForestCompanion } from '@/components/skins/ForestCompanion'
 
 /** Same preference order as session-list chips: display label → host → short id. */
 export function resolveSessionHeaderMachineLabel(
@@ -552,7 +553,7 @@ export function SessionHeader(props: {
 
     return (
         <>
-            <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
+            <div className="hapi-skin-header bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
                 <div className="mx-auto w-full max-w-content flex items-center gap-2 p-3">
                     {/* Guest shares have no session list to return to. */}
                     {!isSessionGuest ? (
@@ -579,6 +580,7 @@ export function SessionHeader(props: {
                     ) : null}
 
                     {/* Session info - two lines: title and path */}
+                    <SessionForestCompanion session={props.session} />
                     <div className="min-w-0 flex-1">
                         <div className="truncate font-semibold">
                             {title}

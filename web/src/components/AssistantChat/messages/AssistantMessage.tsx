@@ -120,7 +120,7 @@ export function HappyAssistantMessage() {
         <MessagePrimitive.Root
             id={elementId}
             data-hapi-message-role="assistant"
-            className={`happy-message ${rootClass} scroll-mt-4`}
+            className={`happy-message ${toolOnly ? '' : 'hapi-skin-assistant'} ${rootClass} scroll-mt-4`}
         >
             {isCliOutput
                 ? <CliOutputBlock text={cliText} />

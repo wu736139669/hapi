@@ -31,6 +31,18 @@ type PushPayload = {
 
 precacheAndRoute(self.__WB_MANIFEST)
 
+// Cache opt-in artwork on demand, keeping the default install free of skin downloads.
+const skinAssetPath = new URL('skins/', self.registration.scope).pathname
+registerRoute(
+    ({ request, url }) => request.destination === 'image'
+        && url.origin === self.location.origin && url.pathname.startsWith(skinAssetPath),
+    new NetworkFirst({
+        cacheName: 'appearance-skins',
+        networkTimeoutSeconds: 2,
+        plugins: [new ExpirationPlugin({ maxEntries: 16, maxAgeSeconds: 60 * 60 * 24 * 30 })],
+    })
+)
+
 registerRoute(
     ({ url }) => url.pathname === '/api/sessions',
     new NetworkFirst({

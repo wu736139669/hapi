@@ -1,0 +1,5 @@
+{
+    "extends": "../tsconfig.json",
+    "include": ["adventure-skin-fixture.tsx", "../src/types/global.d.ts", "../src/types/pwa.d.ts", "../src/types/diff.d.ts"],
+    "compilerOptions": { "noEmit": true }
+}

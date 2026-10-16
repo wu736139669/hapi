@@ -43,7 +43,7 @@ export function SettingsSection(props: { title?: string; description?: string; c
         <section>
             {props.title ? <h2 className="mb-2 text-base font-semibold text-[var(--app-fg)]">{props.title}</h2> : null}
             {props.description ? <p className="mb-2 text-sm text-[var(--app-hint)]">{props.description}</p> : null}
-            <div className="overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] shadow-sm divide-y divide-[var(--app-divider)]">
+            <div className="hapi-skin-panel overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] shadow-sm divide-y divide-[var(--app-divider)]">
                 {props.children}
             </div>
         </section>

@@ -2112,7 +2112,7 @@ export function NewSession(props: {
     )
 
     return (
-        <div className="flex flex-col divide-y divide-[var(--app-divider)] [&>div]:pr-[10px] lg:[&>div]:pr-3">
+        <div className="hapi-new-session flex flex-col divide-y divide-[var(--app-divider)] [&>div]:pr-[10px] lg:[&>div]:pr-3">
             {props.teamId ? (
                 <div className="flex flex-col gap-2 px-3 py-3">
                     <div className="rounded-lg bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-[var(--app-fg)]">

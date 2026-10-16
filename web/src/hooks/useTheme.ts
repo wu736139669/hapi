@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { getTelegramWebApp } from './useTelegram'
+import { APPEARANCE_SKIN_EVENT, initializeAppearanceSkin } from '@/lib/appearanceSkin'
 import { applyColorTheme, getColorThemeBackground, getColorThemeStorageKey, getStoredColorTheme, type ColorScheme } from './useColorTheme'
 
 export type AppearancePreference = 'system' | 'dark' | 'light' | 'oled'
@@ -92,7 +93,8 @@ function applyBrowserThemeColor(scheme: ColorScheme): void {
         document.head.appendChild(meta)
     }
 
-    meta.content = getColorThemeBackground(getStoredColorTheme(), scheme) ?? THEME_COLORS[scheme]
+    meta.content = document.documentElement.style.getPropertyValue('--app-bg').trim()
+        || getColorThemeBackground(getStoredColorTheme(), scheme) || THEME_COLORS[scheme]
     meta.removeAttribute('media')
 }
 
@@ -101,6 +103,7 @@ export function getThemeColor(scheme: ColorScheme): string {
 }
 
 function applyTheme(scheme: ColorScheme): void {
+    initializeAppearanceSkin()
     document.documentElement.style.removeProperty('background-color')
     document.documentElement.setAttribute('data-theme', scheme)
     applyColorTheme(getStoredColorTheme(), scheme)
@@ -205,6 +208,7 @@ export function initializeTheme(): void {
                 if (event.key === getColorThemeStorageKey()) updateScheme(true)
             })
             window.addEventListener('hapi-color-theme-change', () => updateScheme(true))
+            window.addEventListener(APPEARANCE_SKIN_EVENT, () => updateScheme(true))
         }
     }
 }

@@ -1,0 +1,112 @@
+{
+    "baseline": "a8feb4feafea0b5f36a770ad2e75e195a1b8d7e0",
+    "branch": "feat/mobile-adventure-skin",
+    "new_unit_tests": {
+        "passed": 9,
+        "failed": 0
+    },
+    "browser_tests": {
+        "passed": 8,
+        "failed": 0,
+        "browser": "installed Chrome via Playwright"
+    },
+    "web": {
+        "current": {
+            "passed": 3245,
+            "failed": 35,
+            "files": 320
+        },
+        "baseline": {
+            "passed": 3236,
+            "failed": 35,
+            "files": 317
+        },
+        "introduced_failures": [],
+        "existing_failures": [
+            "src/components/FileActionMenu.test.tsx > FileActionMenu > adds the file to the composer and closes",
+            "src/components/FileActionMenu.test.tsx > FileActionMenu > copies the absolute path and closes",
+            "src/components/FileActionMenu.test.tsx > FileActionMenu > copies the relative path and closes",
+            "src/components/FileActionMenu.test.tsx > FileActionMenu > renders the three file actions",
+            "src/components/NewSession/AgyModelSelector.test.tsx > AgyModelSelector > falls back to the wire id for a picked model nobody has a label for",
+            "src/components/NewSession/AgyModelSelector.test.tsx > AgyModelSelector > keeps a picked model listed after the catalog stops advertising it",
+            "src/components/NewSession/AgyModelSelector.test.tsx > AgyModelSelector > says a re-probe is running instead of leaving Retry looking idle",
+            "src/components/NewSession/AgyModelSelector.test.tsx > AgyModelSelector > says it is fetching models, which is what the wait is actually spent on",
+            "src/components/NewSession/newSessionFormDraft.test.ts > newSessionFormDraft > round-trips cursor model fields through sessionStorage",
+            "src/components/NewSession/preferences.test.ts > NewSession preferences > drops stale Safe Yolo preferences for new Codex sessions",
+            "src/components/NewSession/preferences.test.ts > NewSession preferences > falls back when remembered static Claude options are no longer available",
+            "src/components/NewSession/preferences.test.ts > NewSession preferences > migrates the legacy YOLO preference for Claude to bypassPermissions",
+            "src/components/SessionActionMenu.test.tsx > SessionActionMenu - Mark unread action > fires the mark-unread handler and closes the menu",
+            "src/components/SessionExportDialog.test.tsx > SessionExportDialog large export confirmation > localizes server resource-limit details instead of showing the raw 413 response",
+            "src/components/SessionExportDialog.test.tsx > SessionExportDialog large export confirmation > shows count and estimated size, and cancel does not retry or download",
+            "src/components/SessionList.mark-all-read.test.tsx > SessionList mark all as read > leaves unread state unchanged when the confirmation is cancelled",
+            "src/components/SessionList.mark-all-read.test.tsx > SessionList mark all as read > marks hidden duplicate session IDs so a dedup winner change stays read",
+            "src/components/SessionList.mark-all-read.test.tsx > SessionList mark all as read > only shows the independent action when unread sessions exist",
+            "src/components/SessionList.mark-all-read.test.tsx > SessionList mark all as read > requires confirmation before marking every unread session read",
+            "src/components/SessionList.mark-all-read.test.tsx > SessionList mark all as read > uses the requested Chinese label",
+            "src/components/SessionRowSummary.test.tsx > SessionRowSummary background status > refreshes unread attention when the local watermark version changes",
+            "src/components/SessionRowSummary.test.tsx > SessionRowSummary background status > shows an explicit unread dot before the thinking spinner",
+            "src/components/SessionRowSummary.test.tsx > SessionRowSummary background status > shows an explicit unread dot for the selected session only",
+            "src/hooks/useAppBadge.test.ts > useAppBadge > clears the badge when the feature is disabled",
+            "src/hooks/useAppBadge.test.ts > useAppBadge > clears the native badge after the unread session is seen",
+            "src/hooks/useAppBadge.test.ts > useAppBadge > does not repeat the native update when the unread count is unchanged",
+            "src/hooks/useAppBadge.test.ts > useAppBadge > sets the native badge to the number of unread sessions in an installed PWA",
+            "src/lib/input-request-toast.test.tsx > input request toast title > localizes the title in en",
+            "src/lib/input-request-toast.test.tsx > input request toast title > localizes the title in zh-CN",
+            "src/lib/sessionReference.test.ts > matchSessionsForMention > uses conversation content instead of titles for reference eligibility",
+            "src/routes/sessions/files.test.tsx > FilesPage changes-row context menu > copies the absolute path for a git change row",
+            "src/routes/sessions/files.test.tsx > FilesPage changes-row context menu > opens the menu on a git change row and adds it to the composer",
+            "src/routes/sessions/files.test.tsx > FilesPage changes-row context menu > opens the menu on touch long-press and does not navigate on release",
+            "src/routes/sessions/files.test.tsx > FilesPage file context menu > adds a file to the composer draft and navigates back to the chat",
+            "src/routes/sessions/files.test.tsx > FilesPage file context menu > copies the absolute path resolved from the session workspace"
+        ]
+    },
+    "cli": {
+        "current_passed": 2886,
+        "current_failed_tests": 7,
+        "current_skipped": 8,
+        "baseline_confirmed_failed_test_ids": [
+            "src/agent/backends/acp/AcpSdkBackend.test.ts > AcpSdkBackend > keeps response completion pending until a concurrent soft steer settles",
+            "src/agent/backends/acp/AcpSdkBackend.test.ts > AcpSdkBackend > optimistically updates currentModelId after a successful opencode setModel call",
+            "src/agent/backends/acp/AcpSdkBackend.test.ts > AcpSdkBackend > uses session/set_model when flavor is opencode",
+            "src/agent/backends/acp/AcpStdioTransport.test.ts > AcpStdioTransport closed stdin writes > bounds a stalled stdin dispatch and rejects both promises",
+            "src/commands/dsh.test.ts > parseDshCommandOptions > rejects native resume, model, and HAPI permission controls unsupported by DSH ACP",
+            "src/modules/common/slashCommands.test.ts > listSlashCommands > exposes HAPI-supported OpenCode built-ins",
+            "src/runner/buildCliArgs.test.ts > buildCliArgs > builds a remote DSH ACP runner command without unsupported policy flags"
+        ],
+        "environment_suite_failures": [
+            "src/commands/usageScan.test.ts [ src/commands/usageScan.test.ts ]"
+        ]
+    },
+    "hub": {
+        "passed": 1453,
+        "failed": 2,
+        "skipped": 3,
+        "source_diff_from_baseline": false
+    },
+    "shared": {
+        "passed": 326,
+        "failed": 2,
+        "source_diff_from_baseline": false
+    },
+    "relay": {
+        "passed": 118,
+        "failed": 0
+    },
+    "limitations": [
+        "Full repository tests are not all green.",
+        "No physical phone, Safari PWA or Telegram host validation.",
+        "No deployment or production service restart."
+    ],
+    "premerge_verification": {
+        "typecheck": "passed",
+        "single_executable_build": "passed",
+        "browser_passed": 8,
+        "web_passed": 3245,
+        "web_failed": 35,
+        "web_new_failure_ids": [],
+        "cli_passed": 2886,
+        "cli_failed": 7,
+        "cli_new_failure_ids": [],
+        "review": "Requirement, approach and changed code reviewed against repository Major checklist; no introduced Major findings. Referenced pre-push-review skill unavailable after filesystem and HAPI lookup."
+    }
+}

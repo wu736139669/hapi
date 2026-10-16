@@ -5,7 +5,7 @@ export const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDi
     ({ className, ...props }, ref) => (
         <div
             ref={ref}
-            className={cn('rounded-lg bg-[var(--app-secondary-bg)] shadow-sm', className)}
+            className={cn('hapi-skin-panel rounded-lg bg-[var(--app-secondary-bg)] shadow-sm', className)}
             {...props}
         />
     )

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ThemeColorKeyId } from './useThemeColors'
+import { FOREST_BASE_COLORS, getAppearanceSkin } from '@/lib/appearanceSkin'
 
 export type ColorScheme = 'light' | 'dark' | 'oled'
 export type ColorThemePreset =
@@ -205,12 +206,12 @@ export function getColorThemeStorageKey(): string {
 }
 
 export function getColorThemeBackground(theme: ColorThemePreset, scheme: ColorScheme): string | null {
-    return theme === 'default' ? null : PALETTES[theme][toPaletteScheme(scheme)].background
+    return resolveThemePalette(theme, scheme)?.background ?? null
 }
 
 export function getColorThemePickerValue(theme: ColorThemePreset, scheme: ColorScheme, id: ThemeColorKeyId): string | null {
-    if (theme === 'default') return null
-    const palette = PALETTES[theme][toPaletteScheme(scheme)]
+    const palette = resolveThemePalette(theme, scheme)
+    if (!palette) return null
     const values: Record<ThemeColorKeyId, string> = {
         background: palette.background,
         surface: palette.secondary,
@@ -229,12 +230,12 @@ export function applyColorTheme(theme: ColorThemePreset = getStoredColorTheme(),
     const root = document.documentElement
     root.setAttribute('data-color-theme', theme)
 
-    if (theme === 'default') {
+    const values = resolveThemePalette(theme, scheme)
+    if (!values) {
         removeThemeProperties(root)
         return
     }
 
-    const values = PALETTES[theme][toPaletteScheme(scheme)]
     const properties: Record<string, string> = {
         '--app-bg': values.background,
         '--app-fg': values.foreground,
@@ -276,6 +277,13 @@ export function applyColorTheme(theme: ColorThemePreset = getStoredColorTheme(),
     for (const [key, value] of Object.entries(properties)) {
         root.style.setProperty(key, value)
     }
+}
+
+function resolveThemePalette(theme: ColorThemePreset, scheme: ColorScheme): ThemePalette | null {
+    if (theme !== 'default') return PALETTES[theme][toPaletteScheme(scheme)]
+    if (getAppearanceSkin() !== 'forest-adventure') return null
+    const base = FOREST_BASE_COLORS[scheme]
+    return palette(base.accent, base.background, base.foreground, base.hint, base.secondary)
 }
 
 function removeThemeProperties(root: HTMLElement): void {

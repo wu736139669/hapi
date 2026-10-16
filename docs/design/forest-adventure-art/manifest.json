@@ -1,0 +1,38 @@
+{
+    "version": 1,
+    "grid": { "rows": 3, "columns": 3 },
+    "generation": {
+        "tool": "image_gen.imagegen",
+        "transparent_background": true,
+        "prompt": "docs/design/forest-adventure-art/prompt.txt",
+        "references": ["web/public/skins/forest-adventure/forest.webp", "docs/design/screenshots/forest-list-light.png"]
+    },
+    "source": "docs/design/forest-adventure-art/source-sheet.png",
+    "sourceSha256": "60ea31d7ffdad85c115684dc2e50550faaf989d06318e663c750e43ef38c563f",
+    "provenance": {
+        "generatedSource": "/Users/wusumac/.codex/generated_images/01a144bb-ba8d-70c3-bd3f-352554d3e624/exec-7e735fdd-874e-48f2-8710-6f8921361110.png",
+        "requests": 1,
+        "cost": "Not returned by the built-in generation tool"
+    },
+    "normalization": {
+        "sourceSize": [1254, 1254],
+        "columnBoundaries": [0, 418, 836, 1254],
+        "rowBoundaries": [0, 484, 850, 1254],
+        "cellSize": 512,
+        "contentFraction": 0.64,
+        "alphaNoiseThreshold": 8,
+        "note": "Reviewed source has unequal row spacing. Boundaries follow transparent gutters; repack complete silhouettes into a regular 3x3 master before final slicing."
+    },
+    "outputDirectory": "web/public/skins/forest-adventure/elements",
+    "assets": [
+        { "name": "guide", "size": 144, "use": "Session companion and skin preview; state badges remain live HTML" },
+        { "name": "quest-scroll", "size": 128, "use": "Adventure-log banner heading" },
+        { "name": "backpack", "size": 256, "use": "Empty session-list illustration" },
+        { "name": "mushrooms", "size": 192, "use": "Banner foreground and empty-list illustration" },
+        { "name": "wildflowers", "size": 192, "use": "Empty-list illustration" },
+        { "name": "wood-corner", "size": 128, "use": "Banner frame accent, independent of live text" },
+        { "name": "leaf-crest", "size": 96, "use": "Noncompact project-group header decoration" },
+        { "name": "map-compass", "size": 192, "use": "Reserved for a later file/project surface; not loaded at runtime yet" },
+        { "name": "lantern", "size": 128, "use": "Reserved for a later tools surface; not loaded at runtime yet" }
+    ]
+}
