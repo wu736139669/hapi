@@ -2,7 +2,7 @@
 
 日期：2026-10-16。分支：`feat/mobile-adventure-skin`；基线：`a8feb4feafea0b5f36a770ad2e75e195a1b8d7e0`。
 
-已由本地 `goal-instruction-writer` 技能生成指令，创建 native Goal 并执行。生产实现、素材和本次验证完成；全仓仍有已确认的基线失败，**不能称为全仓测试全绿**。未提交、部署、推送或合并。
+已由本地 `goal-instruction-writer` 技能生成指令，创建 native Goal 并执行。生产实现、素材和开发验证完成；全仓仍有已确认的基线失败，**不能称为全仓测试全绿**。下列矩阵记录开发阶段验收；用户随后授权合并部署，已上线 mini 与 k2lab，见 [上线记录](mobile-adventure-skin-deployment.md)。
 
 ## Goal anchor
 
@@ -21,7 +21,7 @@
 | C7 无障碍 / 性能 | radio 箭头 / Home / End、焦点、减少动态效果已覆盖；仅动画当前聊天角色，列表角色静态、隐藏页暂停；默认列表不请求场景；生产构建的按需素材缓存及离线读取通过 |
 | C8 检查 | 类型、构建、9 个新增单元和 8 项浏览器用例通过；全量测试及基线对照已执行，Web 零新增失败；全仓绿灯条件不成立，未掩盖失败 |
 | C9 证据 | 本记录、测试摘要、素材清单、8 张实际截图与素材审图；已展示列表、深色聊天、设置及空列表；未把模拟或作者判断称作真机 / 用户验收 |
-| C10 范围 | 仅 Web 呈现、偏好、素材缓存及必要测试 / 文档；CLI / Hub / shared / relay 和依赖文件无差异；不改聊天管线及 golden fixtures；无 worktree、部署或服务重启 |
+| C10 范围 | 仅 Web 呈现、偏好、素材缓存及必要测试 / 文档；CLI / Hub / shared / relay 和依赖文件无差异；不改聊天管线及 golden fixtures；无 worktree；开发阶段无部署，后续按用户明确授权上线 |
 
 ## 检查结果
 
@@ -96,7 +96,7 @@ Web 原有失败涉及文件操作文案、未读、导出、App Badge、输入�
 - 未做实体 iPhone / Android、Safari PWA、Telegram 宿主或真实软键盘验证；已测桌面 Chrome 的视口、输入、素材缓存和减少动态效果。
 - 用户的美术修正已应用；没有最终用户接受反馈，不能将作者检查当作用户确认。
 - 全仓基线失败如实保留，未扩展 DSH / OpenCode / 未读等业务修复。
-- 未提交、推送、合并、部署或重启当前 Hub / Runner；现用已部署 HAPI 尚未更新。
+- 开发阶段未部署；后续按用户授权完成提交、合并、推送和两台部署，实际服务验收见 `mobile-adventure-skin-deployment.md`。
 
 ## 工作单元与对齐
 

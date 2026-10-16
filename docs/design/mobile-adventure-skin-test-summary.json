@@ -94,8 +94,7 @@
     },
     "limitations": [
         "Full repository tests are not all green.",
-        "No physical phone, Safari PWA or Telegram host validation.",
-        "No deployment or production service restart."
+        "No physical phone, Safari PWA or Telegram host validation."
     ],
     "premerge_verification": {
         "typecheck": "passed",
@@ -108,5 +107,13 @@
         "cli_failed": 7,
         "cli_new_failure_ids": [],
         "review": "Requirement, approach and changed code reviewed against repository Major checklist; no introduced Major findings. Referenced pre-push-review skill unavailable after filesystem and HAPI lookup."
+    },
+    "deployment": {
+        "source_commit": "eb540f80c8bdfe4f177a986a95045586a8b175f9",
+        "branch": "local/deploy-main",
+        "mini": "verified",
+        "k2lab": "verified",
+        "live_ui": "verified",
+        "report": "forest-adventure-art/deployment-report.json"
     }
 }
