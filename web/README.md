@@ -72,6 +72,7 @@ See `src/router.tsx` for route definitions.
   The plan document remains readable; recycled cards stay dismissed and new
   proposals get fresh action menus.
 - Context size display.
+- Codex context compaction shows its live status and elapsed time in the composer status bar; reconnects restore the native start time, and completion or interruption clears it.
 - Per-session scratchlist (`src/components/AssistantChat/ScratchlistPanel.tsx`)
   - Workbench panel for held notes/drafts; **distinct from the queue**.
   - Add/delete/reorder entries; promote to composer (copy) or queue (send).

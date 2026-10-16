@@ -104,10 +104,12 @@ describe.skipIf(process.env.HAPI_RUN_SHARED_CODEX_TESTS !== '1')('installed Code
             }
         } finally { release(); abort.abort(); await running.catch(() => {}); await rm(home, { recursive: true, force: true }); }
     }, 30_000);
-    it('binds empty roots, exchanges messages, isolates /new, and archives only the selected root', async () => {
+    it('binds roots, exchanges messages, reports live compaction, and isolates /new and archive', async () => {
         const home = await mkdtemp('/tmp/hapi-shared-test-'); state.home = home;
         const ch = join(home, 'codex'); const cwd = join(home, 'work'); await mkdir(ch); await mkdir(cwd);
         const modelRequests: unknown[] = [];
+        let holdResponses = false;
+        const heldResponses: Array<() => void> = [];
         const http = createServer((request, response) => {
             const chunks: Buffer[] = [];
             request.on('data', chunk => chunks.push(Buffer.from(chunk)));
@@ -118,8 +120,11 @@ describe.skipIf(process.env.HAPI_RUN_SHARED_CODEX_TESTS !== '1')('installed Code
                 const events = [{ type: 'response.created', response: { id } },
                     { type: 'response.output_item.done', item: { type: 'message', role: 'assistant', id: `msg_${id}`, content: [{ type: 'output_text', text: 'MOCK ANSWER' }] } },
                     { type: 'response.completed', response: { id, usage: { input_tokens: 12, output_tokens: 3, total_tokens: 15 } } }];
-                response.writeHead(200, { 'Content-Type': 'text/event-stream' });
-                response.end(events.map(e => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join(''));
+                const send = () => {
+                    response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+                    response.end(events.map(e => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join(''));
+                };
+                if (holdResponses) heldResponses.push(send); else send();
             });
         });
         await new Promise<void>(resolve => http.listen(0, '127.0.0.1', resolve));
@@ -164,10 +169,29 @@ describe.skipIf(process.env.HAPI_RUN_SHARED_CODEX_TESTS !== '1')('installed Code
                 expect(usageModels).toContain('mock-model');
                 expect(usageModels).toContain('second-mock');
             }, { timeout: 15_000 });
+            await vi.waitFor(async () => {
+                const thread = record(record(await second.request('thread/read', { threadId: initial, includeTurns: false })).thread);
+                expect(record(thread.status).type).toBe('idle');
+            });
+            holdResponses = true;
+            await second.request('thread/compact/start', { threadId: initial });
+            await vi.waitFor(() => {
+                expect(web.state.contextCompactionStartedAt).toBeTypeOf('number');
+                expect(heldResponses.length).toBeGreaterThan(0);
+            }, { timeout: 15_000 });
+            expect(web.state.contextCompactionStartedAt).toBeGreaterThan(Date.now() - 15_000);
+            holdResponses = false;
+            for (const send of heldResponses.splice(0)) send();
+            await vi.waitFor(() => {
+                expect(web.state.contextCompactionStartedAt).toBeNull();
+                expect(web.messages).toContainEqual(expect.objectContaining({ type: 'context_compacted' }));
+            }, { timeout: 15_000 });
             await first.disconnect(); expect(web.dead).toBe(false);
             await second.request('thread/archive', { threadId: initial }); roots = [];
             await running;
         } finally {
+            holdResponses = false;
+            for (const send of heldResponses.splice(0)) send();
             for (const threadId of roots) {
                 await clients.at(-1)?.request('thread/archive', { threadId }).catch(() => {});
             }

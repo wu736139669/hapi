@@ -226,6 +226,8 @@ export const AgentStateSchema = z.object({
     controlledByUser: z.boolean().nullish(),
     // Current actionable shared Codex proposal; content remains in the transcript.
     codexPlanProposalId: z.string().nullish(),
+    // Live compaction start time, shared across clients; null when it ends.
+    contextCompactionStartedAt: z.number().int().nonnegative().nullish(),
     // True while the CLI is delivering a queued message into the active turn
     // (Steer). Surfaced so the web can reflect the inject in progress.
     steeringActive: z.boolean().nullish(),

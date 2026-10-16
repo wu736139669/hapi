@@ -63,6 +63,9 @@ export class SharedCodexRoot {
     private publishedPlanId: string | null | undefined;
     private submittingPlan = false;
     private steeringActive: boolean | undefined;
+    private compaction?: { turnId: string; itemId: string; startedAt: number };
+    private readonly completedCompactions = new Set<string>();
+    private publishedCompactionStartedAt: number | null | undefined;
     private turnRevision = 0;
     private settingsRevision = 0;
     private refreshing?: Promise<void>;
@@ -97,15 +100,20 @@ export class SharedCodexRoot {
                 if (method === 'thread/goal/updated' || method === 'thread/goal/cleared') this.goalRevision++;
                 if (method === 'turn/started') {
                     this.pristineThread = undefined;
+                    if (record(record(params).turn).id !== this.currentTurn) this.completedCompactions.clear();
                     this.turnRevision++; this.currentTurn = string(record(record(params).turn).id); this.interrupted = false;
+                    if (this.compaction?.turnId !== this.currentTurn) this.compaction = undefined;
                     this.retryNoticeTurn = undefined; this.retryNoticeAttempt = 0;
                     if (this.currentTurn) this.latestTurn = { id: this.currentTurn, status: 'inProgress' };
                     this.publishSteering();
                 }
                 if (method === 'turn/completed' && (!this.currentTurn || record(record(params).turn).id === this.currentTurn)) {
                     this.turnRevision++; this.currentTurn = undefined; this.interrupted = record(record(params).turn).status === 'interrupted';
+                    this.compaction = undefined;
                     this.publishSteering();
                 }
+                this.observeCompaction(method, record(params));
+                this.publishCompaction();
                 const p = record(params);
                 if (method === 'item/completed' && this.latestTurn && this.latestTurn.id === p.turnId) {
                     const planId = planProposalForItem(this.threadId, this.latestTurn.id, p.item);
@@ -150,6 +158,7 @@ export class SharedCodexRoot {
             // Replay final native history with stable IDs after every reconnect.
             this.projection?.reset();
             this.steeringActive = undefined;
+            this.publishedCompactionStartedAt = undefined;
             this.publishedPlanId = undefined;
             void this.refresh().then(() => this.refreshChildren(false)).then(() => this.queue.replay())
                 .catch(error => logger.debug('[Codex shared] hub resync', error));
@@ -244,10 +253,11 @@ export class SharedCodexRoot {
             // advertise a destructive operation we cannot make atomic yet.
             conversationHistory: { forkCurrent: true, forkAtMessage: true, rewindToMessage: false }
         } }));
-        this.session.updateAgentState(state => ({ ...state, controlledByUser: false, startingMode: undefined, codexPlanProposalId: null, requests: {},
+        this.session.updateAgentState(state => ({ ...state, controlledByUser: false, startingMode: undefined, codexPlanProposalId: null, contextCompactionStartedAt: null, requests: {},
             completedRequests: { ...state.completedRequests, ...Object.fromEntries(Object.entries(state.requests ?? {}).map(([id, request]) =>
                 [id, { ...request, completedAt: Date.now(), status: 'canceled' as const }])) }
         }));
+        this.publishedCompactionStartedAt = null;
         if (subscribe && !this.pristineThread) response = record(await this.client.request('thread/resume', { threadId, excludeTurns: true }));
         this.acceptSettings(response); this.acceptSettings(this.host.settingsFor(threadId) ?? {});
         return response;
@@ -280,8 +290,36 @@ export class SharedCodexRoot {
         this.steeringActive = active;
         this.session.updateAgentState(state => ({ ...state, steeringActive: active }));
     }
+    private observeCompaction(method: string, params: Record<string, unknown>): void {
+        if (this.closed || this.stopping) return;
+        const turnId = string(params.turnId);
+        if (turnId && turnId !== this.currentTurn) return;
+        const item = record(params.item);
+        if (item.type === 'contextCompaction' && turnId) {
+            const itemId = string(item.id);
+            if (method === 'item/started' && itemId && !this.completedCompactions.has(itemId) && this.compaction?.itemId !== itemId) {
+                this.turnRevision++;
+                this.compaction = { turnId, itemId, startedAt: typeof params.startedAtMs === 'number' ? params.startedAtMs : Date.now() };
+            }
+            if (method === 'item/completed' && itemId) {
+                this.turnRevision++; this.completedCompactions.add(itemId);
+                if (itemId === this.compaction?.itemId) this.compaction = undefined;
+            }
+        }
+        if (method === 'thread/compacted' && this.compaction) {
+            this.turnRevision++; this.compaction = undefined;
+        }
+    }
+    private publishCompaction(): void {
+        const startedAt = !this.stopping && !this.closed && !this.reconnecting && this.client.isInitialized()
+            ? this.compaction?.startedAt ?? null : null;
+        if (this.publishedCompactionStartedAt === startedAt) return;
+        this.publishedCompactionStartedAt = startedAt;
+        this.session.updateAgentState(state => ({ ...state, contextCompactionStartedAt: startedAt }));
+    }
     private alive(): void {
         this.publishSteering();
+        this.publishCompaction();
         this.publishPlan();
         if (!this.closed) this.session.keepAlive(Boolean(this.currentTurn), undefined, this.settings);
     }
@@ -366,8 +404,25 @@ export class SharedCodexRoot {
         const revision = this.turnRevision;
         const thread = this.pristineThread ? { ...this.pristineThread, turns: [] } : await readCurrentThread(this.client, this.threadId);
         const turns = Array.isArray(thread.turns) ? thread.turns.map(record) : [];
+        const activeTurnId = string(turns.find(turn => turn.status === 'inProgress')?.id);
+        let compaction: typeof this.compaction;
+        if (activeTurnId) {
+            // One live tail item suffices; never replay history to recover a status.
+            const page = record(await this.client.request('thread/items/list', {
+                threadId: this.threadId, turnId: activeTurnId, sortDirection: 'desc', limit: 1
+            }));
+            const entry = record(Array.isArray(page.data) ? page.data[0] : undefined);
+            const item = record(entry.item);
+            const itemId = string(item.id);
+            if (item.type === 'contextCompaction' && itemId && entry.completedAtMs == null && !this.completedCompactions.has(itemId)) {
+                compaction = { turnId: activeTurnId, itemId,
+                    startedAt: typeof entry.startedAtMs === 'number' ? entry.startedAtMs
+                        : this.compaction?.itemId === itemId ? this.compaction.startedAt : Date.now() };
+            }
+        }
         if (revision === this.turnRevision) {
-            this.currentTurn = string(turns.find(turn => turn.status === 'inProgress')?.id);
+            this.currentTurn = activeTurnId;
+            this.compaction = compaction;
             this.interrupted = turns.at(-1)?.status === 'interrupted';
             const last = turns.at(-1);
             const id = string(last?.id);
@@ -418,7 +473,7 @@ export class SharedCodexRoot {
     }
     private async reconnect(): Promise<void> {
         if (this.closed || this.stopping || this.reconnecting || !this.threadId) return;
-        this.reconnecting = true; this.publishSteering(); this.publishPlan(); this.permissions.close();
+        this.reconnecting = true; this.publishSteering(); this.publishCompaction(); this.publishPlan(); this.permissions.close();
         try {
             while (!this.closed && !this.stopping) {
                 try {
@@ -438,7 +493,7 @@ export class SharedCodexRoot {
                     logger.debug('[Codex shared] reconnect', error); await new Promise(resolve => setTimeout(resolve, 1_000));
                 }
             }
-        } finally { this.reconnecting = false; this.publishSteering(); this.publishPlan(); }
+        } finally { this.reconnecting = false; this.publishSteering(); this.publishCompaction(); this.publishPlan(); }
     }
     async applySettings(raw: unknown): Promise<{ applied: RuntimeSettings }> {
         const config = SettingsSchema.parse(raw);
@@ -650,6 +705,7 @@ export class SharedCodexRoot {
         this.stopping = true; this.ready();
         this.history?.close(); for (const history of this.childHistories.values()) history.close();
         this.publishSteering();
+        this.publishCompaction();
         this.publishPlan();
         this.session.onReconnect(null); this.client.setTransportAbandonedHandler(null);
     }

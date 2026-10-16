@@ -7,7 +7,8 @@ import { SharedCodexRoot, type RootHost } from './root';
 import { codexPlanProposalId } from './plan';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 
-type NativeTurn = { id: string; status: string; items: unknown[] };
+type NativeTurn = { id: string; status: string; items: unknown[];
+    itemTimes?: Record<string, { startedAtMs: number; completedAtMs: number | null }> };
 
 vi.mock('../codexAppServerClient', () => ({
     CodexAppServerClient: class {
@@ -41,7 +42,9 @@ vi.mock('../codexAppServerClient', () => ({
                 const anchor = params.cursor as { itemId?: string } | undefined;
                 const offset = typeof params.cursor === 'object' ? items.findIndex(item => (item as { id: string }).id === anchor?.itemId) + 1 : Number(params.cursor ?? 0);
                 const data = items.slice(offset, offset + 1).map(item => ({ turnId: turn?.id, item,
-                    completedAtMs: turn?.status !== 'inProgress' || (item as { status?: string }).status === 'completed' ? 1 : null }));
+                    startedAtMs: turn?.itemTimes?.[(item as { id: string }).id]?.startedAtMs ?? null,
+                    completedAtMs: turn?.itemTimes?.[(item as { id: string }).id]?.completedAtMs
+                        ?? (turn?.status !== 'inProgress' || (item as { status?: string }).status === 'completed' ? 1 : null) }));
                 return { data: structuredClone(data), nextCursor: offset + 1 < items.length ? String(offset + 1) : null };
             }
             if (method === 'thread/list') return { data: [] };
@@ -393,5 +396,94 @@ describe('shared steering availability', () => {
         f.native.thread.turns = [{ id: 'busy', status: 'completed', items: [] }];
         f.reconnect();
         await vi.waitFor(() => expect(f.state().steeringActive).toBe(false));
+    });
+});
+
+describe('live context compaction', () => {
+    const item = { id: 'compact', type: 'contextCompaction' };
+
+    it('publishes the native start time once and ignores unrelated or stale items', async () => {
+        const f = await fixture();
+        f.native.notify('turn/started', { threadId: 'thread', turn: { id: 'turn' } });
+        const event = { threadId: 'thread', turnId: 'turn', item, startedAtMs: 1_000 };
+        f.native.notify('item/started', event);
+        expect(f.state().contextCompactionStartedAt).toBe(1_000);
+        const updates = f.updateState.mock.calls.length;
+        f.native.notify('item/started', { ...event, startedAtMs: 2_000 });
+        f.native.notify('item/completed', { ...event, threadId: 'child' });
+        f.native.notify('item/completed', { ...event, turnId: 'old' });
+        f.native.notify('item/completed', { ...event, item: { ...item, id: 'old' } });
+        expect(f.updateState).toHaveBeenCalledTimes(updates);
+        expect(f.state().contextCompactionStartedAt).toBe(1_000);
+        f.native.notify('item/completed', event);
+        expect(f.state().contextCompactionStartedAt).toBeNull();
+        expect(f.state().steeringActive).toBe(true);
+        f.native.notify('item/started', event);
+        expect(f.state().contextCompactionStartedAt).toBeNull();
+    });
+
+    it.each(['completed', 'failed', 'interrupted'])('clears when the turn is %s', async status => {
+        const f = await fixture();
+        f.native.notify('turn/started', { threadId: 'thread', turn: { id: 'turn' } });
+        f.native.notify('item/started', { threadId: 'thread', turnId: 'turn', item, startedAtMs: 1_000 });
+        f.native.notify('turn/completed', { threadId: 'thread', turn: { id: 'turn', status } });
+        expect(f.state().contextCompactionStartedAt).toBeNull();
+    });
+
+    it('recovers the elapsed start after reconnect and clears a completion missed in the same turn', async () => {
+        const f = await fixture();
+        const turn: NativeTurn = { id: 'turn', status: 'inProgress', items: [item],
+            itemTimes: { compact: { startedAtMs: 1_000, completedAtMs: null } } };
+        f.native.thread.turns = [turn];
+        await f.root.refresh();
+        expect(f.state().contextCompactionStartedAt).toBe(1_000);
+        const updates = f.updateState.mock.calls.length;
+        f.reconnect();
+        await f.root.refresh();
+        expect(f.updateState.mock.calls.length).toBeGreaterThan(updates);
+        expect(f.state().contextCompactionStartedAt).toBe(1_000);
+        f.native.initialized = false; f.native.abandoned();
+        expect(f.state().contextCompactionStartedAt).toBeNull();
+        await vi.waitFor(() => expect(f.state().contextCompactionStartedAt).toBe(1_000));
+        turn.itemTimes!.compact.completedAtMs = 4_000;
+        await f.root.refresh();
+        expect(f.state().contextCompactionStartedAt).toBeNull();
+        expect(f.state().steeringActive).toBe(true);
+    });
+
+    it('keeps a late snapshot from resurrecting a completed compaction', async () => {
+        const f = await fixture();
+        f.native.thread.turns = [{ id: 'turn', status: 'inProgress', items: [item] }];
+        f.native.notify('turn/started', { threadId: 'thread', turn: { id: 'turn' } });
+        const event = { threadId: 'thread', turnId: 'turn', item, startedAtMs: 1_000 };
+        f.native.notify('item/started', event);
+        const request = f.root.client.request.bind(f.root.client);
+        let release!: () => void;
+        let delayed = false;
+        const spy = vi.spyOn(f.root.client, 'request').mockImplementation(async (method, params) => {
+            if (method === 'thread/items/list' && !delayed) {
+                delayed = true;
+                await new Promise<void>(resolve => { release = resolve; });
+                return { data: [{ turnId: 'turn', item, startedAtMs: 1_000, completedAtMs: null }], nextCursor: null };
+            }
+            return request(method, params);
+        });
+        const refresh = f.root.refresh();
+        await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+        f.native.notify('item/completed', event);
+        // The history preview also reads the tail; keep those reads unblocked.
+        spy.mockImplementation(request);
+        release(); await refresh;
+        expect(f.state().contextCompactionStartedAt).toBeNull();
+    });
+
+    it('clears on shutdown and rejects a delayed start', async () => {
+        const f = await fixture();
+        f.native.notify('turn/started', { threadId: 'thread', turn: { id: 'turn' } });
+        const event = { threadId: 'thread', turnId: 'turn', item, startedAtMs: 1_000 };
+        f.native.notify('item/started', event);
+        f.root.stopAccepting();
+        f.native.notify('item/started', { ...event, item: { ...item, id: 'late' } });
+        expect(f.state().contextCompactionStartedAt).toBeNull();
     });
 });

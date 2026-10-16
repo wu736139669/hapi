@@ -1192,6 +1192,7 @@ export default {
   'misc.offline': 'offline',
   'misc.permissionRequired': '需要权限',
   'misc.online': 'online',
+  'misc.compactingContext': '正在压缩上下文',
   'misc.contextDetails': '上下文详情',
   'misc.contextCache': '缓存：{value}',
   'misc.contextUsed': '使用：{value}（{percent}%）',

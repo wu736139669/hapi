@@ -1193,6 +1193,7 @@ export default {
   'misc.offline': 'offline',
   'misc.permissionRequired': 'permission required',
   'misc.online': 'online',
+  'misc.compactingContext': 'Compacting context',
   'misc.contextDetails': 'Context details',
   'misc.contextCache': 'Cache: {value}',
   'misc.contextUsed': 'Used: {value} ({percent}%)',

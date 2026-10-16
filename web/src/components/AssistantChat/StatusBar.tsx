@@ -7,7 +7,7 @@ import {
 } from '@hapi/protocol'
 import type { PermissionModeTone } from '@hapi/protocol'
 import * as Popover from '@radix-ui/react-popover'
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { AgentState, CodexCollaborationMode, PermissionMode } from '@/types/api'
 import type { ConversationStatus } from '@/realtime/types'
 import { getContextBudgetTokens } from '@/chat/modelConfig'
@@ -57,7 +57,7 @@ function getConnectionStatus(
     voiceStatus: ConversationStatus | undefined,
     backgroundTaskCount: number,
     t: (key: string) => string
-): { text: string; color: string; dotColor: string; isPulsing: boolean } {
+): { text: string; color: string; dotColor: string; isPulsing: boolean; compactionStartedAt?: number } {
     const hasPermissions = agentState?.requests && Object.keys(agentState.requests).length > 0
 
     // Voice connecting takes priority
@@ -85,6 +85,16 @@ function getConnectionStatus(
             color: 'text-[#FF9500]',
             dotColor: 'bg-[#FF9500]',
             isPulsing: true
+        }
+    }
+
+    if (agentState?.contextCompactionStartedAt != null) {
+        return {
+            text: t('misc.compactingContext'),
+            color: 'text-[#007AFF]',
+            dotColor: 'bg-[#007AFF]',
+            isPulsing: true,
+            compactionStartedAt: agentState.contextCompactionStartedAt
         }
     }
 
@@ -222,6 +232,16 @@ export function StatusBar(props: {
         () => getConnectionStatus(props.active, props.thinking, props.agentState, props.voiceStatus, props.backgroundTaskCount ?? 0, t),
         [props.active, props.thinking, props.agentState, props.voiceStatus, props.backgroundTaskCount, t]
     )
+    const compactionStartedAt = connectionStatus.compactionStartedAt
+    const [now, setNow] = useState(Date.now)
+    useEffect(() => {
+        if (compactionStartedAt === undefined) return
+        setNow(Date.now())
+        const timer = window.setInterval(() => setNow(Date.now()), 1_000)
+        return () => window.clearInterval(timer)
+    }, [compactionStartedAt])
+    const compactionSeconds = Math.max(0, Math.floor((now - (compactionStartedAt ?? now)) / 1_000))
+    const compactionElapsed = `${Math.floor(compactionSeconds / 60)}:${String(compactionSeconds % 60).padStart(2, '0')}`
 
     const contextHeuristicModel = props.contextModel ?? props.model
     const contextWarning = useMemo(
@@ -292,14 +312,17 @@ export function StatusBar(props: {
     const codexFastMode = shouldShowCodexFastBadge(props.agentFlavor, props.serviceTier)
 
     return (
-        <div className="flex min-w-0 items-baseline justify-between gap-2 px-2 pb-1">
-            <div className="flex min-w-0 items-baseline gap-2">
+        <div className={`flex min-w-0 items-baseline justify-between gap-2 px-2 pb-1 ${compactionStartedAt !== undefined ? 'flex-wrap' : ''}`}>
+            <div className={`flex min-w-0 items-baseline gap-2 ${compactionStartedAt !== undefined ? 'flex-wrap' : ''}`}>
                 <div className="relative top-px sm:top-0.5 flex shrink-0 items-center gap-1.5">
                     <span
                         className={`h-2 w-2 rounded-full ${connectionStatus.dotColor} ${connectionStatus.isPulsing ? 'animate-pulse' : ''}`}
                     />
                     <span className={`whitespace-nowrap text-xs ${connectionStatus.color}`}>
                         {connectionStatus.text}
+                        {compactionStartedAt !== undefined ? (
+                            <span aria-hidden="true"> · {compactionElapsed}</span>
+                        ) : null}
                     </span>
                 </div>
                 {contextUsageLabel ? (
@@ -364,7 +387,7 @@ export function StatusBar(props: {
                 ) : null}
             </div>
 
-            <div className="flex min-w-0 shrink-0 items-baseline gap-2">
+            <div className={`flex min-w-0 shrink-0 items-baseline gap-2 ${compactionStartedAt !== undefined ? 'ml-auto' : ''}`}>
                 {reasoningLabel ? (
                     <span className="whitespace-nowrap text-xs text-[var(--app-hint)]">
                         <span className="sm:hidden">{compactReasoningLabel}</span>
