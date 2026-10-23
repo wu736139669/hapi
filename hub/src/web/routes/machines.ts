@@ -109,6 +109,7 @@ export function createMachinesRoutes(
         const teamPayload = parsed.data.team
             ? { ...parsed.data.team, ...(teamAgentToken ? { token: teamAgentToken } : {}) }
             : undefined
+        const namespace = c.get('namespace')
 
         const result = await engine.spawnSession(
             machineId,
@@ -127,6 +128,7 @@ export function createMachinesRoutes(
             parsed.data.collaborationMode,
             parsed.data.copilotAgentMode,
             startingMode,
+            namespace,
             teamPayload
         )
         return c.json(result)
@@ -402,6 +404,31 @@ export function createMachinesRoutes(
             return c.json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to list Grok models'
+            }, 500)
+        }
+    })
+
+    app.get('/machines/:id/kimi-models', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ success: false, error: 'Not connected' }, 503)
+        }
+
+        const machineId = c.req.param('id')
+        const machine = requireMachine(c, engine, machineId)
+        if (machine instanceof Response) return machine
+
+        const cwd = (c.req.query('cwd') ?? '').trim()
+        if (!cwd) {
+            return c.json({ success: false, error: 'cwd query parameter is required' }, 400)
+        }
+
+        try {
+            return c.json(await engine.listKimiModelsForCwd(machineId, cwd))
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to list Kimi models'
             }, 500)
         }
     })

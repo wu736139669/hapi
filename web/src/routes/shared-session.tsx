@@ -37,7 +37,7 @@ export default function SharedSessionPage() {
         search: {
           guest: true,
           share: shareToken,
-          lang: lang ?? locale,
+          lang: (lang ?? locale) as 'en' | 'zh-CN' | 'ru',
         },
         replace: true,
       });

@@ -12,6 +12,8 @@ import { MAX_SESSION_PREVIEW_LIMIT, MIN_SESSION_PREVIEW_LIMIT, normalizeSessionP
 import { useThemeColors, type ThemeColorKeyId } from '@/hooks/useThemeColors'
 import { useSessionHeaderMetadata, type SessionHeaderMetadataKey } from '@/hooks/useSessionHeaderMetadata'
 import { useSessionListToolbar } from '@/hooks/useSessionListToolbar'
+import { useAppBadgePreference } from '@/hooks/useAppBadgePreference'
+import { useOpenExternalLinksInNewTab } from '@/hooks/useOpenExternalLinksInNewTab'
 import { SettingsChoiceGroup, SettingsFieldLabel, SettingsPageContent, SettingsRow, SettingsSection, SettingsSwitch } from '@/components/settings/SettingsPrimitives'
 import { AppearanceSkinPicker } from '@/components/skins/AppearanceSkinPicker'
 
@@ -143,6 +145,8 @@ export default function SettingsDisplayPage() {
     const { pinInProgressSessions, setPinInProgressSessions } = usePinInProgressSessions()
     const { pinActiveSessions, setPinActiveSessions } = usePinActiveSessions()
     const { preferences: sessionToolbar, setPreference: setSessionToolbarPreference } = useSessionListToolbar()
+    const { appBadgeEnabled, setAppBadgeEnabled } = useAppBadgePreference()
+    const { openExternalLinksInNewTab, setOpenExternalLinksInNewTab } = useOpenExternalLinksInNewTab()
     const { preferences: sessionHeaderMetadata, setPreference: setSessionHeaderMetadata } = useSessionHeaderMetadata()
     const sessionHeaderOptions: ReadonlyArray<{ key: SessionHeaderMetadataKey; labelKey: string }> = [
         { key: 'showLabels', labelKey: 'settings.display.sessionHeader.showLabels' },
@@ -174,7 +178,7 @@ export default function SettingsDisplayPage() {
             </SettingsSection>
 
             <SettingsSection title={t('settings.display.typography')}>
-                <SettingsChoiceGroup label={t('settings.display.fontSize')} value={fontScale} columns={5} options={getFontScaleOptions()} onChange={setFontScale} />
+                <SettingsChoiceGroup label={t('settings.display.fontSize')} value={fontScale} columns={6} options={getFontScaleOptions()} onChange={setFontScale} />
                 <SettingsChoiceGroup label={t('settings.display.terminalFontSize')} value={terminalFontSize} columns={5} options={getTerminalFontSizeOptions()} onChange={setTerminalFontSize} />
             </SettingsSection>
 
@@ -237,6 +241,15 @@ export default function SettingsDisplayPage() {
                         onChange={(checked) => setSessionHeaderMetadata(option.key, checked)}
                     />
                 ))}
+            </SettingsSection>
+
+            <SettingsSection title={t('settings.display.links')}>
+                <SettingsSwitch
+                    label={t('settings.display.openExternalLinksInNewTab')}
+                    description={t('settings.display.openExternalLinksInNewTab.desc')}
+                    checked={openExternalLinksInNewTab}
+                    onChange={setOpenExternalLinksInNewTab}
+                />
             </SettingsSection>
         </SettingsPageContent>
     )

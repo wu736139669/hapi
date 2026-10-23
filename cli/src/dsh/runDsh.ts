@@ -9,7 +9,7 @@ import { getInvokedCwd } from '@/utils/invokedCwd'
 import { MessageQueue2 } from '@/utils/MessageQueue2'
 import { logger } from '@/ui/logger'
 import { randomUUID } from 'node:crypto'
-import type { DshPermissionMode } from '@hapi/protocol'
+import type { AgentState, DshPermissionMode } from '@hapi/protocol'
 import type { DshModelsResponse } from '@hapi/protocol/apiTypes'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import { convertDshEvent } from './dshEvents'
@@ -226,10 +226,17 @@ export async function runDsh(opts: {
     modelReasoningEffort?: string
     resumeSessionId?: string
     existingSessionId?: string
+    /** Fresh machine-spawn stub (`--hapi-session-id`); adopt via bootstrapSession. */
+    reservedSessionId?: string
     workingDirectory?: string
 } = {}): Promise<void> {
     const workingDirectory = opts.workingDirectory ?? getInvokedCwd()
     const startedBy = opts.startedBy ?? 'terminal'
+    const startingMode = 'remote' as const
+    const initialState: AgentState = {
+        controlledByUser: false,
+        startingMode
+    }
 
     if (opts.startingMode === 'local') {
         logger.debug('[dsh] Local mode requested; forcing remote because DSH Web owns the native UI')
@@ -247,7 +254,9 @@ export async function runDsh(opts: {
             startedBy,
             workingDirectory,
             model: opts.model,
-            modelReasoningEffort: opts.modelReasoningEffort
+            modelReasoningEffort: opts.modelReasoningEffort,
+            agentState: initialState,
+            reservedSessionId: opts.reservedSessionId
         })
     const { session, sessionInfo } = bootstrap
     setControlledByUser(session, 'remote')
@@ -375,7 +384,7 @@ export async function runDsh(opts: {
         }
     })
     lifecycle.registerProcessHandlers()
-    registerKillSessionHandler(session.rpcHandlerManager, lifecycle)
+    registerKillSessionHandler(session.rpcHandlerManager, lifecycle, session)
 
     const handleMuxFrame = (request: DshServerRequest) => {
         const frame = request.payload

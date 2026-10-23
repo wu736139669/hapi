@@ -26,6 +26,13 @@ const mocks = vi.hoisted(() => ({
     copilotModels: [] as Array<{ modelId: string; name?: string }>,
     copilotModelsLoading: false,
     claudeDialogSelection: ['claude-native-1'] as string[],
+    kimiModels: [] as Array<{ modelId: string; name?: string; provider?: string }>,
+    kimiModelsLoading: false,
+    kimiModelsError: null as string | null,
+    opencodeCurrentModelId: null as string | null,
+    opencodeVariants: null as Record<string, string[]> | null,
+    opencodeVariantsLoading: false,
+    opencodeVariantsEnabled: false,
     piDialogSelection: ['pi-native-1'] as string[],
     piModels: [] as PiModelSummary[],
     piModelsLoading: false,
@@ -158,6 +165,14 @@ vi.mock('@/hooks/queries/useCopilotModelsForCwd', () => ({
         currentModelId: null,
         isLoading: mocks.copilotModelsLoading,
         error: null
+    })
+}))
+vi.mock('@/hooks/queries/useKimiModelsForCwd', () => ({
+    useKimiModelsForCwd: () => ({
+        availableModels: mocks.kimiModels,
+        currentModelId: null,
+        isLoading: mocks.kimiModelsLoading,
+        error: mocks.kimiModelsError
     })
 }))
 vi.mock('@/hooks/queries/usePiModelsForMachine', () => ({
@@ -362,6 +377,9 @@ describe('NewSession launch preferences', () => {
         mocks.directoryExists = true
         mocks.copilotModels = []
         mocks.copilotModelsLoading = false
+        mocks.kimiModels = []
+        mocks.kimiModelsLoading = false
+        mocks.kimiModelsError = null
         mocks.opencodeModels = [{ modelId: 'provider/current', name: 'Current' }]
         mocks.opencodeModelsLoading = false
         mocks.piDialogSelection = ['pi-native-1']
@@ -549,7 +567,6 @@ describe('NewSession launch preferences', () => {
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
                 onTeamSuccess={mocks.onTeamSuccess}
-
                 onCancel={() => {}}
             />
         )
@@ -557,6 +574,65 @@ describe('NewSession launch preferences', () => {
         await waitFor(() => {
             expect(screen.getByTestId('model')).toHaveTextContent('deepseek-v4-flash[1m]')
             expect(screen.getByTestId('launch-effort')).toHaveTextContent('high')
+        })
+    })
+
+    it('shows dynamic Kimi models with Default for the selected directory', async () => {
+        mocks.kimiModels = [
+            { modelId: 'GLM-5.3-flash', name: 'thehive / GLM-5.3-flash', provider: 'thehive' },
+            { modelId: 'deepseek-v4.1-flash', name: 'thehive / hive-deepseek', provider: 'thehive' },
+            { modelId: 'hyper-glm-5.3-flash', name: 'charm-hyper / Hyper · GLM-5.3-Flash', provider: 'charm-hyper' },
+            { modelId: 'openrouter-union-alpha', provider: 'openrouter' }
+        ]
+
+        render(
+            <NewSession
+                api={api}
+                machines={[machine]}
+                initialMachineId="machine-1"
+                initialDirectory={'C:\\repo'}
+                onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+                onCancel={() => {}}
+            />
+        )
+
+        fireEvent.click(screen.getByDisplayValue('kimi'))
+
+        await waitFor(() => {
+            expect(screen.getByTestId('model-options')).toHaveTextContent(
+                'Default,thehive — thehive / GLM-5.3-flash,thehive — thehive / hive-deepseek,charm-hyper — charm-hyper / Hyper · GLM-5.3-Flash,openrouter — openrouter-union-alpha'
+            )
+        })
+    })
+
+    it('restores a remembered Kimi alias instead of resetting it to Default', async () => {
+        mocks.kimiModels = [
+            { modelId: 'GLM-5.3-flash', provider: 'thehive' }
+        ]
+        savePreferredAgent('kimi')
+        savePreferredLaunchSettings('machine-1', 'kimi', {
+            model: 'GLM-5.3-flash',
+            cursorSelectedBase: 'auto',
+            effort: 'auto',
+            modelReasoningEffort: 'default'
+        })
+
+        render(
+            <NewSession
+                api={api}
+                machines={[machine]}
+                initialMachineId="machine-1"
+                initialDirectory={'C:\\repo'}
+                onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+                onCancel={() => {}}
+            />
+        )
+
+        await waitFor(() => {
+            expect(screen.getByTestId('model')).toHaveTextContent('GLM-5.3-flash')
+            expect(screen.getByTestId('create')).toBeEnabled()
         })
     })
 
@@ -583,7 +659,6 @@ describe('NewSession launch preferences', () => {
                 initialDirectory="C:\\repo"
                 onSuccess={mocks.onSuccess}
                 onTeamSuccess={mocks.onTeamSuccess}
-
                 onCancel={() => {}}
             />
         )
@@ -612,6 +687,36 @@ describe('NewSession launch preferences', () => {
             expect(effort).toBeEnabled()
             expect(create).toBeEnabled()
         })
+    })
+
+    it('resets a remembered Kimi alias that the dynamic catalog no longer lists', async () => {
+        mocks.kimiModels = [
+            { modelId: 'GLM-5.3-flash', provider: 'thehive' }
+        ]
+        savePreferredAgent('kimi')
+        savePreferredLaunchSettings('machine-1', 'kimi', {
+            model: 'retired-alias',
+            cursorSelectedBase: 'auto',
+            effort: 'auto',
+            modelReasoningEffort: 'default'
+        })
+
+        render(
+            <NewSession
+                api={api}
+                machines={[machine]}
+                initialMachineId="machine-1"
+                initialDirectory={'C:\\repo'}
+                onSuccess={mocks.onSuccess}
+                onTeamSuccess={mocks.onTeamSuccess}
+                onCancel={() => {}}
+            />
+        )
+
+        await waitFor(() => {
+            expect(screen.getByTestId('model')).toHaveTextContent('auto')
+        })
+        expect(screen.getByTestId('create')).toBeEnabled()
     })
 
     it.each([

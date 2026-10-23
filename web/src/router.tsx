@@ -297,7 +297,10 @@ function SessionsPage() {
         <>
             <div className="flex h-full min-h-0">
             <div
-                className={`hapi-sessions-sidebar ${sidebarIsCollapsed ? 'sidebar-collapsed-rail hidden split:flex shrink-0 flex-col border-r border-[var(--app-divider)] bg-[var(--app-bg)]' : `${isSessionsIndex ? 'flex' : 'hidden split:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}`}
+                // min-w-0: without it, shrink-0 toolbar icons inflate the flex
+                // item's min-content past --sidebar-w and the shed never sees a
+                // tight budget (#2039 desktop overflow past the split).
+                className={`hapi-sessions-sidebar min-w-0 ${sidebarIsCollapsed ? 'sidebar-collapsed-rail hidden split:flex shrink-0 flex-col border-r border-[var(--app-divider)] bg-[var(--app-bg)]' : `${isSessionsIndex ? 'flex' : 'hidden split:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}`}
                 style={!sidebarIsCollapsed ? { '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties : undefined}
             >
                 <div className="flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)]">
@@ -336,33 +339,77 @@ function SessionsPage() {
                         onBrowse={canBrowse ? () => navigate({ to: '/browse' }) : undefined}
                         onRefresh={handleRefresh}
                         isLoading={isLoading}
-                        renderHeader={false}
-                        headerActions={sidebarIsCollapsed ? (
-                            <button type="button" onClick={() => sidebarCollapse.setSidebarCollapsed(false)} className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]" title={t('sessions.sidebar.expand')} aria-label={t('sessions.sidebar.expand')}>
-                                <SidebarCollapseIcon direction="right" className="h-4 w-4" />
-                            </button>
-                        ) : (
-                            <div className="flex items-center gap-2">
-                                {!isSessionsIndex ? <button type="button" onClick={() => sidebarCollapse.setSidebarCollapsed(true)} className="hidden split:flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]" title={t('sessions.sidebar.collapse')} aria-label={t('sessions.sidebar.collapse')}><SidebarCollapseIcon direction="left" className="h-5 w-5" /></button> : null}
-                                {canBrowse && toolbarPreferences.showBrowse && !toolbarPreferences.collapsed ? <button type="button" onClick={() => navigate({ to: '/browse' })} className="p-1.5 rounded-full text-[var(--app-hint)]" title={t('browse.nav')}><FolderOpenIcon className="h-5 w-5" /></button> : null}
-                                {toolbarPreferences.showShareManager && !toolbarPreferences.collapsed ? <button
-                                    type="button"
-                                    onClick={() => setSessionSharesOpen(true)}
-                                    className="relative flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]"
-                                    title={t('sessionShare.manage')}
-                                    aria-label={t('sessionShare.manage')}
-                                >
-                                    <ShareIcon className="h-[18px] w-[18px]" />
-                                    {sessionShares.length > 0 ? (
-                                        <span className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-emerald-500 px-1 text-center text-[10px] leading-4 text-white">
-                                            {sessionShares.length > 99 ? '99+' : sessionShares.length}
-                                        </span>
-                                    ) : null}
-                                </button> : null}
-                                <button type="button" onClick={() => navigate({ to: '/settings' })} className="p-1.5 rounded-full text-[var(--app-hint)]" title={t('settings.title')}><SettingsIcon className="h-5 w-5" /></button>
-                                <button type="button" onClick={() => navigate({ to: '/sessions/new' })} className="session-list-new-button flex h-9 w-9 items-center justify-center rounded-full text-[var(--app-link)]" title={t('sessions.new')}><PlusIcon className="h-5 w-5" /></button>
-                            </div>
-                        )}
+                        // Keep ranks: new 4, unread lens 5, settings 6,
+                        // mark-all 7, browse 8. Higher sheds into More first (#2039).
+                        renderHeader
+                        toolbarExtras={[
+                            ...(sidebarIsCollapsed ? [{
+                                id: 'expand-sidebar',
+                                keep: 3,
+                                node: (
+                                    <button type="button" onClick={() => sidebarCollapse.setSidebarCollapsed(false)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]" title={t('sessions.sidebar.expand')} aria-label={t('sessions.sidebar.expand')}>
+                                        <SidebarCollapseIcon direction="right" className="h-4 w-4" />
+                                    </button>
+                                )
+                            }] : []),
+                            ...(!sidebarIsCollapsed && !isSessionsIndex ? [{
+                                id: 'collapse-sidebar',
+                                keep: 3,
+                                node: (
+                                    <button type="button" onClick={() => sidebarCollapse.setSidebarCollapsed(true)} className="hidden split:flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]" title={t('sessions.sidebar.collapse')} aria-label={t('sessions.sidebar.collapse')}>
+                                        <SidebarCollapseIcon direction="left" className="h-5 w-5" />
+                                    </button>
+                                )
+                            }] : []),
+                            ...(toolbarPreferences.showShareManager && !toolbarPreferences.collapsed ? [{
+                                id: 'share-manager',
+                                keep: 6,
+                                node: (
+                                    <button
+                                        type="button"
+                                        onClick={() => setSessionSharesOpen(true)}
+                                        className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]"
+                                        title={t('sessionShare.manage')}
+                                        aria-label={t('sessionShare.manage')}
+                                    >
+                                        <ShareIcon className="h-[18px] w-[18px]" />
+                                        {sessionShares.length > 0 ? (
+                                            <span className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-emerald-500 px-1 text-center text-[10px] leading-4 text-white">
+                                                {sessionShares.length > 99 ? '99+' : sessionShares.length}
+                                            </span>
+                                        ) : null}
+                                    </button>
+                                )
+                            }] : []),
+                            ...(canBrowse && toolbarPreferences.showBrowse && !toolbarPreferences.collapsed ? [{
+                                id: 'browse',
+                                keep: 8,
+                                node: (
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate({ to: '/browse' })}
+                                        className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                        title={t('browse.nav')}
+                                    >
+                                        <FolderOpenIcon className="h-5 w-5" />
+                                    </button>
+                                )
+                            }] : []),
+                            {
+                                id: 'settings',
+                                keep: 6,
+                                node: (
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate({ to: '/settings' })}
+                                        className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                        title={t('settings.title')}
+                                    >
+                                        <SettingsIcon className="h-5 w-5" />
+                                    </button>
+                                )
+                            }
+                        ]}
                         api={api}
                         titleSuggestionAvailable={titleSuggestionAvailable}
                         machineLabelsById={machineLabelsById}
@@ -1204,11 +1251,11 @@ const sessionsIndexRoute = createRoute({
 const sessionDetailRoute = createRoute({
     getParentRoute: () => sessionsRoute,
     path: '$sessionId',
-    validateSearch: (search: Record<string, unknown>): { outline?: boolean; guest?: boolean; share?: string; lang?: 'en' | 'zh-CN' } => {
+    validateSearch: (search: Record<string, unknown>): { outline?: boolean; guest?: boolean; share?: string; lang?: 'en' | 'zh-CN' | 'ru' } => {
         const outline = search.outline === true || search.outline === 'true'
         const guest = search.guest === true || search.guest === 'true'
         const share = typeof search.share === 'string' && search.share.length > 0 ? search.share : undefined
-        const lang = search.lang === 'en' || search.lang === 'zh-CN' ? search.lang : undefined
+        const lang = search.lang === 'en' || search.lang === 'zh-CN' || search.lang === 'ru' ? search.lang : undefined
         return { ...(outline ? { outline: true } : {}), ...(guest ? { guest: true } : {}), ...(share ? { share } : {}), ...(lang ? { lang } : {}) }
     },
     component: SessionDetailRoute,
@@ -1439,8 +1486,8 @@ const studioOwnerRoute = createRoute({
 const sharedSessionRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/shared-session/$shareToken',
-    validateSearch: (search: Record<string, unknown>): { lang?: 'en' | 'zh-CN' } => {
-        const lang = search.lang === 'en' || search.lang === 'zh-CN' ? search.lang : undefined
+    validateSearch: (search: Record<string, unknown>): { lang?: 'en' | 'zh-CN' | 'ru' } => {
+        const lang = search.lang === 'en' || search.lang === 'zh-CN' || search.lang === 'ru' ? search.lang : undefined
         return lang ? { lang } : {}
     },
     component: SharedSessionPage,
