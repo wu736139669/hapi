@@ -1995,26 +1995,19 @@ export function buildCliArgs(
   // Codex shares one engine; Runner owns the wrapper, not a remote mode.
   if (agent !== 'codex') args.push('--hapi-starting-mode', startingMode);
   args.push('--started-by', 'runner');
-  // Codex, Cursor ACP, DSH, OpenCode, Pi native resume, and Claude message-level
-  // forks reuse the original HAPI row via --existing-session-id. Grok fork
-  // children also bind the pending HAPI session id.
-  const reuseExistingSessionId = agent === 'codex' || agent === 'cursor' || agent === 'dsh' || agent === 'pi'
-      || agent === 'opencode'
-      || agent === 'agy'
-      || agent === 'grok'
-      || (agentCommand === 'claude' && options.forkSession);
-  const existingSessionId = options.existingSessionId
-      ?? (reuseExistingSessionId ? options.sessionId : undefined);
-
   // Stamp the HAPI row id on argv for orphan reap after tracking loss (#1910).
   // Adopt-stub (`--hapi-session-id`) vs reopen (`--existing-session-id`) are
   // different operations — never collapse them (#1911 Opus Critical + Codex Major).
   // Local HTTP non-UUID sessionId stays on --hapi-session-id (reap-only; create
   // ignores non-UUID reserved ids). A UUID sessionId must NOT stamp adopt — that
   // would 404/409 against a non-stub row (#1911 Opus Major @ 09141964c).
+  // `sessionId` is never reopen on its own: for a fresh machine spawn the hub
+  // passes the preallocated stub as both sessionId and reservedSessionId, and
+  // reopening it would make Codex demand a thread binding that cannot exist yet
+  // ("Existing HAPI session has no Codex thread binding").
   const hubUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  if (existingSessionId) {
-    args.push('--existing-session-id', existingSessionId);
+  if (options.existingSessionId) {
+    args.push('--existing-session-id', options.existingSessionId);
   } else if (options.reservedSessionId) {
     args.push('--hapi-session-id', options.reservedSessionId);
   } else if (options.sessionId && !hubUuid.test(options.sessionId)) {

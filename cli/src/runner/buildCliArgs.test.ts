@@ -430,6 +430,22 @@ describe('buildCliArgs', () => {
         expect(args).not.toContain('--existing-session-id')
     })
 
+    it('keeps a fresh prealloc on adopt even when the hub duplicates it as sessionId', () => {
+        // rpcGateway sends sessionId = reservedSessionId ?? existingSessionId.
+        // Treating sessionId as reopen made Codex fail with
+        // "Existing HAPI session has no Codex thread binding" on every new spawn.
+        const prealloc = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+        const args = buildCliArgs('codex', {
+            directory: '/tmp',
+            sessionId: prealloc,
+            reservedSessionId: prealloc,
+            startingMode: 'remote',
+        })
+        expect(args).toContain('--hapi-session-id')
+        expect(args[args.indexOf('--hapi-session-id') + 1]).toBe(prealloc)
+        expect(args).not.toContain('--existing-session-id')
+    })
+
     it('stamps --existing-session-id for Claude reopen/resume (not adopt --hapi-session-id)', () => {
         // #1911 Opus Critical: syncEngine resume passes access.sessionId as
         // existingSessionId; adopt-stub stamp → SessionNotAdoptableError → 409.
