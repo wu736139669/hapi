@@ -32,7 +32,7 @@ import { classifyNoSchemeHref } from '@/lib/markdown-href-policy'
 import { remarkSessionPathLinks } from '@/lib/remark-session-path-links'
 import { buildSessionReferencePath, parseSessionPathHref } from '@/lib/sessionReference'
 import { UriConfirmDialog } from '@/components/UriConfirmDialog'
-import { ImagePreview } from '@/components/ImagePreview'
+import { MarkdownImage } from '@/components/assistant-ui/markdown-image'
 import { isPreviewableFilePath } from '@/lib/file-preview'
 import { useOptionalFilePreview } from '@/lib/file-preview-context'
 
@@ -851,22 +851,6 @@ function Em(props: ComponentPropsWithoutRef<'em'>) {
     return <em {...props} className={cn('aui-md-em italic', props.className)} />
 }
 
-function Image(props: ComponentPropsWithoutRef<'img'>) {
-    const src = typeof props.src === 'string' ? props.src : ''
-    const label = typeof props.alt === 'string' && props.alt ? props.alt : 'Image preview'
-    if (!src) return <img {...props} className={cn('aui-md-img my-3 max-w-full rounded-xl', props.className)} />
-
-    return (
-        <ImagePreview
-            src={src}
-            fileName={label}
-            label={label}
-            buttonClassName="group my-3 flex max-h-[32rem] min-h-[10rem] w-full items-center justify-center overflow-hidden rounded-xl bg-[var(--app-subtle-bg)] p-2 text-left"
-            imageClassName={cn('aui-md-img max-h-[30rem] max-w-full object-contain transition-transform group-hover:scale-[1.01]', props.className)}
-        />
-    )
-}
-
 type DefaultComponentsMap = {
     [key: string]: ComponentType<any>
     code: ComponentType<any>
@@ -901,7 +885,7 @@ export const defaultComponents: DefaultComponentsMap = memoizeMarkdownComponents
     tr: Tr,
     th: Th,
     td: Td,
-    img: Image,
+    img: MarkdownImage,
 } as const) as unknown as DefaultComponentsMap
 
 export function MarkdownText({ smooth }: { smooth?: boolean } = {}) {

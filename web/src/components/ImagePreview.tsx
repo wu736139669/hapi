@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode, type SyntheticEvent, type WheelEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { CloseIcon } from '@/components/icons'
 
 const MIN_IMAGE_SCALE = 0.25
@@ -38,6 +39,7 @@ export function ImagePreview(props: {
     buttonClassName?: string
     imageClassName?: string
     imageStyle?: CSSProperties
+    onImageError?: () => void
     caption?: ReactNode
     galleryId?: string
     onTriggerPointerDown?: (event: PointerEvent<HTMLButtonElement>) => void
@@ -292,13 +294,14 @@ export function ImagePreview(props: {
                     alt={props.label}
                     className={props.imageClassName ?? 'max-h-[calc(100vh-14rem)] max-w-full object-contain transition-transform group-hover:scale-[1.01]'}
                     style={props.imageStyle}
+                    onError={props.onImageError}
                     draggable={false}
                 />
                 {props.caption}
                 <span className="sr-only">{props.fileName}</span>
             </button>
 
-            {viewerOpen ? (
+            {viewerOpen ? createPortal(
                 <div
                     className="fixed inset-0 z-50 flex flex-col bg-black/90 text-white"
                     role="dialog"
@@ -389,7 +392,8 @@ export function ImagePreview(props: {
                             }}
                         />
                     </div>
-                </div>
+                </div>,
+                document.body
             ) : null}
         </>
     )

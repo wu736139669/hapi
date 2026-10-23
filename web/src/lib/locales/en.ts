@@ -585,6 +585,9 @@ export default {
   'media.displayed.file': 'Displayed file',
   'media.displayed.header': '{label}: {fileName}',
   'media.displayed.unavailable': '{label} is unavailable. {error}',
+  'media.image.loading': 'Loading image…',
+  'media.image.loadFailed': 'Image could not be loaded.',
+  'media.image.localUnavailable': 'This image is on the agent’s computer. Ask the agent to resend it as an attachment.',
 
   // Tool card
   'tool.askQuestion': 'Other',

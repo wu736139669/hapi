@@ -584,6 +584,9 @@ export default {
   'media.displayed.file': '展示文件',
   'media.displayed.header': '{label}：{fileName}',
   'media.displayed.unavailable': '{label}不可用：{error}',
+  'media.image.loading': '正在加载图片…',
+  'media.image.loadFailed': '图片加载失败。',
+  'media.image.localUnavailable': '这张图片在智能体的电脑上，请让智能体把它作为附件重新发送。',
 
   // Tool card
   'tool.askQuestion': '其他',
