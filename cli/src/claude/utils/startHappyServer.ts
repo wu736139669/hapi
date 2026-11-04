@@ -36,6 +36,7 @@ import { PermissionModeSchema } from '@hapi/protocol/schemas'
 import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer } from "@/modules/pingPeer/pingPeer";
 import {
     TeamClientError,
+    createTeamTask,
     formatTeamMessages,
     formatTeamStatus,
     formatTeamTasks,
@@ -640,7 +641,7 @@ function createHapiMcpServer(
         });
 
         mcp.registerTool<any, any>('team_send', {
-            description: 'Agent Team: send a message to teammates. to="all" (default) writes to the shared log only; to="<role or session id prefix>" or to="lead" wakes that member; to="human" notifies the human out-of-band (no inbox item); use kind="decision" when you need the human to decide something. Use inReplyTo=<seq> when answering a peer message so the hub can stop runaway back-and-forth. Do NOT use this for routine replies to the human.',
+            description: 'Agent Team: send a message to teammates. to="all" (default) writes to the shared log only; to="lead" wakes the Lead; non-Lead members can only direct-message the Lead (peer-to-peer DMs are blocked); to="human" notifies the human out-of-band (no inbox item); use kind="decision" when you need the human to decide something. Use inReplyTo=<seq> when answering a peer message so the hub can stop runaway back-and-forth. Do NOT use this for routine replies to the human.',
             title: 'Send Team Message',
             inputSchema: z.object({
                 text: z.string().min(1).describe('Message text'),
@@ -715,20 +716,43 @@ function createHapiMcpServer(
         });
 
         mcp.registerTool<any, any>('team_task', {
-            description: 'Agent Team: list team tasks or update one. Moving a task to doing/done requires its dependencies to be done; marking a task done requires a deliverable (evidence: branch/commit/files/test result).',
+            description: 'Agent Team: list team tasks, create one for an existing member (Lead only), or update one. Moving a task to doing/done requires its dependencies to be done; marking a task done requires a deliverable (evidence: branch/commit/files/test result). A member may hold only one doing task at a time.',
             title: 'Team Tasks',
             inputSchema: z.object({
-                action: z.enum(['list', 'update']).describe('list = show team tasks; update = change one task'),
+                action: z.enum(['list', 'create', 'update']).describe('list = show team tasks; create = add a task for an existing member (Lead only); update = change one task'),
                 taskId: z.string().min(1).optional().describe('Required for action=update'),
-                status: z.enum(['todo', 'doing', 'done', 'blocked']).optional().describe('New status'),
+                title: z.string().min(1).max(200).optional().describe('Required for action=create'),
+                assigneeSessionId: z.string().min(1).nullable().optional().describe('Assignee session id (create)'),
+                status: z.enum(['todo', 'doing', 'done', 'blocked']).optional().describe('New status (update)'),
                 deliverable: z.string().min(1).max(2000).optional().describe('Evidence for done: branch/commit/files/test result'),
                 dependsOn: z.array(z.string().min(1)).max(20).optional().describe('Task ids that must be done first'),
+                requirementId: z.string().min(1).optional().describe('Requirement the new task belongs to (create)'),
             }),
-        }, async (args: { action: 'list' | 'update'; taskId?: string; status?: 'todo' | 'doing' | 'done' | 'blocked'; deliverable?: string; dependsOn?: string[] }) => {
+        }, async (args: { action: 'list' | 'create' | 'update'; taskId?: string; title?: string; assigneeSessionId?: string | null; status?: 'todo' | 'doing' | 'done' | 'blocked'; deliverable?: string; dependsOn?: string[]; requirementId?: string }) => {
             try {
                 const status = await requireTeam();
                 if (args.action === 'list') {
                     return { content: [{ type: 'text' as const, text: formatTeamTasks(status.tasks, client.sessionId) }], isError: false };
+                }
+                if (args.action === 'create') {
+                    if (!args.title) {
+                        return { content: [{ type: 'text' as const, text: 'title is required for action=create' }], isError: true };
+                    }
+                    const task = await createTeamTask({
+                        sessionId: client.sessionId,
+                        teamId: status.team.id,
+                        title: args.title,
+                        assigneeSessionId: args.assigneeSessionId ?? null,
+                        dependsOn: args.dependsOn,
+                        requirementId: args.requirementId
+                    });
+                    return {
+                        content: [{
+                            type: 'text' as const,
+                            text: `已创建任务「${task.title}」 id=${task.id}${task.assigneeSessionId ? '，已指派并通知成员' : ''}`
+                        }],
+                        isError: false
+                    };
                 }
                 if (!args.taskId) {
                     return { content: [{ type: 'text' as const, text: 'taskId is required for action=update' }], isError: true };

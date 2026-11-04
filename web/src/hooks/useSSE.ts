@@ -444,6 +444,7 @@ export function useSSE(options: {
             }
             if (shouldInvalidateTeamsList) {
                 tasks.push(queryClient.invalidateQueries({ queryKey: queryKeys.teams }))
+                tasks.push(queryClient.invalidateQueries({ queryKey: queryKeys.teamOverview }))
             }
             for (const teamId of teamIds) {
                 tasks.push(queryClient.invalidateQueries({ queryKey: queryKeys.team(teamId) }))

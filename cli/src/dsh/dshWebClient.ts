@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 
 type JsonRecord = Record<string, unknown>
 
@@ -26,6 +29,7 @@ export type DshSessionSummary = {
     origin?: 'subagent'
     cwd?: string
     agentPreset?: string
+    agentAvailable?: boolean
     projections?: {
         asOfSeq: number
         values: Record<string, unknown>
@@ -87,11 +91,67 @@ export function resolveDshWebUrl(value = process.env.HAPI_DSH_URL): string {
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
         throw new Error('HAPI_DSH_URL must use http:// or https://')
     }
-    if (url.username || url.password || url.search || url.hash) {
-        throw new Error('HAPI_DSH_URL must not contain credentials, query parameters, or a fragment')
+    if (url.username || url.password || url.hash) {
+        throw new Error('HAPI_DSH_URL must not contain credentials or a fragment')
     }
+    if ([...url.searchParams.keys()].some((key) => key !== 'token')) {
+        throw new Error('HAPI_DSH_URL only accepts the DSH launch token query parameter')
+    }
+    url.search = ''
     url.pathname = '/'
     return url.origin
+}
+
+/**
+ * DSH 0.2.x prints a short-lived launch token in its web URL.  Keep the URL
+ * parser strict, but accept the printed URL at the client boundary and strip
+ * its token before constructing the base URL.
+ */
+function resolveConfiguredUrl(value: string | undefined): { url: string; token?: string } {
+    const candidate = value?.trim() || 'http://127.0.0.1:3080'
+    const parsed = new URL(candidate)
+    const token = parsed.searchParams.get('token') || undefined
+    if (token) parsed.search = ''
+    return { url: resolveDshWebUrl(parsed.toString()), ...(token ? { token } : {}) }
+}
+
+function tokenFromFile(path: string): string | undefined {
+    try {
+        const text = readFileSync(path, 'utf8').trim()
+        if (!text) return undefined
+        try {
+            const url = new URL(text)
+            return url.searchParams.get('token') || undefined
+        } catch {
+            return text.split(/\s+/u)[0]
+        }
+    } catch {
+        return undefined
+    }
+}
+
+function configuredToken(explicit?: string, explicitFile?: string): string | undefined {
+    // An explicit empty token disables file discovery.  This keeps callers
+    // that inject a fetch implementation (tests and availability probes)
+    // isolated from a developer's real ~/.dsh token.
+    if (explicit !== undefined) return explicit.trim() || undefined
+    if (explicitFile !== undefined) {
+        const token = tokenFromFile(explicitFile.trim())
+        return token
+    }
+    if (process.env.HAPI_DSH_TOKEN?.trim()) return process.env.HAPI_DSH_TOKEN.trim()
+    const configuredPath = process.env.HAPI_DSH_TOKEN_FILE?.trim()
+    const paths = configuredPath
+        ? [configuredPath]
+        : [
+            join(homedir(), '.dsh', 'hapi-token'),
+            join(homedir(), '.local', 'share', 'deepseek-harness', 'state', 'hapi-token')
+        ]
+    for (const path of paths) {
+        const token = tokenFromFile(path)
+        if (token) return token
+    }
+    return undefined
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -149,18 +209,28 @@ function parseSessionSummary(value: unknown): DshSessionSummary | null {
         ...(value.origin === 'subagent' ? { origin: 'subagent' as const } : {}),
         ...(asString(value.cwd) ? { cwd: value.cwd as string } : {}),
         ...(asString(value.agentPreset) ? { agentPreset: value.agentPreset as string } : {}),
+        ...(typeof value.agentAvailable === 'boolean' ? { agentAvailable: value.agentAvailable } : {}),
         ...(projections ? { projections } : {})
     }
 }
 
 export class DshWebClient {
     readonly baseUrl: string
+    private readonly launchToken?: string
+    private authCookie?: string
+    private remoteEventCookie?: string
+    private authMode: 'unknown' | 'legacy' | 'remote' = 'unknown'
+    private remoteClientId?: string
 
     constructor(
-        baseUrl = resolveDshWebUrl(),
-        private readonly fetchImpl: typeof fetch = fetch
+        baseUrl = process.env.HAPI_DSH_URL ?? 'http://127.0.0.1:3080',
+        private readonly fetchImpl: typeof fetch = fetch,
+        token?: string,
+        tokenFile?: string
     ) {
-        this.baseUrl = resolveDshWebUrl(baseUrl)
+        const configured = resolveConfiguredUrl(baseUrl)
+        this.baseUrl = configured.url
+        this.launchToken = configured.token ?? configuredToken(token, tokenFile)
     }
 
     async describe(signal?: AbortSignal): Promise<{
@@ -170,6 +240,18 @@ export class DshWebClient {
         model: string
         attachedSessions: number
     }> {
+        await this.ensureAuth(signal)
+        if (this.authMode === 'remote') {
+            const sessions = await this.listSessions(signal)
+            const cwd = sessions.find((entry) => entry.cwd)?.cwd ?? process.cwd()
+            return {
+                version: '0.2.1',
+                cwd,
+                provider: 'unknown',
+                model: 'unknown',
+                attachedSessions: sessions.filter((entry) => entry.agentAvailable ?? entry.running).length
+            }
+        }
         const { value } = await this.call('host.describe', {}, signal)
         if (!isRecord(value)) throw new Error('DeepSeek Harness host.describe returned an invalid value')
         const version = asString(value.version)
@@ -206,12 +288,32 @@ export class DshWebClient {
             ...(options.beforeSeq !== undefined ? { beforeSeq: options.beforeSeq } : {}),
             ...(options.maxMessages !== undefined ? { maxMessages: options.maxMessages } : {})
         }
-        const { value } = await this.call('session.history', payload, options.signal, 120_000)
-        if (!isRecord(value) || !Array.isArray(value.events) || typeof value.hasMore !== 'boolean') {
-            throw new Error('DeepSeek Harness session.history returned an invalid value')
+        const remote = await this.ensureAuth(options.signal)
+        const throughSeq = remote
+            ? await this.readSessionCursor(options.sessionId, options.signal)
+            : undefined
+        const { value } = remote
+            ? await this.call('session.page', {
+                request: {
+                    address: { kind: 'session', sessionId: options.sessionId },
+                    // A page is inclusive. The follow opening snapshot gives
+                    // us the valid current tail cursor.
+                    throughSeq,
+                    ...(options.beforeSeq !== undefined ? { beforeSeq: options.beforeSeq } : {}),
+                    ...(options.maxMessages !== undefined ? { maxMessages: options.maxMessages } : {})
+                }
+            }, options.signal, 120_000)
+            : await this.call('session.history', payload, options.signal, 120_000)
+        const rows = isRecord(value) && Array.isArray(value.events)
+            ? value.events
+            : isRecord(value) && Array.isArray(value.records)
+                ? value.records
+                : null
+        if (!isRecord(value) || !rows || typeof value.hasMore !== 'boolean') {
+            throw new Error(`DeepSeek Harness ${remote ? 'session.page' : 'session.history'} returned an invalid value`)
         }
         const entries: DshHistoryEntry[] = []
-        for (const raw of value.events) {
+        for (const raw of rows) {
             if (!isRecord(raw)) throw new Error('DeepSeek Harness session.history returned an invalid entry')
             const event = parseSessionEvent(raw.event)
             if (!event) throw new Error('DeepSeek Harness session.history returned an invalid event')
@@ -242,6 +344,7 @@ export class DshWebClient {
         signal?: AbortSignal
     }): Promise<{ rpcId: string; command?: { text?: string } }> {
         const { rpcId, value } = await this.call('session.prompt', {
+            requestId: options.rpcId ?? randomUUID(),
             sessionId: options.sessionId,
             mode: options.mode ?? 'queue',
             content: [{ type: 'text', text: options.text }],
@@ -314,12 +417,35 @@ export class DshWebClient {
         current: DshModelSelection
         models: DshModelSummary[]
     }> {
-        const { value } = await this.call('session.models', { sessionId }, signal)
-        if (!isRecord(value) || !isRecord(value.current) || !Array.isArray(value.groups)) {
+        const remote = await this.ensureAuth(signal)
+        const { value } = remote
+            ? await this.call('session.modelCatalog', {}, signal)
+            : await this.call('session.models', { sessionId }, signal)
+        if (!isRecord(value) || !Array.isArray(value.groups)) {
             throw new Error('DeepSeek Harness session.models returned an invalid value')
         }
-        const provider = asString(value.current.provider)
-        const model = asString(value.current.model)
+        let currentValue = remote
+            ? (isRecord(value.default) ? value.default : null)
+            : (isRecord(value.current) ? value.current : null)
+        if (remote) {
+            const projections = await this.call('session/projections', {
+                request: { sessionId }
+            }, signal)
+            const projectionValue = isRecord(projections.value) && isRecord(projections.value.values)
+                ? projections.value.values
+                : null
+            const selection = projectionValue && isRecord(projectionValue.modelSelection)
+                ? (isRecord(projectionValue.modelSelection.next)
+                    ? projectionValue.modelSelection.next
+                    : isRecord(projectionValue.modelSelection.lastUsed)
+                        ? projectionValue.modelSelection.lastUsed
+                        : null)
+                : null
+            if (selection) currentValue = selection
+        }
+        if (!currentValue) throw new Error('DeepSeek Harness session.models is missing the current model')
+        const provider = asString(currentValue.provider)
+        const model = asString(currentValue.model)
         if (!provider || !model) {
             throw new Error('DeepSeek Harness session.models is missing the current model')
         }
@@ -361,8 +487,8 @@ export class DshWebClient {
             current: {
                 provider,
                 model,
-                ...(asString(value.current.reasoningEffort)
-                    ? { reasoningEffort: value.current.reasoningEffort as string }
+                ...(asString(currentValue.reasoningEffort)
+                    ? { reasoningEffort: currentValue.reasoningEffort as string }
                     : {})
             },
             models
@@ -418,6 +544,52 @@ export class DshWebClient {
     }
 
     private async sendResponse(rpcId: string, result: unknown, signal?: AbortSignal): Promise<void> {
+        if (await this.ensureAuth(signal)) {
+            const unwrapped = isRecord(result) && result.ok === true && Object.hasOwn(result, 'value')
+                ? result.value
+                : result
+            const outcome = isRecord(result) && result.ok === false
+                ? {
+                    kind: 'rejected',
+                    error: {
+                        name: 'AbortError',
+                        message: isRecord(result.error) && asString(result.error.message)
+                            ? result.error.message
+                            : 'Cancelled by HAPI client'
+                    }
+                }
+                : isRecord(unwrapped) && typeof unwrapped.outcome === 'string'
+                    ? { kind: 'result', value: unwrapped.outcome }
+                    : isRecord(unwrapped) && unwrapped.answer !== undefined
+                        ? { kind: 'result', value: unwrapped.answer }
+                        : { kind: 'result', value: unwrapped }
+            const response = await this.fetchImpl(new URL('/api/$events/result', this.baseUrl), {
+                method: 'POST',
+                headers: {
+                    ...(this.remoteEventCookie ? { cookie: this.remoteEventCookie } : this.headers()),
+                    'content-type': 'application/json'
+                },
+                body: JSON.stringify({
+                    type: 'client-request',
+                    rpcId: randomUUID(),
+                    method: '$events/result',
+                    payload: {
+                        args: {
+                            clientId: this.remoteClientId,
+                            eventId: rpcId,
+                            outcome
+                        }
+                    }
+                }),
+                signal
+            })
+            if (!response.ok) throw new Error(`DeepSeek Harness response transport failed: HTTP ${response.status}`)
+            const body: unknown = await response.json()
+            if (!isRecord(body) || !isRecord(body.result) || body.result.ok !== true) {
+                throw new Error('DeepSeek Harness response was rejected')
+            }
+            return
+        }
         const response = await this.fetchImpl(new URL('/api/respond', this.baseUrl), {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -441,6 +613,9 @@ export class DshWebClient {
         onFrame: (request: DshServerRequest) => void
         onError?: (error: Error) => void
     }): Promise<void> {
+        if (this.authMode === 'remote' || this.launchToken) {
+            return this.subscribeRemoteEvents(options)
+        }
         const url = new URL('/api/events.mux', this.baseUrl)
         url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
         return new Promise((resolve, reject) => {
@@ -487,6 +662,303 @@ export class DshWebClient {
         })
     }
 
+    /** Open one latest DSH session.follow stream and project its entries into
+     * the legacy event callback shape used by HAPI's runner. */
+    subscribeSession(options: {
+        sessionId: string
+        signal: AbortSignal
+        onEvent: (event: DshSessionEvent, view?: unknown) => void
+        onSnapshot?: (records: DshHistoryEntry[], cursor?: number) => void
+        onError?: (error: Error) => void
+    }): Promise<void> {
+        // DSH binds one API cookie to one mux peer. Use a dedicated client for
+        // the long-lived follow stream so this instance can keep using its
+        // cookie for unary prompt/model/cancel calls without starving the
+        // stream of live event frames.
+        const streamClient = new DshWebClient(this.baseUrl, this.fetchImpl, this.launchToken)
+        return streamClient.ensureAuth(options.signal).then((remote) => {
+            if (!remote) return
+            return streamClient.openSessionStream(options)
+        })
+    }
+
+    private openSessionStream(options: {
+        sessionId: string
+        signal: AbortSignal
+        onEvent: (event: DshSessionEvent, view?: unknown) => void
+        onSnapshot?: (records: DshHistoryEntry[], cursor?: number) => void
+        onError?: (error: Error) => void
+    }): Promise<void> {
+        return this.subscribeRemoteStream({
+            endpoint: 'session/follow',
+            payload: {
+                args: {
+                    request: {
+                        address: { kind: 'session', sessionId: options.sessionId },
+                        assistantStream: true
+                    }
+                }
+            },
+            signal: options.signal,
+            onValue: (value) => {
+                if (!isRecord(value)) return
+                if (value.type === 'snapshot' && Array.isArray(value.records)) {
+                    const records = value.records.flatMap((record): DshHistoryEntry[] => {
+                        if (!isRecord(record)) return []
+                        const event = parseSessionEvent(record.event)
+                        return event
+                            ? [{ event, ...(record.view !== undefined ? { view: record.view } : {}) }]
+                            : []
+                    })
+                    options.onSnapshot?.(
+                        records,
+                        asNumber(value.cursor) ?? undefined
+                    )
+                    for (const record of records) options.onEvent(record.event, record.view)
+                } else if (value.type === 'entry' || value.type === 'event') {
+                    this.emitFollowRecord(value, options.onEvent)
+                }
+            },
+            onError: options.onError
+        })
+    }
+
+    private emitFollowRecord(value: unknown, onEvent: (event: DshSessionEvent, view?: unknown) => void): void {
+        if (!isRecord(value)) return
+        const event = parseSessionEvent(value.event)
+        if (event) onEvent(event, value.view)
+    }
+
+    private subscribeRemoteEvents(options: {
+        signal: AbortSignal
+        onFrame: (request: DshServerRequest) => void
+        onError?: (error: Error) => void
+    }): Promise<void> {
+        const rememberCookie = this.ensureAuth(options.signal).then((remote) => {
+            if (remote) this.remoteEventCookie = this.authCookie
+            return remote
+        })
+        return rememberCookie.then((remote) => remote ? this.subscribeRemoteStream({
+            endpoint: '$events',
+            payload: { args: {} },
+            signal: options.signal,
+            onValue: (value) => {
+                if (!isRecord(value)) return
+                if (value.type === 'ready' && asString(value.clientId)) {
+                    this.remoteClientId = value.clientId as string
+                    return
+                }
+                if (value.type === 'waterfall' && asString(value.eventId) && asString(value.event)
+                    && asString(value.agentId) && isRecord(value.request)) {
+                    const event = value.event as string
+                    const request = value.request
+                    if (event === 'approval/request' || event === 'approval/requested') {
+                        options.onFrame({
+                            type: 'server-request',
+                            rpcId: value.eventId as string,
+                            method: event,
+                            payload: {
+                                type: 'approval/requested',
+                                sessionId: value.agentId as string,
+                                approvalId: value.eventId,
+                                ...(asString(request.toolName) ? { toolName: request.toolName } : {}),
+                                ...(asString(request.callId) ? { callId: request.callId } : {}),
+                                ...(asString(request.reason) ? { reason: request.reason } : {})
+                            }
+                        })
+                    } else if (event === 'user-questions/request' || event === 'question/requested') {
+                        options.onFrame({
+                            type: 'server-request',
+                            rpcId: value.eventId as string,
+                            method: event,
+                            payload: {
+                                type: 'question/requested',
+                                sessionId: value.agentId as string,
+                                questions: Array.isArray(request.questions) ? request.questions : []
+                            }
+                        })
+                    }
+                    return
+                }
+                // A few 0.2.x builds expose a broadcasted session/event on the
+                // Remote Event stream.  Accept both [session,event] and a
+                // single object form without making it a dependency.
+                if (value.type === 'emit' && value.event === 'session/event' && Array.isArray(value.args)) {
+                    const candidate = value.args.at(-1)
+                    const event = parseSessionEvent(candidate)
+                    const sessionId = value.args.length > 1 && asString(value.args[0]) ? value.args[0] : undefined
+                    if (event) {
+                        options.onFrame({
+                            type: 'server-request',
+                            rpcId: randomUUID(),
+                            method: 'session/event',
+                            payload: { type: 'session/event', ...(sessionId ? { sessionId } : {}), event }
+                        })
+                    }
+                }
+            },
+            onError: options.onError
+        }) : Promise.resolve())
+    }
+
+    private async readSessionCursor(sessionId: string, signal?: AbortSignal): Promise<number> {
+        if (this.remoteEventCookie && this.authCookie === this.remoteEventCookie) {
+            this.authMode = 'unknown'
+            this.authCookie = undefined
+            await this.ensureAuth(signal)
+        }
+        const controller = new AbortController()
+        const abort = () => controller.abort(signal?.reason)
+        signal?.addEventListener('abort', abort, { once: true })
+        let cursor = -1
+        try {
+            await this.subscribeRemoteStream({
+                endpoint: 'session/follow',
+                payload: {
+                    args: {
+                        request: {
+                            address: { kind: 'session', sessionId }
+                        }
+                    }
+                },
+                signal: controller.signal,
+                waitForFirst: true,
+                onValue: (value) => {
+                    if (isRecord(value) && value.type === 'snapshot' && asNumber(value.cursor) !== null) {
+                        cursor = value.cursor as number
+                    }
+                }
+            })
+        } finally {
+            signal?.removeEventListener('abort', abort)
+            controller.abort()
+            // DSH binds an API cookie to the lifetime of its mux peer. Closing
+            // this short-lived cursor probe retires that peer, so exchange the
+            // launch token once more before the following unary page request.
+            if (!signal?.aborted) {
+                this.authMode = 'unknown'
+                this.authCookie = undefined
+                await this.ensureAuth(signal)
+            }
+        }
+        return cursor
+    }
+
+    private subscribeRemoteStream(options: {
+        endpoint: string
+        payload: unknown
+        signal: AbortSignal
+        onValue: (value: unknown) => void
+        onError?: (error: Error) => void
+        waitForFirst?: boolean
+    }): Promise<void> {
+        return this.ensureAuth(options.signal).then(() => new Promise((resolve, reject) => {
+            const url = new URL('/api/remote.mux', this.baseUrl)
+            url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+            const WebSocketCtor = WebSocket as unknown as new (
+                url: string,
+                options?: { headers?: Record<string, string> }
+            ) => WebSocket
+            const socket = new WebSocketCtor(url.toString(), this.authCookie ? { headers: { cookie: this.authCookie } } : undefined)
+            const streamId = randomUUID()
+            let opened = false
+            let firstItem = false
+            let ended = false
+            const abort = () => {
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ type: 'cancel', streamId }))
+                }
+                socket.close()
+            }
+            options.signal.addEventListener('abort', abort, { once: true })
+            socket.onopen = () => {
+                opened = true
+                socket.send(JSON.stringify({
+                    type: 'open',
+                    streamId,
+                    endpoint: options.endpoint,
+                    payload: options.payload
+                }))
+                if (!options.waitForFirst) resolve()
+            }
+            socket.onmessage = (message) => {
+                try {
+                    const parsed: unknown = JSON.parse(String(message.data))
+                    if (!isRecord(parsed) || parsed.streamId !== streamId) return
+                    if (parsed.type === 'item') {
+                        options.onValue(parsed.value)
+                        if (options.waitForFirst && !firstItem) {
+                            firstItem = true
+                            resolve()
+                        }
+                    } else if (parsed.type === 'error') {
+                        const errorValue = isRecord(parsed.error) ? parsed.error : {}
+                        throw new Error(asString(errorValue.message) ?? 'DeepSeek Harness remote stream failed')
+                    } else if (parsed.type === 'end') {
+                        ended = true
+                        socket.close()
+                    }
+                } catch (error) {
+                    const failure = error instanceof Error ? error : new Error(String(error))
+                    if (!opened) reject(failure)
+                    else options.onError?.(failure)
+                }
+            }
+            socket.onerror = () => {
+                const error = new Error('DeepSeek Harness remote stream failed')
+                if (!opened) reject(error)
+                else options.onError?.(error)
+            }
+            socket.onclose = () => {
+                options.signal.removeEventListener('abort', abort)
+                if (!options.signal.aborted && !ended) {
+                    const error = new Error('DeepSeek Harness remote stream disconnected')
+                    if (!opened) reject(error)
+                    else options.onError?.(error)
+                }
+            }
+        }))
+    }
+
+    private headers(extra?: Record<string, string>): Record<string, string> {
+        return {
+            ...(this.authCookie ? { cookie: this.authCookie } : {}),
+            ...(extra ?? {})
+        }
+    }
+
+    private async ensureAuth(signal?: AbortSignal): Promise<boolean> {
+        if (this.authMode === 'remote') return true
+        if (this.authMode === 'legacy') return false
+        if (!this.launchToken) {
+            this.authMode = 'legacy'
+            return false
+        }
+        const url = new URL('/connect', this.baseUrl)
+        url.searchParams.set('token', this.launchToken)
+        url.searchParams.set('interactions', 'answer')
+        let response: Response
+        try {
+            response = await this.fetchImpl(url, {
+                method: 'GET',
+                redirect: 'manual',
+                signal
+            })
+        } catch (error) {
+            throw new Error(`Unable to authenticate with DeepSeek Harness at ${this.baseUrl}: ${error instanceof Error ? error.message : String(error)}`)
+        }
+        if (response.status < 300 || response.status >= 400) {
+            throw new Error(`DeepSeek Harness authentication failed: HTTP ${response.status}`)
+        }
+        const setCookie = typeof response.headers.getSetCookie === 'function'
+            ? response.headers.getSetCookie()[0]
+            : response.headers.get('set-cookie')
+        if (!setCookie) throw new Error('DeepSeek Harness authentication did not return an API cookie')
+        this.authCookie = setCookie.split(';', 1)[0]
+        this.authMode = 'remote'
+        return true
+    }
+
     private async call(
         method: string,
         payload: unknown,
@@ -499,10 +971,41 @@ export class DshWebClient {
         const combined = signal ? AbortSignal.any([timeout, signal]) : timeout
         let response: Response
         try {
-            response = await this.fetchImpl(new URL(`/api/${method}`, this.baseUrl), {
+            const remote = await this.ensureAuth(combined)
+            // The generated Remote gateway reserves one `args` object.  Keep
+            // the old wire shape when no launch token is configured so HAPI
+            // remains usable with a 0.1.x host during a rolling upgrade.
+            const args = remote
+                ? method === 'session.list' && isRecord(payload) && Object.keys(payload).length === 0
+                    ? { _request: {} }
+                    : ['session.create', 'session.prompt', 'session.cancel', 'session.selectModel'].includes(method)
+                        ? isRecord(payload) && Object.keys(payload).length === 1 && isRecord(payload.request)
+                            ? payload
+                            : { request: payload }
+                    : method === 'commands/execute' && isRecord(payload) && isRecord(payload.args)
+                        ? {
+                            ...(isRecord(payload.args) && asString(payload.args.agentId)
+                                ? { agentId: payload.args.agentId }
+                                : {}),
+                            ...(isRecord(payload.args) && typeof payload.args.line === 'string'
+                                ? { line: payload.args.line }
+                                : {}),
+                            submittedAttachments: isRecord(payload.args) && Array.isArray(payload.args.images)
+                                ? payload.args.images
+                                : []
+                        }
+                        : payload
+                : payload
+            const wireMethod = remote ? method.replace('.', '/') : method
+            response = await this.fetchImpl(new URL(`/api/${wireMethod}`, this.baseUrl), {
                 method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ type: 'client-request', rpcId, method, payload }),
+                headers: this.headers({ 'content-type': 'application/json' }),
+                body: JSON.stringify({
+                    type: 'client-request',
+                    rpcId,
+                    method: wireMethod,
+                    payload: remote ? { args } : payload
+                }),
                 signal: combined
             })
         } catch (error) {

@@ -393,7 +393,7 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       {
         name: 'team_send',
         title: 'Send Team Message',
-        description: 'Agent Team: send a message to teammates. to="all" (default) writes to the shared log only; to="<role or session id prefix>" or to="lead" wakes that member; to="human" notifies the human out-of-band (no inbox item); use kind="decision" when you need the human to decide something. Use inReplyTo=<seq> when answering a peer message.',
+        description: 'Agent Team: send a message to teammates. to="all" (default) writes to the shared log only; to="lead" wakes the Lead; non-Lead members can only direct-message the Lead (peer-to-peer DMs are blocked); to="human" notifies the human out-of-band (no inbox item); use kind="decision" when you need the human to decide something. Use inReplyTo=<seq> when answering a peer message.',
         inputSchema: z.object({
           text: z.string().min(1).describe('Message text'),
           to: z.string().min(1).optional().describe('"all" (default), "lead", "human", or a member session id/prefix'),
@@ -422,13 +422,16 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
       {
         name: 'team_task',
         title: 'Team Tasks',
-        description: 'Agent Team: list team tasks or update one. doing/done requires dependencies to be done; done requires a deliverable (evidence).',
+        description: 'Agent Team: list team tasks, create one for an existing member (Lead only), or update one. doing/done requires dependencies to be done; done requires a deliverable (evidence). A member may hold only one doing task at a time.',
         inputSchema: z.object({
-          action: z.enum(['list', 'update']),
+          action: z.enum(['list', 'create', 'update']),
           taskId: z.string().min(1).optional().describe('Required for action=update'),
+          title: z.string().min(1).max(200).optional().describe('Required for action=create'),
+          assigneeSessionId: z.string().min(1).nullable().optional().describe('Assignee session id (create)'),
           status: z.enum(['todo', 'doing', 'done', 'blocked']).optional(),
           deliverable: z.string().min(1).max(2000).optional().describe('Evidence for done: branch/commit/files/test result'),
           dependsOn: z.array(z.string().min(1)).max(20).optional(),
+          requirementId: z.string().min(1).optional().describe('Requirement the new task belongs to (create)'),
         }),
       },
       {

@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import type { AgentFlavor, PermissionMode, SyncEvent } from '@hapi/protocol/types'
+import type { TeamOverviewMemberStatus, TeamOverviewTeam } from '@hapi/protocol/apiTypes'
 
 import {
     TeamStore,
@@ -182,6 +183,57 @@ export class TeamService {
         }
     }
 
+    /**
+     * Cross-team dashboard read model. Live member status uses the same
+     * derivation as the team page; token usage is attached by the HTTP layer.
+     */
+    getOverview(namespace: string): TeamOverviewTeam[] {
+        return this.listTeams(namespace).map((team) => {
+            const detail = this.getTeamDetail(team.id, namespace)
+            const tasks = detail?.tasks ?? []
+            const members = detail?.members ?? []
+            const requirements = detail?.requirements ?? []
+            const doingByAssignee = new Map<string, TeamTaskRecord>()
+            const counts: Record<TeamTaskRecord['status'], number> = { todo: 0, doing: 0, blocked: 0, done: 0 }
+            for (const task of tasks) {
+                counts[task.status] += 1
+                if (task.status === 'doing' && task.assigneeSessionId && !doingByAssignee.has(task.assigneeSessionId)) {
+                    doingByAssignee.set(task.assigneeSessionId, task)
+                }
+            }
+            const lastBySession = this.store.lastMessageAtBySession(team.id)
+            const pendingDecisions = this.store.listMessages(team.id, { limit: 2000 })
+                .filter(isPendingHumanDecision).length
+
+            return {
+                id: team.id,
+                name: team.name,
+                status: team.status,
+                leadSessionId: team.leadSessionId,
+                members: members.map((member) => {
+                    const currentTask = doingByAssignee.get(member.sessionId)
+                    return {
+                        sessionId: member.sessionId,
+                        role: member.role,
+                        status: member.status as TeamOverviewMemberStatus,
+                        currentTask: currentTask ? { id: currentTask.id, title: currentTask.title } : null,
+                        lastReportAt: lastBySession[member.sessionId] ?? null
+                    }
+                }),
+                tasks: { total: tasks.length, ...counts },
+                requirements: {
+                    total: requirements.length,
+                    open: requirements.filter((requirement) => requirement.status !== 'done').length,
+                    missingConclusion: requirements.filter((requirement) =>
+                        requirement.status === 'done' && !(requirement.conclusion ?? '').trim()
+                    ).length
+                },
+                pendingDecisions,
+                lastActivityAt: this.store.lastMessageAt(team.id)
+            }
+        })
+    }
+
     createTeam(namespace: string, input: CreateTeamServiceInput): TeamRecord {
         const storeInput: CreateTeamInput = {
             namespace,
@@ -262,6 +314,7 @@ export class TeamService {
         if (target.toSessionId === sessionId) {
             throw new TeamServiceError('invalid', 'Cannot send a team message to yourself')
         }
+        this.assertMemberTargetAllowed(team, sessionId, target)
         return await this.appendAndRoute(team, target, {
             fromKind: 'session',
             fromSessionId: sessionId,
@@ -465,11 +518,32 @@ export class TeamService {
     async createTaskForHuman(
         namespace: string,
         teamId: string,
-        input: { title: string; assigneeSessionId?: string | null; dependsOn?: string[]; requirementId?: string }
+        input: { title: string; assigneeSessionId?: string | null; dependsOn?: string[]; requirementId?: string },
+        /** Session caller (Lead via MCP). Absent = human web caller. */
+        actorSessionId: string | null = null
     ): Promise<TeamTaskRecord> {
         const team = this.store.getTeam(teamId, namespace)
         if (!team) {
             throw new TeamServiceError('not_found', 'Team not found')
+        }
+        let actor: { fromKind: 'human' | 'session'; fromSessionId: string | null; fromRole: string } = {
+            fromKind: 'human',
+            fromSessionId: null,
+            fromRole: '人类'
+        }
+        if (actorSessionId) {
+            const membership = this.requireMembership(actorSessionId, namespace)
+            if (membership.team.id !== team.id) {
+                throw new TeamServiceError('forbidden', 'Session is not a member of this team')
+            }
+            if (membership.team.leadSessionId !== actorSessionId) {
+                throw new TeamServiceError('forbidden', 'Only the Lead can create tasks for team members')
+            }
+            actor = {
+                fromKind: 'session',
+                fromSessionId: actorSessionId,
+                fromRole: membership.member.role
+            }
         }
         const members = this.store.listMembers(team.id)
         const assigneeSessionId = input.assigneeSessionId ?? null
@@ -495,13 +569,13 @@ export class TeamService {
         const assigneeRole = members.find((member) => member.sessionId === assigneeSessionId)?.role
         this.store.appendMessage({
             teamId: team.id,
-            fromKind: 'human',
-            fromSessionId: null,
+            fromKind: actor.fromKind,
+            fromSessionId: actor.fromSessionId,
             toKind: assigneeSessionId ? 'task' : 'broadcast',
             toSessionId: assigneeSessionId,
             kind: 'task-assign',
             text: input.title,
-            meta: { taskId: task.id, fromRole: '人类', ...(assigneeRole ? { role: assigneeRole } : {}) }
+            meta: { taskId: task.id, fromRole: actor.fromRole, ...(assigneeRole ? { role: assigneeRole } : {}) }
         })
         this.publishUpdate(team)
 
@@ -510,9 +584,9 @@ export class TeamService {
                 await this.runtime.deliverPeerMessage({
                     sessionId: assigneeSessionId,
                     text: this.formatPeerText(team, members, {
-                        fromKind: 'human',
-                        fromSessionId: null,
-                        fromRole: '人类',
+                        fromKind: actor.fromKind,
+                        fromSessionId: actor.fromSessionId,
+                        fromRole: actor.fromRole,
                         text: `你有一个新任务：${input.title}\n任务 id：${task.id}`
                     })
                 })
@@ -630,6 +704,38 @@ export class TeamService {
             }
         }
 
+        // Reassignment is only safe before work starts: a fresh member has no
+        // access to the previous session's conversation or worktree. Anything
+        // in flight must be blocked and re-created with a fresh brief instead.
+        if (patch.assigneeSessionId !== undefined
+            && patch.assigneeSessionId !== task.assigneeSessionId
+            && task.status !== 'todo'
+        ) {
+            throw new TeamServiceError(
+                'invalid',
+                'Only todo tasks can be reassigned; mark the current task blocked and create a new one with a brief for the new member'
+            )
+        }
+
+        // One doing task per member: a second "doing" would silently split the
+        // member's attention and let the Lead over-assign without noticing.
+        const nextAssignee = patch.assigneeSessionId !== undefined
+            ? patch.assigneeSessionId
+            : task.assigneeSessionId
+        if (sessionId && patch.status === 'doing' && nextAssignee) {
+            const busy = this.store.listTasks(team.id).find((candidate) =>
+                candidate.id !== taskId
+                && candidate.assigneeSessionId === nextAssignee
+                && candidate.status === 'doing'
+            )
+            if (busy) {
+                throw new TeamServiceError(
+                    'invalid',
+                    `该成员已有进行中的任务「${busy.title}」，请先完成或改派再开始新任务`
+                )
+            }
+        }
+
         const updated = this.store.updateTask(taskId, {
             ...(patch.status !== undefined ? { status: patch.status } : {}),
             ...(patch.assigneeSessionId !== undefined ? { assigneeSessionId: patch.assigneeSessionId } : {}),
@@ -658,6 +764,30 @@ export class TeamService {
             meta: { taskId: updated.id, fromRole, status: updated.status, ...(deliverable ? { deliverable } : {}) }
         })
         this.publishUpdate(team)
+
+        // A todo task handed to another member: tell them, with the stored brief
+        // when there is one, so they are not starting from a bare title.
+        if (patch.assigneeSessionId !== undefined
+            && updated.assigneeSessionId
+            && updated.assigneeSessionId !== task.assigneeSessionId
+            && this.runtime
+        ) {
+            const meta = updated.meta ?? {}
+            const brief = typeof meta.brief === 'string' ? meta.brief.trim() : ''
+            try {
+                await this.runtime.deliverPeerMessage({
+                    sessionId: updated.assigneeSessionId,
+                    text: this.formatPeerText(team, members, {
+                        fromKind: membership ? 'session' : 'human',
+                        fromSessionId: sessionId,
+                        fromRole,
+                        text: `任务「${updated.title}」已指派给你${brief ? `\n任务说明：${brief}` : ''}\n任务 id：${updated.id}`
+                    })
+                })
+            } catch {
+                // Best-effort; the task board still shows the assignment.
+            }
+        }
 
         // Done/blocked are lead-relevant: push those to the lead explicitly.
         if (membership && patch.status !== undefined
@@ -1243,6 +1373,29 @@ export class TeamService {
 
     // ------------------------------------------------------------------ helpers
 
+    /**
+     * Star topology: only the Lead opens a direct channel to another member.
+     * Members report with `to="lead"` and reach everyone else through the shared
+     * log (broadcast) or their tasks; peer DMs would wake another member behind
+     * the Lead's back and bypass the task board.
+     */
+    private assertMemberTargetAllowed(
+        team: TeamRecord,
+        senderSessionId: string,
+        target: { toSessionId: string | null }
+    ): void {
+        if (!target.toSessionId) {
+            return
+        }
+        if (team.leadSessionId === senderSessionId || target.toSessionId === team.leadSessionId) {
+            return
+        }
+        throw new TeamServiceError(
+            'forbidden',
+            'Only the Lead can direct-message another member; report with to="lead" or broadcast to the team log instead'
+        )
+    }
+
     private requireMembership(sessionId: string, namespace: string): { team: TeamRecord; member: TeamMemberRecord } {
         const membership = this.store.findTeamBySession(sessionId, namespace)
         if (!membership) {
@@ -1422,7 +1575,9 @@ function buildLeadBrief(team: TeamRecord): string {
         `你是 HAPI 团队「${team.name}」的 Lead。`,
         '',
         '职责：拆解任务、派生成员、汇总进展，必要时把决策升级给人类。',
-        '可用工具：team_status（成员/任务/需求/预算）、team_read（拉取团队消息，广播不会主动推送）、team_send（汇报/分派/通知人类）、team_task（任务列表/更新状态/交付物/依赖）、team_requirement（需求列表/状态/结论）、spawn_peer（派生成员，需用户批准）。',
+        '成员只向你汇报（成员之间不能直接发消息）；需要协作时用任务和依赖串联，不要让他们互相喊话。',
+        '可用工具：team_status（成员/任务/需求/预算）、team_read（拉取团队消息，广播不会主动推送）、team_send（汇报/分派/通知人类）、team_task（列表/建任务/更新状态/交付物/依赖）、team_requirement（需求列表/状态/结论）、spawn_peer（派生成员，需用户批准）。',
+        '复用 idle 成员时用 team_task action=create 给它建任务并指派，不要为了一个小任务新开成员；每个成员同一时间只能有一个 doing 任务。',
         '人类每条新消息会自动成为一个"需求"：派生任务时带上 requirementId（spawn_peer），完成后用 team_requirement 把需求标 done 并写一句 conclusion（结果）——人类只读结论即可。',
         '派生成员默认继承你的工具/模型/思考等级/权限，不需要手动指定；只有人类明确要求不同配置时才传覆盖参数。',
         '需要直接调用 hub API 时用团队级凭证 $HAPI_TEAM_TOKEN（只能访问本团队的消息/任务/状态），不要读取 ~/.hapi/settings.json 的凭证。',
@@ -1449,7 +1604,7 @@ function buildAssignmentBrief(
         '',
         '团队规范：',
         '- 开工前可调用 team_read 拉取团队消息（广播不会主动推送）。',
-        '- 进展/完成/阻塞用 team_send 汇报（kind=status 或 task-update）。',
+        '- 进展/完成/阻塞用 team_send 汇报（kind=status 或 task-update），并且只发给 Lead（to="lead"）；成员之间不能直接发消息。',
         '- 任务状态用 team_task 更新：开工标 doing、卡住标 blocked、完成标 done 并附交付物（分支/文件/测试结果）；有依赖的任务需依赖先完成。',
         '- 汇报时带上 taskId（team_send 的 taskId 参数），消息会自动归入对应需求。',
         '- 需要 hub API 时用团队级凭证 $HAPI_TEAM_TOKEN 调 $HAPI_API_URL（只能访问本团队），不要读取 ~/.hapi/settings.json。',
@@ -1480,6 +1635,19 @@ function slug(value: string): string {
 function isAcknowledgement(text: string): boolean {
     const compact = text.trim().replace(/[\s!！。.，,~～]+$/g, '')
     return /^(ok|okay|okey|收到|好|好的|好嘞|行|嗯+|谢谢|多谢|辛苦了|thx|thanks|👍)$/i.test(compact)
+}
+
+/** Mirrors the web "待你确认" inbox: an unanswered decision from a member. */
+function isPendingHumanDecision(message: TeamMessageRecord): boolean {
+    if (message.fromKind !== 'session') {
+        return false
+    }
+    const meta = message.meta ?? {}
+    const isDecision = message.kind === 'decision' || meta.awaitingHuman === true
+    if (!isDecision) {
+        return false
+    }
+    return meta.humanRepliedAt === undefined && meta.humanDismissedAt === undefined
 }
 
 /** Human ask -> requirement title: first non-empty line, capped. */

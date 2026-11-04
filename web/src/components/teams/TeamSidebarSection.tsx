@@ -22,6 +22,8 @@ export function TeamSidebarSection(props: {
     sessions: SessionSummary[]
     selectedTeamId?: string | null
     selectedSessionId?: string | null
+    overviewSelected?: boolean
+    onSelectOverview: () => void
     onSelectTeam: (teamId: string) => void
     onSelectSession: (sessionId: string) => void
 }) {
@@ -39,19 +41,34 @@ export function TeamSidebarSection(props: {
         })
     }, [props.selectedTeamId])
 
-    if (props.teams.length === 0) {
-        return null
-    }
-
     const sessionsById = new Map(props.sessions.map((session) => [session.id, session]))
 
     return (
         <div className="mb-1">
-            <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--app-hint)]">
-                {t('team.section.title')}
-            </div>
-            <div className="flex flex-col gap-0.5">
-                {props.teams.map((team) => {
+            <button
+                type="button"
+                onClick={props.onSelectOverview}
+                className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors ${
+                    props.overviewSelected
+                        ? 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)]'
+                        : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
+                }`}
+            >
+                <svg className="h-4 w-4 shrink-0 text-[var(--app-hint)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="7" height="9" rx="1" />
+                    <rect x="14" y="3" width="7" height="5" rx="1" />
+                    <rect x="14" y="12" width="7" height="9" rx="1" />
+                    <rect x="3" y="16" width="7" height="5" rx="1" />
+                </svg>
+                <span className="min-w-0 truncate">{t('dashboard.nav')}</span>
+            </button>
+            {props.teams.length === 0 ? null : (
+                <>
+                    <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                        {t('team.section.title')}
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                        {props.teams.map((team) => {
                     const isExpanded = expanded.has(team.id)
                     return (
                         <div key={team.id}>
@@ -143,8 +160,10 @@ export function TeamSidebarSection(props: {
                             ) : null}
                         </div>
                     )
-                })}
-            </div>
+                        })}
+                    </div>
+                </>
+            )}
         </div>
     )
 }

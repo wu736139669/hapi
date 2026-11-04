@@ -40,7 +40,7 @@ describe('DshWebClient', () => {
                     }]
                 }]
             }
-        }))
+        }), '')
 
         await expect(client.getModels('session-1')).resolves.toEqual({
             current: { provider: 'deepseek-official', model: 'deepseek-v4-pro', reasoningEffort: 'max' },
@@ -60,7 +60,7 @@ describe('DshWebClient', () => {
     it('keeps DSH RPC errors structured', async () => {
         const client = new DshWebClient('http://127.0.0.1:3080', rpcFetch({
             'host.describe': new Error('not ready')
-        }))
+        }), '')
         const error = await client.describe().catch((value) => value)
         expect(error).toBeInstanceOf(DshWebRpcError)
         expect(error).toMatchObject({ method: 'host.describe', code: 'failed' })
@@ -82,7 +82,7 @@ describe('DshWebClient', () => {
                 rpcId: request.rpcId,
                 result: { ok: true, value }
             }), { status: 200, headers: { 'content-type': 'application/json' } })
-        }) as typeof fetch)
+        }) as typeof fetch, '')
 
         await expect(client.executeCommand('session-1', '/compact')).resolves.toEqual({
             commandId: 'cmd-1',
@@ -95,7 +95,7 @@ describe('DshWebClient', () => {
     })
 
     it('returns undefined for a DSH line that is not a native command', async () => {
-        const client = new DshWebClient('http://127.0.0.1:3080', rpcFetch({ 'commands/execute': undefined }))
+        const client = new DshWebClient('http://127.0.0.1:3080', rpcFetch({ 'commands/execute': undefined }), '')
         await expect(client.executeCommand('session-1', '/unknown')).resolves.toBeUndefined()
     })
 
@@ -105,7 +105,7 @@ describe('DshWebClient', () => {
                 commandId: 'cmd-2',
                 result: { kind: 'error', text: 'Compaction is unavailable because the agent is busy.' }
             }
-        }))
+        }), '')
 
         await expect(client.executeCommand('session-1', '/compact')).resolves.toEqual({
             commandId: 'cmd-2',
@@ -145,7 +145,7 @@ describe('DshWebClient', () => {
                     }]
                 }]
             }
-        }))
+        }), '')
 
         await expect(listDshModels(client)).resolves.toEqual({
             success: true,
@@ -162,5 +162,42 @@ describe('DshWebClient', () => {
                 reasoningEfforts: [{ id: 'max', name: 'Max', isDefault: true }]
             }]
         })
+    })
+
+    it('authenticates a 0.2.x host and sends generated Remote args', async () => {
+        const requests: Array<{ url: string; body?: Record<string, unknown>; headers?: Headers }> = []
+        const client = new DshWebClient('http://127.0.0.1:3080', (async (input, init) => {
+            const url = String(input)
+            requests.push({
+                url,
+                body: init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined,
+                headers: new Headers(init?.headers)
+            })
+            if (url.endsWith('/connect?token=test-token&interactions=answer')) {
+                return new Response(null, {
+                    status: 302,
+                    headers: { 'set-cookie': 'dsh-auth-test=abc; Path=/; HttpOnly' }
+                })
+            }
+            return new Response(JSON.stringify({
+                type: 'server-response',
+                rpcId: requests.at(-1)?.body?.rpcId,
+                result: {
+                    ok: true,
+                    value: {
+                        items: [{ sessionId: 's1', updatedAt: 1, running: false, blank: false }]
+                    }
+                }
+            }), { status: 200 })
+        }) as typeof fetch, 'test-token')
+
+        await expect(client.listSessions()).resolves.toEqual([{
+            sessionId: 's1', updatedAt: 1, running: false, blank: false
+        }])
+        expect(requests[1].body).toMatchObject({
+            method: 'session/list',
+            payload: { args: { _request: {} } }
+        })
+        expect(requests[1].headers?.get('cookie')).toBe('dsh-auth-test=abc')
     })
 })

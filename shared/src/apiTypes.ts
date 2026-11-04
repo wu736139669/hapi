@@ -563,6 +563,46 @@ export const CreateTeamRequestSchema = z.object({
 
 export type CreateTeamRequest = z.infer<typeof CreateTeamRequestSchema>
 
+/** Cross-team dashboard read model: one screen for every team's live state. */
+export type TeamOverviewMemberStatus = 'idle' | 'working' | 'blocked' | 'offline'
+
+export type TeamOverviewMemberUsage = {
+    /** Tokens in the trailing 24 hours. */
+    last24hTokens: number
+    /** Lifetime tokens for this member session. */
+    totalTokens: number
+}
+
+export type TeamOverviewMember = {
+    sessionId: string
+    role: string
+    status: TeamOverviewMemberStatus
+    /** The single task this member currently has in `doing`, if any. */
+    currentTask: { id: string; title: string } | null
+    /** Last message this member posted into the team log. */
+    lastReportAt: number | null
+    /** Present only for the hub owner namespace. */
+    usage?: TeamOverviewMemberUsage
+}
+
+export type TeamOverviewTeam = {
+    id: string
+    name: string
+    status: 'active' | 'archived'
+    leadSessionId: string | null
+    members: TeamOverviewMember[]
+    tasks: { total: number; todo: number; doing: number; blocked: number; done: number }
+    requirements: { total: number; open: number; missingConclusion: number }
+    /** Member messages with kind=decision still waiting for a human answer. */
+    pendingDecisions: number
+    lastActivityAt: number | null
+}
+
+export type TeamOverviewResponse = {
+    generatedAt: number
+    teams: TeamOverviewTeam[]
+}
+
 export const TeamSendMessageRequestSchema = z.object({
     fromSessionId: z.string().min(1),
     text: z.string().min(1).max(20000),
@@ -646,6 +686,8 @@ export const TeamTaskUpdateRequestSchema = z.object({
 export type TeamTaskUpdateRequest = z.infer<typeof TeamTaskUpdateRequestSchema>
 
 export const CreateTeamTaskRequestSchema = z.object({
+    /** Session caller (CLI/MCP). Absent = human web caller. Only the Lead may pass this. */
+    fromSessionId: z.string().min(1).optional(),
     title: z.string().min(1).max(200),
     assigneeSessionId: z.string().min(1).nullable().optional(),
     dependsOn: z.array(z.string().min(1)).max(20).optional(),
@@ -1481,6 +1523,8 @@ export type UsageSummaryResponse = {
     daily: Array<UsageSummaryBucket & { key: string }>
     byAgent: UsageSummaryBucket[]
     byModel: UsageSummaryBucket[]
+    /** Per-session buckets; only populated when the caller asks for them. */
+    bySession?: UsageSummaryBucket[]
     updatedAt: number
 }
 

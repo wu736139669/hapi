@@ -478,6 +478,28 @@ export class TeamStore {
         return rows.map(mapMessageRow)
     }
 
+    /** Latest message timestamp per member session, for the team dashboard. */
+    lastMessageAtBySession(teamId: string): Record<string, number> {
+        const rows = this.db.prepare(
+            `SELECT from_session_id AS sessionId, MAX(created_at) AS at
+             FROM team_messages
+             WHERE team_id = ? AND from_session_id IS NOT NULL
+             GROUP BY from_session_id`
+        ).all(teamId) as Array<{ sessionId: string; at: number }>
+        const out: Record<string, number> = {}
+        for (const row of rows) {
+            out[row.sessionId] = row.at
+        }
+        return out
+    }
+
+    lastMessageAt(teamId: string): number | null {
+        const row = this.db.prepare(
+            'SELECT MAX(created_at) AS at FROM team_messages WHERE team_id = ?'
+        ).get(teamId) as { at: number | null } | undefined
+        return row?.at ?? null
+    }
+
     getMessage(teamId: string, seq: number): TeamMessageRecord | null {
         const row = this.db.prepare(
             'SELECT * FROM team_messages WHERE team_id = ? AND seq = ?'

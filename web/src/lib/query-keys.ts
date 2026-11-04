@@ -50,5 +50,6 @@ export const queryKeys = {
     studio: (studioId: string) => ['studio', studioId] as const,
     teams: ['teams'] as const,
     team: (teamId: string) => ['team', teamId] as const,
+    teamOverview: ['team-overview'] as const,
     teamMessages: (teamId: string) => ['team-messages', teamId] as const,
 }

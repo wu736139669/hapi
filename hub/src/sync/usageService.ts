@@ -146,7 +146,8 @@ export function getUsageSummary(
     store: Store,
     namespace: string,
     range: string | undefined,
-    timeZone: string = 'UTC'
+    timeZone: string = 'UTC',
+    options: { includeBySession?: boolean } = {}
 ): UsageSummaryResponse {
     const sessions = store.sessions.getSessionsByNamespace(namespace)
     // New messages are indexed on insertion. Backfill history from older hubs
@@ -154,7 +155,7 @@ export function getUsageSummary(
     store.usage.collectSessions(sessions)
 
     const now = Date.now()
-    const days = range === '30d' ? 30 : range === 'all' ? null : 7
+    const days = range === '30d' ? 30 : range === 'all' ? null : range === '1d' ? 1 : 7
     const from = days === null ? null : now - days * 24 * 60 * 60 * 1000
     // Read the durable namespace ledger rather than only live session ids;
     // usage rows intentionally survive session deletion.
@@ -205,6 +206,7 @@ export function getUsageSummary(
     const daily = new Map<string, Totals>()
     const byAgent = new Map<string, Totals>()
     const byModel = new Map<string, Totals>()
+    const bySession = new Map<string, Totals>()
     const sessionsWithUsage = new Set<string>()
     const cumulativePrevious = new Map<string, UsageSnapshot>()
     const cumulativeFingerprints = new Set<string>()
@@ -293,7 +295,11 @@ export function getUsageSummary(
         const modelTotals = byModel.get(modelKey) ?? emptyTotals()
         addTotals(modelTotals, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens)
         byModel.set(modelKey, modelTotals)
-        sessionsWithUsage.add(canonicalSession(event.sessionId))
+        const sessionKey = canonicalSession(event.sessionId)
+        const sessionTotals = bySession.get(sessionKey) ?? emptyTotals()
+        addTotals(sessionTotals, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens)
+        bySession.set(sessionKey, sessionTotals)
+        sessionsWithUsage.add(sessionKey)
     }
 
     // Reconciliation rows are absolute per-day totals, so range filtering
@@ -315,7 +321,11 @@ export function getUsageSummary(
         const modelTotals = byModel.get(row.model) ?? emptyTotals()
         addTotals(modelTotals, row.inputTokens, row.outputTokens, row.cacheReadTokens, row.cacheCreationTokens, row.requests)
         byModel.set(row.model, modelTotals)
-        sessionsWithUsage.add(canonicalSession(row.sessionId))
+        const sessionKey = canonicalSession(row.sessionId)
+        const sessionTotals = bySession.get(sessionKey) ?? emptyTotals()
+        addTotals(sessionTotals, row.inputTokens, row.outputTokens, row.cacheReadTokens, row.cacheCreationTokens, row.requests)
+        bySession.set(sessionKey, sessionTotals)
+        sessionsWithUsage.add(sessionKey)
     }
 
     const sortBuckets = (values: Map<string, Totals>): UsageSummaryBucket[] => Array.from(values.entries())
@@ -330,6 +340,7 @@ export function getUsageSummary(
             .sort((a, b) => a.key.localeCompare(b.key)),
         byAgent: sortBuckets(byAgent),
         byModel: sortBuckets(byModel),
+        ...(options.includeBySession ? { bySession: sortBuckets(bySession) } : {}),
         updatedAt: now
     }
 }

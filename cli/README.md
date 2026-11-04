@@ -32,7 +32,7 @@ Run Claude Code, Codex, Cursor Agent, DeepSeek Harness, Grok Build, or OpenCode 
   Supports `hapi cursor resume <chatId>`, `hapi cursor --continue`, `--mode plan|ask`, `--yolo`, `--model`.
   Local and remote modes supported; remote uses `agent -p` with stream-json.
 - `hapi dsh` - Start or resume a DeepSeek Harness session through `dsh web`.
-  Start DSH first with `dsh web --port 3080`. HAPI uses `http://127.0.0.1:3080` by default; set `HAPI_DSH_URL` to override it.
+  Start DSH first with `dsh web --port 3080`. HAPI uses `http://127.0.0.1:3080` by default; set `HAPI_DSH_URL` to override it. DSH 0.2.x launch tokens can be supplied with `HAPI_DSH_TOKEN` or `HAPI_DSH_TOKEN_FILE` (the bundled launch wrapper writes this file).
 - `hapi grok` - Start Grok Build mode. See `src/grok/runGrok.ts`.
 - `hapi opencode` - Start OpenCode mode via ACP. See `src/opencode/runOpencode.ts`.
   Note: OpenCode supports local and remote modes; local mode streams via OpenCode plugins.

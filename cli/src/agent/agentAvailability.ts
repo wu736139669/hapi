@@ -108,7 +108,21 @@ async function getDshWebAvailability(
 ): Promise<AgentAvailabilityEntry> {
     let client: DshWebClient
     try {
-        client = new DshWebClient(env.HAPI_DSH_URL, fetchImpl)
+        // Do not let an availability probe with an injected environment pick
+        // up the current process user's token file. The normal process.env
+        // path keeps DSH's default token discovery; isolated probes retain
+        // only the token/file explicitly present in their environment.
+        const explicitToken = env.HAPI_DSH_TOKEN
+        const explicitTokenFile = env.HAPI_DSH_TOKEN_FILE
+        const ambientEnvironment = env === process.env
+        client = new DshWebClient(
+            env.HAPI_DSH_URL,
+            fetchImpl,
+            explicitToken !== undefined || explicitTokenFile !== undefined
+                ? explicitToken
+                : ambientEnvironment ? undefined : '',
+            ambientEnvironment ? undefined : explicitTokenFile
+        )
     } catch {
         return { agent: 'dsh', available: false, reason: 'invalid_configuration' }
     }

@@ -24,6 +24,7 @@ import { App } from '@/App'
 import { SessionChat } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
 import { TeamChatPage } from '@/components/teams/TeamChatPage'
+import { TeamOverviewPage } from '@/components/teams/TeamOverviewPage'
 import { TeamSidebarSection } from '@/components/teams/TeamSidebarSection'
 import { SessionShareManagerDialog } from '@/components/SessionShareManagerDialog'
 import { SidebarShowButton } from '@/components/SidebarToggle'
@@ -260,7 +261,9 @@ function SessionsPage() {
         [machines]
     )
     const sessionMatch = matchRoute({ to: '/sessions/$sessionId', fuzzy: true })
-    const selectedSessionId = sessionMatch && sessionMatch.sessionId !== 'new' ? sessionMatch.sessionId : null
+    const selectedSessionId = sessionMatch && sessionMatch.sessionId !== 'new' && sessionMatch.sessionId !== 'dashboard'
+        ? sessionMatch.sessionId
+        : null
     const teamMatch = matchRoute({ to: '/sessions/teams/$teamId', fuzzy: true })
     const selectedTeamId = teamMatch ? teamMatch.teamId : null
     // Team member sessions live inside their team in the sidebar, not as
@@ -399,6 +402,11 @@ function SessionsPage() {
                                 sessions={sessions}
                                 selectedTeamId={selectedTeamId}
                                 selectedSessionId={selectedSessionId}
+                                overviewSelected={pathname === '/sessions/dashboard'}
+                                onSelectOverview={() => navigate({
+                                    to: '/sessions/dashboard',
+                                    ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+                                })}
                                 onSelectTeam={(teamId) => navigate({
                                     to: '/sessions/teams/$teamId',
                                     params: { teamId },
@@ -1524,6 +1532,12 @@ type NewSessionSearch = {
     teamName?: string
 }
 
+const teamOverviewRoute = createRoute({
+    getParentRoute: () => sessionsRoute,
+    path: 'dashboard',
+    component: TeamOverviewPage,
+})
+
 const teamChatRoute = createRoute({
     getParentRoute: () => sessionsRoute,
     path: 'teams/$teamId',
@@ -1682,6 +1696,7 @@ export const routeTree = rootRoute.addChildren([
     sessionsRoute.addChildren([
         sessionsIndexRoute,
         newSessionRoute,
+        teamOverviewRoute,
         teamChatRoute,
         sessionDetailRoute.addChildren([
             sessionTerminalRoute,

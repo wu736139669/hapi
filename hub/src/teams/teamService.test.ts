@@ -190,6 +190,33 @@ describe('TeamService messaging', () => {
         }
     })
 
+    it('blocks peer-to-peer direct messages while keeping lead reports and broadcasts open', async () => {
+        const { service, store, team, delivered } = setup()
+        store.addMember(team.id, 'sess-reviewer', 'reviewer')
+        try {
+            await expect(
+                service.sendMessage('sess-builder', 'alpha', { text: 'psst', to: 'sess-reviewer' })
+            ).rejects.toThrow('Only the Lead')
+
+            // Prefix targets that resolve to a peer are blocked too.
+            await expect(
+                service.sendMessage('sess-builder', 'alpha', { text: 'psst', to: 'sess-rev' })
+            ).rejects.toThrow('Only the Lead')
+            expect(delivered).toHaveLength(0)
+
+            // Lead -> member stays open.
+            await service.sendMessage('sess-lead', 'alpha', { text: 'review T1', to: 'sess-reviewer' })
+            expect(delivered.at(-1)?.sessionId).toBe('sess-reviewer')
+
+            // Member -> Lead and broadcast stay open.
+            await service.sendMessage('sess-builder', 'alpha', { text: 'progress', to: 'lead' })
+            expect(delivered.at(-1)?.sessionId).toBe('sess-lead')
+            await service.sendMessage('sess-builder', 'alpha', { text: 'note to all' })
+        } finally {
+            service.close()
+        }
+    })
+
     it('lets the human post into the channel and pushes directed messages', async () => {
         const { service, delivered } = setup()
         try {
@@ -533,6 +560,84 @@ describe('TeamService web task management', () => {
                 title: 'bad',
                 assigneeSessionId: 'sess-outsider'
             })).rejects.toThrow('not a team member')
+        } finally {
+            service.close()
+        }
+    })
+
+    it('lets the Lead create and assign tasks for existing members', async () => {
+        const { service, team, delivered } = setup()
+        try {
+            const task = await service.createTaskForHuman('alpha', team.id, {
+                title: '补测试',
+                assigneeSessionId: 'sess-builder'
+            }, 'sess-lead')
+            expect(task.assigneeSessionId).toBe('sess-builder')
+            expect(delivered.at(-1)?.sessionId).toBe('sess-builder')
+            expect(delivered.at(-1)?.text).toContain('来自 lead')
+
+            const messages = service.listMessagesForHuman('alpha', team.id)
+            expect(messages.some((message) => message.kind === 'task-assign' && message.fromKind === 'session')).toBe(true)
+
+            await expect(
+                service.createTaskForHuman('alpha', team.id, { title: '越权' }, 'sess-builder')
+            ).rejects.toThrow('Only the Lead')
+        } finally {
+            service.close()
+        }
+    })
+
+    it('allows only one doing task per member', async () => {
+        const { service, team } = setup()
+        try {
+            const first = await service.createTaskForHuman('alpha', team.id, {
+                title: 'A',
+                assigneeSessionId: 'sess-builder'
+            })
+            const second = await service.createTaskForHuman('alpha', team.id, {
+                title: 'B',
+                assigneeSessionId: 'sess-builder'
+            })
+            await service.updateTask('sess-builder', 'alpha', first.id, { status: 'doing' })
+            await expect(
+                service.updateTask('sess-builder', 'alpha', second.id, { status: 'doing' })
+            ).rejects.toThrow('已有进行中的任务')
+
+            await service.updateTask('sess-builder', 'alpha', first.id, {
+                status: 'done',
+                deliverable: 'A 已完成'
+            })
+            const progressed = await service.updateTask('sess-builder', 'alpha', second.id, { status: 'doing' })
+            expect(progressed.status).toBe('doing')
+        } finally {
+            service.close()
+        }
+    })
+
+    it('only reassigns todo tasks and briefs the new member', async () => {
+        const { service, store, team, delivered } = setup()
+        store.addMember(team.id, 'sess-reviewer', 'reviewer')
+        try {
+            const todo = await service.createTaskForHuman('alpha', team.id, {
+                title: '补文档',
+                assigneeSessionId: 'sess-builder'
+            })
+            delivered.length = 0
+            const reassigned = await service.updateTask(null, 'alpha', todo.id, {
+                assigneeSessionId: 'sess-reviewer'
+            })
+            expect(reassigned.assigneeSessionId).toBe('sess-reviewer')
+            expect(delivered.at(-1)?.sessionId).toBe('sess-reviewer')
+            expect(delivered.at(-1)?.text).toContain('已指派给你')
+
+            const doing = await service.createTaskForHuman('alpha', team.id, {
+                title: '在办',
+                assigneeSessionId: 'sess-builder'
+            })
+            await service.updateTask(null, 'alpha', doing.id, { status: 'doing' })
+            await expect(
+                service.updateTask(null, 'alpha', doing.id, { assigneeSessionId: 'sess-reviewer' })
+            ).rejects.toThrow('Only todo tasks can be reassigned')
         } finally {
             service.close()
         }

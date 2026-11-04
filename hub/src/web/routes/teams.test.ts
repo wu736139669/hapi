@@ -11,7 +11,15 @@ import { TeamStore } from '../../teams/teamStore'
 import type { WebAppEnv } from '../middleware/auth'
 import { createTeamsRoutes } from './teams'
 
-function createApp(getNamespace: () => string = () => 'alpha') {
+function createApp(
+    getNamespace: () => string = () => 'alpha',
+    options: {
+        getMemberUsage?: (
+            namespace: string,
+            sessionIds: string[]
+        ) => Map<string, { last24hTokens: number; totalTokens: number }>
+    } = {}
+) {
     const events: SyncEvent[] = []
     const sessions = new Map<string, TeamSessionView>()
     sessions.set('sess-lead', {
@@ -55,7 +63,7 @@ function createApp(getNamespace: () => string = () => 'alpha') {
         c.set('namespace', getNamespace())
         await next()
     })
-    app.route('/api', createTeamsRoutes(service))
+    app.route('/api', createTeamsRoutes(service, options))
     return { app, events, service, delivered, archived }
 }
 
@@ -82,6 +90,64 @@ describe('Agent Team member routes', () => {
 
         const outsider = await app.request('/api/teams/by-session/sess-nobody')
         expect(outsider.status).toBe(404)
+    })
+
+    it('returns a cross-team overview for the control room', async () => {
+        const usageCalls: string[][] = []
+        const { app, service } = createApp(() => 'alpha', {
+            getMemberUsage: (_namespace, sessionIds) => {
+                usageCalls.push(sessionIds)
+                return new Map(sessionIds.map((sessionId) => [
+                    sessionId,
+                    { last24hTokens: 100, totalTokens: 1_000 }
+                ]))
+            }
+        })
+        const teamId = await createTeam(app)
+        const spawned = await app.request(`/api/teams/${teamId}/spawn`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ fromSessionId: 'sess-lead', role: 'builder', task: 'design' })
+        })
+        const spawnBody = await spawned.json() as { sessionId: string; taskId: string }
+        await service.updateTask(spawnBody.sessionId, 'alpha', spawnBody.taskId, { status: 'doing' })
+        await service.sendMessage(spawnBody.sessionId, 'alpha', {
+            text: 'need a call',
+            to: 'human',
+            kind: 'decision'
+        })
+        const human = await service.sendHumanMessage('alpha', teamId, { text: 'ship it' })
+        await service.updateRequirement(null, 'alpha', human.meta?.requirementId as string, {
+            status: 'done'
+        })
+
+        const response = await app.request('/api/teams/overview')
+        expect(response.status).toBe(200)
+        const body = await response.json() as {
+            teams: Array<{
+                id: string
+                pendingDecisions: number
+                requirements: { missingConclusion: number }
+                tasks: { doing: number }
+                members: Array<{
+                    sessionId: string
+                    currentTask: { title: string } | null
+                    lastReportAt: number | null
+                    usage?: { last24hTokens: number; totalTokens: number }
+                }>
+            }>
+        }
+        expect(body.teams).toHaveLength(1)
+        const team = body.teams[0]!
+        expect(team.id).toBe(teamId)
+        expect(team.pendingDecisions).toBe(1)
+        expect(team.requirements.missingConclusion).toBe(1)
+        expect(team.tasks.doing).toBe(1)
+        const builder = team.members.find((member) => member.sessionId === spawnBody.sessionId)
+        expect(builder?.currentTask?.title).toBe('design')
+        expect(typeof builder?.lastReportAt).toBe('number')
+        expect(builder?.usage).toEqual({ last24hTokens: 100, totalTokens: 1_000 })
+        expect(usageCalls[0]).toContain(spawnBody.sessionId)
     })
 
     it('sends team messages with push for directed targets', async () => {

@@ -20,7 +20,16 @@ import type { WebAppEnv } from '../middleware/auth'
  * Agent Team API. Registered only when the hub has `teamsEnabled` — with the
  * feature off these paths do not exist (404), matching pre-feature behavior.
  */
-export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
+export function createTeamsRoutes(
+    teams: TeamService,
+    options: {
+        /** Per-member token totals; omitted for non-owner namespaces. */
+        getMemberUsage?: (
+            namespace: string,
+            sessionIds: string[]
+        ) => Map<string, { last24hTokens: number; totalTokens: number }>
+    } = {}
+): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
     app.get('/teams', (c) => {
@@ -35,6 +44,35 @@ export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
     app.get('/teams/feature', (c) => {
         c.header('Cache-Control', 'no-store')
         return c.json({ enabled: true })
+    })
+
+    // Cross-team control room. Registered before /teams/:id for the same reason.
+    app.get('/teams/overview', (c) => {
+        c.header('Cache-Control', 'no-store')
+        const namespace = c.get('namespace')
+        const overview = teams.getOverview(namespace)
+        const sessionIds = Array.from(new Set(
+            overview.flatMap((team) => team.members.map((member) => member.sessionId))
+        ))
+        let usage: Map<string, { last24hTokens: number; totalTokens: number }> | undefined
+        if (sessionIds.length > 0 && options.getMemberUsage) {
+            try {
+                usage = options.getMemberUsage(namespace, sessionIds)
+            } catch {
+                // The dashboard still works without usage totals.
+                usage = undefined
+            }
+        }
+        return c.json({
+            generatedAt: Date.now(),
+            teams: overview.map((team) => ({
+                ...team,
+                members: team.members.map((member) => {
+                    const memberUsage = usage?.get(member.sessionId)
+                    return memberUsage ? { ...member, usage: memberUsage } : member
+                })
+            }))
+        })
     })
 
     app.get('/teams/by-session/:sessionId', (c) => {
@@ -166,7 +204,7 @@ export function createTeamsRoutes(teams: TeamService): Hono<WebAppEnv> {
                 assigneeSessionId: parsed.data.assigneeSessionId ?? null,
                 dependsOn: parsed.data.dependsOn,
                 requirementId: parsed.data.requirementId
-            })
+            }, parsed.data.fromSessionId ?? null)
             c.header('Cache-Control', 'no-store')
             return c.json({ task }, 201)
         } catch (error) {

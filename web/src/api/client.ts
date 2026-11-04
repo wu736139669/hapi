@@ -49,6 +49,7 @@ import type {
     SessionContentSearchResponse
 } from '@/types/api'
 import type { TeamDetail, TeamMessage, TeamSummary, TeamTask, TeamWithMembers } from '@/types/team'
+import type { TeamOverviewResponse } from '@hapi/protocol/apiTypes'
 import type {
     CodexGoalRequest,
     CodexGoalResponse,
@@ -568,6 +569,10 @@ export class ApiClient {
 
     async getTeams(): Promise<{ teams: TeamWithMembers[] }> {
         return await this.request<{ teams: TeamWithMembers[] }>('/api/teams')
+    }
+
+    async getTeamOverview(): Promise<TeamOverviewResponse> {
+        return await this.request<TeamOverviewResponse>('/api/teams/overview')
     }
 
     async getTeam(teamId: string): Promise<TeamDetail> {

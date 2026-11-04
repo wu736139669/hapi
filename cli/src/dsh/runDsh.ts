@@ -265,6 +265,10 @@ export async function runDsh(opts: {
     await client.describe()
 
     const muxAbort = new AbortController()
+    // The latest DSH protocol exposes session state through a dedicated
+    // `session.follow` stream. Keep it separate from the interaction event
+    // stream so a reconnect or an approval request cannot stall event replay.
+    const sessionAbort = new AbortController()
     const loopAbort = new AbortController()
     const queue = new MessageQueue2<DshQueueMode>((mode) => hashObject(mode))
     const pendingTurns = new Map<string, PendingTurn>()
@@ -297,6 +301,7 @@ export async function runDsh(opts: {
     let nativeTurnStateObserved = false
     let keepAliveInterval: ReturnType<typeof setInterval> | null = null
     let latestEventSeq = sessionInfo.metadata?.dshHistoryLastEventSeq ?? -1
+    let staleHistoryCursor = false
 
     const syncKeepAlive = () => {
         session.keepAlive(thinking, 'remote', {
@@ -371,6 +376,7 @@ export async function runDsh(opts: {
             queue.close()
             loopAbort.abort()
             muxAbort.abort()
+            sessionAbort.abort()
             failPendingTurns(new Error('DeepSeek Harness session stopped'))
             finishPendingApprovals('Session stopped')
             finishPendingQuestions('Session stopped')
@@ -511,6 +517,12 @@ export async function runDsh(opts: {
 
         if (frame.type !== 'session/event' || !frame.event) return
         const event = frame.event
+        // `session.follow` starts with a snapshot. A resumed HAPI session has
+        // already imported events through dshHistoryLastEventSeq; applying
+        // those records again would duplicate transcript messages. Sequence
+        // numbers are monotonic per native session, so this also makes event
+        // stream reconnects idempotent.
+        if (event.seq <= latestEventSeq) return
         if (event.type === 'tool/call' && isRecord(event.data)
             && event.data.name === 'ask_user_question'
             && typeof event.data.callId === 'string') {
@@ -597,6 +609,22 @@ export async function runDsh(opts: {
             nativeSummary = (await client.listSessions()).find((entry) => entry.sessionId === nativeSessionId)
             if (!nativeSummary) throw new Error(`DeepSeek Harness session not found: ${nativeSessionId}`)
         }
+        // DSH 0.2.x can rewrite a session history during compaction.  The
+        // persisted cursor then may be from the pre-compaction sequence space
+        // (larger than the native session's current cursor), which would make
+        // the event filter below discard every new event forever.  Keep the
+        // cursor inside the current native sequence space; subsequent events
+        // advance it normally and the next turn-end persists the repaired
+        // value.
+        const nativeCursor = nativeSummary?.projections?.asOfSeq
+        if (nativeCursor !== undefined && latestEventSeq > nativeCursor) {
+            logger.debug('[dsh] Resetting stale history cursor after native compaction', {
+                persisted: latestEventSeq,
+                native: nativeCursor
+            })
+            latestEventSeq = nativeCursor
+            staleHistoryCursor = true
+        }
         if (!nativeTurnStateObserved) thinking = nativeSummary?.running === true
 
         const projectedPermission = summaryPermissionPreset(nativeSummary?.projections?.values.permissions)
@@ -606,6 +634,50 @@ export async function runDsh(opts: {
         }
 
         session.updateMetadata((metadata) => ({ ...metadata, dshSessionId: nativeSessionId! }))
+
+        const sessionStreamError = (error: Error) => {
+            if (stopped || sessionAbort.signal.aborted) return
+            session.sendSessionEvent({ type: 'error', message: error.message })
+            failPendingTurns(error)
+            loopAbort.abort(error)
+        }
+        await client.subscribeSession({
+            sessionId: nativeSessionId,
+            signal: sessionAbort.signal,
+            onSnapshot: (records) => {
+                if (!staleHistoryCursor || records.length === 0) return
+                // After compaction, DSH's sequence space is unrelated to the
+                // persisted HAPI cursor. The follow snapshot includes a bounded
+                // tail, so recover only the latest turn's assistant output;
+                // user prompts and older compacted turns are already in HAPI.
+                let lastTurnStart = -1
+                for (let index = records.length - 1; index >= 0; index -= 1) {
+                    if (records[index]!.event.type === 'turn/start') {
+                        lastTurnStart = index
+                        break
+                    }
+                }
+                const firstAssistant = lastTurnStart >= 0
+                    ? records.find((record, index) => index > lastTurnStart && record.event.type === 'assistant/message')
+                    : undefined
+                latestEventSeq = (firstAssistant?.event.seq ?? records[lastTurnStart >= 0 ? lastTurnStart : 0]!.event.seq) - 1
+                staleHistoryCursor = false
+            },
+            onEvent: (event, view) => {
+                handleMuxFrame({
+                    type: 'server-request',
+                    rpcId: randomUUID(),
+                    method: 'session/event',
+                    payload: {
+                        type: 'session/event',
+                        sessionId: nativeSessionId!,
+                        event,
+                        ...(view !== undefined ? { view } : {})
+                    }
+                })
+            },
+            onError: sessionStreamError
+        })
 
         const catalog = await client.getModels(nativeSessionId)
         currentSelection = catalog.current
@@ -915,10 +987,12 @@ export async function runDsh(opts: {
                     pendingTurns.delete(rpcId)
                     ownedRpcIds.delete(rpcId)
                 }
-                for (let index = batch.items.length - 1; index >= 0; index -= 1) {
-                    const item = batch.items[index]!
-                    if (batch.isolate) queue.unshiftIsolated(item.message, batch.mode, item.localId)
-                    else queue.unshift(item.message, batch.mode, item.localId)
+                if (!stopped) {
+                    for (let index = batch.items.length - 1; index >= 0; index -= 1) {
+                        const item = batch.items[index]!
+                        if (batch.isolate) queue.unshiftIsolated(item.message, batch.mode, item.localId)
+                        else queue.unshift(item.message, batch.mode, item.localId)
+                    }
                 }
                 throw error
             }

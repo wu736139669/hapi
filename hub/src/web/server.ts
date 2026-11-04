@@ -40,6 +40,7 @@ import { createClaudeModelsRoutes } from './routes/claudeModels'
 import { createPublicStudioRoutes, createStudioRoutes } from './routes/studios'
 import { createSessionShareRoutes } from './routes/sessionShares'
 import { createTeamsRoutes } from './routes/teams'
+import { getUsageSummary } from '../sync/usageService'
 import type { SSEManager } from '../sse/sseManager'
 import type { VisibilityTracker } from '../visibility/visibilityTracker'
 import type { TeamService } from '../teams/teamService'
@@ -323,9 +324,50 @@ function createWebApp(options: {
     app.route('/api', createMachinesRoutes(options.getSyncEngine, options.getTeamService, { dataDir: configuration.dataDir }))
     app.route('/api', createStorageRoutes(configuration.dbPath))
     app.route('/api', createHubSettingsRoutes(configuration.dataDir, () => configuration.teamsEnabled))
+    // Team dashboard usage: scanning the usage ledger is heavier than the other
+    // reads, so keep one namespace-wide per-session map for a minute and filter
+    // it per request. Usage stays owner-only, matching /api/usage/summary.
+    let memberUsageCache: {
+        at: number
+        namespace: string
+        map: Map<string, { last24hTokens: number; totalTokens: number }>
+    } | null = null
+    const getMemberUsage = (
+        namespace: string,
+        sessionIds: string[]
+    ): Map<string, { last24hTokens: number; totalTokens: number }> => {
+        if (namespace !== 'default') {
+            return new Map()
+        }
+        const now = Date.now()
+        if (!memberUsageCache || memberUsageCache.namespace !== namespace || now - memberUsageCache.at > 60_000) {
+            const collect = (range: string) => new Map(
+                (getUsageSummary(options.store, namespace, range, 'UTC', { includeBySession: true }).bySession ?? [])
+                    .map((bucket) => [bucket.key, bucket.totalTokens])
+            )
+            const recent = collect('1d')
+            const total = collect('all')
+            const map = new Map<string, { last24hTokens: number; totalTokens: number }>()
+            for (const sessionId of new Set([...recent.keys(), ...total.keys()])) {
+                map.set(sessionId, {
+                    last24hTokens: recent.get(sessionId) ?? 0,
+                    totalTokens: total.get(sessionId) ?? 0
+                })
+            }
+            memberUsageCache = { at: now, namespace, map }
+        }
+        const out = new Map<string, { last24hTokens: number; totalTokens: number }>()
+        for (const sessionId of sessionIds) {
+            const entry = memberUsageCache.map.get(sessionId)
+            if (entry) {
+                out.set(sessionId, entry)
+            }
+        }
+        return out
+    }
     const teamService = options.getTeamService?.() ?? null
     if (teamService) {
-        app.route('/api', createTeamsRoutes(teamService))
+        app.route('/api', createTeamsRoutes(teamService, { getMemberUsage }))
     }
     app.route('/api', createUsageRoutes(options.store, options.refreshUsage))
     app.route('/api', createActivityRoutes(options.store))

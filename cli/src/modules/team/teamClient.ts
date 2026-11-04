@@ -311,6 +311,32 @@ export async function updateTeamTask(
     return response.task ?? null
 }
 
+/** Create a task for an existing member. The hub allows this only for the Lead. */
+export async function createTeamTask(
+    options: TeamClientOptions & {
+        teamId: string
+        title: string
+        assigneeSessionId?: string | null
+        dependsOn?: string[]
+        requirementId?: string
+    }
+): Promise<TeamTaskView> {
+    const context = await openSession(options)
+    const response = await request<{ task: TeamTaskView }>(
+        context,
+        'post',
+        `/api/teams/${encodeURIComponent(options.teamId)}/tasks`,
+        {
+            fromSessionId: options.sessionId,
+            title: options.title,
+            ...(options.assigneeSessionId !== undefined ? { assigneeSessionId: options.assigneeSessionId } : {}),
+            ...(options.dependsOn && options.dependsOn.length > 0 ? { dependsOn: options.dependsOn } : {}),
+            ...(options.requirementId ? { requirementId: options.requirementId } : {})
+        }
+    )
+    return response.task
+}
+
 // -------------------------------------------------------------- formatting
 
 export function formatTeamStatus(status: TeamStatusView): string {
