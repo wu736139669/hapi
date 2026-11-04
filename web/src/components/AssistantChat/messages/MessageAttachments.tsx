@@ -58,6 +58,7 @@ function ImageAttachment(props: { attachment: AttachmentMetadata; api?: ApiClien
             fullSrc={fullSrc}
             fileName={attachment.filename}
             label={attachment.filename}
+            fileSize={attachment.size}
             buttonClassName="relative overflow-hidden rounded-lg text-left cursor-zoom-in"
             imageClassName="max-h-48 max-w-full object-contain"
             onTriggerClick={requestFullSize}

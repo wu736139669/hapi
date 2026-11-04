@@ -3,12 +3,17 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
+import { STOCK_PEER_SPAWN_DEFAULTS } from '@hapi/protocol/peerSpawnDefaults'
 import type { WebAppEnv } from '../middleware/auth'
 import { createHubSettingsRoutes } from './hubSettings'
 import { writeSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
 import { writeSessionSummaryInChatEnabled } from '../../config/sessionSummaryInChat'
 
 const directories: string[] = []
+const stockPeerSpawnDefaults = {
+    ...STOCK_PEER_SPAWN_DEFAULTS,
+    permissionMode: 'bypassPermissions' as const
+}
 
 afterEach(async () => {
     await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })))
@@ -27,7 +32,7 @@ describe('GET/PUT /api/hub-settings', () => {
         return { app, dataDir }
     }
 
-    it('returns default off for emit and chat display', async () => {
+    it('returns default off for emit, chat display, and stock peer spawn defaults', async () => {
         const { app } = await createApp()
         const response = await app.request('/api/hub-settings')
         expect(response.status).toBe(200)
@@ -36,7 +41,8 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryContract: false,
             sessionSummaryInChat: false,
             teamsEnabled: false,
-            teamsEnabledActive: false
+            teamsEnabledActive: false,
+            peerSpawnDefaults: stockPeerSpawnDefaults
         })
     })
 
@@ -52,7 +58,8 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryContract: true,
             sessionSummaryInChat: false,
             teamsEnabled: false,
-            teamsEnabledActive: false
+            teamsEnabledActive: false,
+            peerSpawnDefaults: stockPeerSpawnDefaults
         })
 
         const get = await app.request('/api/hub-settings')
@@ -60,7 +67,8 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryContract: true,
             sessionSummaryInChat: false,
             teamsEnabled: false,
-            teamsEnabledActive: false
+            teamsEnabledActive: false,
+            peerSpawnDefaults: stockPeerSpawnDefaults
         })
     })
 
@@ -78,18 +86,80 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryContract: true,
             sessionSummaryInChat: true,
             teamsEnabled: false,
-            teamsEnabledActive: false
+            teamsEnabledActive: false,
+            peerSpawnDefaults: stockPeerSpawnDefaults
         })
     })
 
-    it('rejects empty body', async () => {
+    it('persists peer spawn defaults', async () => {
         const { app } = await createApp()
-        const response = await app.request('/api/hub-settings', {
+        const put = await app.request('/api/hub-settings', {
             method: 'PUT',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({})
+            body: JSON.stringify({
+                peerSpawnDefaults: {
+                    agent: 'cursor',
+                    permissionMode: 'yolo',
+                    models: { cursor: 'auto' }
+                }
+            })
         })
-        expect(response.status).toBe(400)
+        expect(put.status).toBe(200)
+        expect(await put.json()).toEqual({
+            sessionSummaryContract: false,
+            sessionSummaryInChat: false,
+            teamsEnabled: false,
+            teamsEnabledActive: false,
+            peerSpawnDefaults: {
+                agent: 'cursor',
+                permissionMode: 'yolo',
+                models: {
+                    claude: 'sonnet',
+                    cursor: 'auto'
+                }
+            }
+        })
+    })
+
+    it('clears a saved peer spawn model override with an empty string', async () => {
+        const { app } = await createApp()
+        await app.request('/api/hub-settings', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                peerSpawnDefaults: {
+                    agent: 'codex',
+                    permissionMode: 'default',
+                    models: { codex: 'gpt-5' }
+                }
+            })
+        })
+
+        const clear = await app.request('/api/hub-settings', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                peerSpawnDefaults: {
+                    agent: 'codex',
+                    permissionMode: 'default',
+                    models: { codex: '' }
+                }
+            })
+        })
+        expect(clear.status).toBe(200)
+        expect(await clear.json()).toEqual({
+            sessionSummaryContract: false,
+            sessionSummaryInChat: false,
+            teamsEnabled: false,
+            teamsEnabledActive: false,
+            peerSpawnDefaults: {
+                agent: 'codex',
+                permissionMode: 'default',
+                models: {
+                    claude: 'sonnet'
+                }
+            }
+        })
     })
 
     it('rejects invalid body', async () => {
@@ -98,6 +168,28 @@ describe('GET/PUT /api/hub-settings', () => {
             method: 'PUT',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ sessionSummaryContract: 'yes' })
+        })
+        expect(response.status).toBe(400)
+    })
+
+    it('rejects retired gemini as peer spawn default agent', async () => {
+        const { app } = await createApp()
+        const response = await app.request('/api/hub-settings', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                peerSpawnDefaults: { agent: 'gemini' }
+            })
+        })
+        expect(response.status).toBe(400)
+    })
+
+    it('rejects empty body', async () => {
+        const { app } = await createApp()
+        const response = await app.request('/api/hub-settings', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({})
         })
         expect(response.status).toBe(400)
     })
@@ -119,7 +211,8 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryContract: false,
             sessionSummaryInChat: true,
             teamsEnabled: false,
-            teamsEnabledActive: false
+            teamsEnabledActive: false,
+            peerSpawnDefaults: stockPeerSpawnDefaults
         })
 
         const put = await tenantApp.request('/api/hub-settings', {
@@ -142,7 +235,8 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryContract: false,
             sessionSummaryInChat: false,
             teamsEnabled: true,
-            teamsEnabledActive: false
+            teamsEnabledActive: false,
+            peerSpawnDefaults: stockPeerSpawnDefaults
         })
 
         const stored = await (await app.request('/api/hub-settings')).json() as { teamsEnabled: boolean }
@@ -158,7 +252,8 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryContract: true,
             sessionSummaryInChat: true,
             teamsEnabled: false,
-            teamsEnabledActive: false
+            teamsEnabledActive: false,
+            peerSpawnDefaults: stockPeerSpawnDefaults
         })
     })
 })

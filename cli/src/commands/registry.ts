@@ -22,6 +22,9 @@ import { hubCommand } from './hub'
 import { pingPeerCommand } from './pingPeer'
 import { inspectPeerCommand } from './inspectPeer'
 import { usageScanCommand } from './usageScan'
+import { spawnPeerCommand } from './spawnPeer'
+import { usageCommand } from './usage'
+import { setModeCommand } from './setMode'
 import type { CommandContext, CommandDefinition } from './types'
 
 // Gemini CLI was sunset (Google stopped serving the consumer Gemini CLI on
@@ -65,6 +68,9 @@ const COMMANDS: CommandDefinition[] = [
     notifyCommand,
     pingPeerCommand,
     inspectPeerCommand,
+    spawnPeerCommand,
+    setModeCommand,
+    usageCommand,
     // Internal: spawned by the hub to scan the local OpenCode store without
     // blocking its event loop (see hub/src/sync/usageReconciliation.ts).
     usageScanCommand

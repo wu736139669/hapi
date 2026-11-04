@@ -21,6 +21,7 @@ const spawnState = vi.hoisted(() => ({
     stdoutDataHandlers: [] as Array<(chunk: string) => void>,
     stdinEnd: vi.fn(),
     stdinWrite: vi.fn<(chunk: string) => boolean>(() => true),
+    stdinWriteCallback: true,
     kill: vi.fn(),
     exitCode: null as number | null,
     pid: 424242 as number | undefined,
@@ -76,7 +77,7 @@ vi.mock('node:child_process', () => ({
                 end: (...args: unknown[]) => spawnState.stdinEnd(...args),
                 write: (chunk: string, callback?: (error?: Error | null) => void) => {
                     const result = spawnState.stdinWrite(chunk);
-                    callback?.();
+                    if (spawnState.stdinWriteCallback) callback?.();
                     return result;
                 }
             },
@@ -599,9 +600,10 @@ describe('AcpStdioTransport closed stdin writes', () => {
     });
 
     test('bounds a stalled stdin dispatch and rejects both promises', async () => {
+        const transport = await AcpStdioTransport.create({ command: 'gemini' });
+        spawnState.stdinWriteCallback = false;
         vi.useFakeTimers();
         try {
-            const transport = await AcpStdioTransport.create({ command: 'gemini' });
             const request = transport.sendRequestWithDispatch('session/prompt', {}, {
                 timeoutMs: Infinity,
                 dispatchTimeoutMs: 10
@@ -610,15 +612,16 @@ describe('AcpStdioTransport closed stdin writes', () => {
             let completedError: unknown;
             const dispatch = request.dispatched.catch((error) => { dispatchError = error; });
             const completed = request.completed.catch((error) => { completedError = error; });
-            await vi.advanceTimersByTimeAsync(10);
+            await vi.runAllTimersAsync();
             await dispatch;
             await completed;
             expect(isAcpIndeterminateError(dispatchError)).toBe(true);
             expect(isAcpIndeterminateError(completedError)).toBe(true);
-            await transport.close();
         } finally {
             vi.useRealTimers();
+            spawnState.stdinWriteCallback = true;
         }
+        await transport.close();
     });
 
     test('rejects pending requests when stdin.write throws', async () => {

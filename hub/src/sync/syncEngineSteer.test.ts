@@ -12,7 +12,7 @@ type EngineInternals = {
     }
 }
 
-function setup(options: { flavor?: 'codex' | 'claude'; scheduledAt?: number } = {}) {
+function setup(options: { flavor?: 'codex' | 'claude' | 'gemini'; scheduledAt?: number } = {}) {
     const store = new Store(':memory:')
     const engine = new SyncEngine(
         store,
@@ -42,11 +42,11 @@ function setup(options: { flavor?: 'codex' | 'claude'; scheduledAt?: number } = 
 
 describe('SyncEngine steerQueuedMessage', () => {
     it('rejects unsupported agents before RPC', async () => {
-        const { engine, session, message } = setup({ flavor: 'claude' })
+        const { engine, session, message } = setup({ flavor: 'gemini' })
 
         await expect(engine.steerQueuedMessage(session.id, message.id)).resolves.toEqual({
             status: 'failed',
-            error: 'Steering is not supported for this agent',
+            error: 'Steering is only supported for Claude, Pi, Codex, OpenCode, Cursor ACP, and DSH sessions',
             localId: null
         })
     })

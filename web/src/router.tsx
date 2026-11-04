@@ -10,12 +10,15 @@ import {
     useMatchRoute,
     useNavigate,
     useParams,
+    useRouter,
     useSearch,
 } from '@tanstack/react-router'
 import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
 import {
     getSessionListSelectionNavigation,
+    isSessionSidebarHidden,
     PRESERVE_SESSION_SIDEBAR_SCROLL,
+    shouldShowSessionSidebar,
 } from '@/lib/sessionNavigation'
 import { App } from '@/App'
 import { SessionChat } from '@/components/SessionChat'
@@ -23,6 +26,7 @@ import { SessionList } from '@/components/SessionList'
 import { TeamChatPage } from '@/components/teams/TeamChatPage'
 import { TeamSidebarSection } from '@/components/teams/TeamSidebarSection'
 import { SessionShareManagerDialog } from '@/components/SessionShareManagerDialog'
+import { SidebarShowButton } from '@/components/SidebarToggle'
 import { NewSession } from '@/components/NewSession'
 import { WorkspaceBrowser } from '@/components/WorkspaceBrowser'
 import { LoadingState } from '@/components/LoadingState'
@@ -33,6 +37,7 @@ import { useSidebarResize } from '@/hooks/useSidebarResize'
 import { useMessages } from '@/hooks/queries/useMessages'
 import { useMachines } from '@/hooks/queries/useMachines'
 import { useMachineLabels } from '@/hooks/useMachineLabels'
+import { useMentionInactiveCollapsed } from '@/hooks/useMentionInactiveCollapsed'
 import { useSession } from '@/hooks/queries/useSession'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { useSessions } from '@/hooks/queries/useSessions'
@@ -40,9 +45,9 @@ import { useTeams } from '@/hooks/queries/useTeams'
 import { useSessionShares } from '@/hooks/queries/useSessionShares'
 import { useSlashCommands } from '@/hooks/queries/useSlashCommands'
 import { useSkills } from '@/hooks/queries/useSkills'
-import { getSessionTitle } from '@/lib/sessionTitle'
-import { buildSessionReferenceText, matchSessionsForMention } from '@/lib/sessionReference'
-import type { Suggestion } from '@/hooks/useActiveSuggestions'
+import { buildSessionMentionSuggestions } from '@/lib/sessionMentionSuggestions'
+import { createDeferredSuggestions } from '@/lib/deferredSuggestions'
+import type { Suggestion, SuggestionRequestContext } from '@/hooks/useActiveSuggestions'
 import { useSendMessage, type SendErrorInfo } from '@/hooks/mutations/useSendMessage'
 import type { ComposerSendError } from '@/components/AssistantChat/HappyComposer'
 import { ApiError } from '@/api/client'
@@ -56,12 +61,15 @@ import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer
 import { getDraftAttachments } from '@/lib/composer-attachment-drafts'
 import { refreshSessionDetailPreservingActive } from '@/lib/session-detail-optimistic'
 import { inactiveSessionCanResume, resolveCursorReopenGate } from '@/lib/sessionResume'
-import { initializeSessionLastSeen } from '@/lib/sessionLastSeen'
-import { useSelectedSessionSeen } from '@/hooks/useSelectedSessionSeen'
+import { isOnSessionPage, resolveVoiceSession } from '@/lib/dictationSend'
+import { configureSessionReadState, observeSessionReadStates } from '@/lib/sessionLastSeen'
 import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
 import { clearCodexImportedSession } from '@/lib/codexImportedSessions'
 import { getSupersedingSessionId, prepareFollowSupersedingSession, shouldFollowSupersedingSession } from '@/routes/sessions/followSupersedingSession'
 import { migrateSuppressedSendError } from '@/lib/suppressed-send-error'
+import { useConsumedMessageTarget } from '@/lib/useConsumedMessageTarget'
+import { normalizeMessageSearchTarget } from '@/lib/messageSearchTarget'
+import { buildFileMentionSearchQuery } from '@/lib/file-search-query'
 import FilesPage from '@/routes/sessions/files'
 import FilePage from '@/routes/sessions/file'
 import TerminalPage from '@/routes/sessions/terminal'
@@ -201,6 +209,7 @@ function ShareIcon(props: { className?: string }) {
 function SessionsPage() {
     const { api, baseUrl, titleSuggestionAvailable = false, isSessionGuest = false } = useAppContext()
     const navigate = useNavigate()
+    const router = useRouter()
     const pathname = useLocation({ select: location => location.pathname })
     const matchRoute = useMatchRoute()
     const { t } = useTranslation()
@@ -268,21 +277,81 @@ function SessionsPage() {
         () => selectedSessionId ? sessions.find((session) => session.id === selectedSessionId) ?? null : null,
         [selectedSessionId, sessions]
     )
+    const readStateScope = api?.getReadStateScope()
+    useEffect(() => {
+        const scope = readStateScope
+        if (!api || !scope) return
+        return configureSessionReadState(scope, (id, request) => {
+            if (api.getReadStateScope() !== scope) return Promise.reject(new Error('Read-state identity changed'))
+            return api.updateSessionReadState(id, request)
+        })
+    }, [api, readStateScope])
     useEffect(() => {
         if (isLoading || error) {
             return
         }
-        initializeSessionLastSeen(baseUrl, sessions)
+        observeSessionReadStates(sessions)
         setInitializedHub(baseUrl)
     }, [baseUrl, error, isLoading, sessions])
-    useSelectedSessionSeen(selectedSessionId, selectedSession?.updatedAt)
     const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
+    const sidebarSearch = useLocation({ select: location => location.search })
+    const [isSidebarVisible, setIsSidebarVisible] = useState(
+        () => shouldShowSessionSidebar(pathname, sidebarSearch)
+    )
+    useEffect(() => {
+        if (isSessionsIndex) {
+            setIsSidebarVisible(true)
+        } else if (!shouldShowSessionSidebar(pathname, sidebarSearch)) {
+            setIsSidebarVisible(false)
+        }
+    }, [isSessionsIndex, pathname, sidebarSearch])
+    const sidebarHidden = !isSidebarVisible
+    const shouldShowSidebar = isSessionsIndex || isSidebarVisible
+    useEffect(() => {
+        // Child routes and in-session actions can navigate without carrying
+        // the parent session search state. Keep the chat-focused URL explicit
+        // while this layout remains hidden so reloads do not restore the rail.
+        if (isSessionsIndex || !sidebarHidden) return
+        const { pathname: currentPathname, search, hash, state } = router.history.location
+        const searchParams = new URLSearchParams(search)
+        if (searchParams.get('sidebar') === 'hidden') return
+        searchParams.set('sidebar', 'hidden')
+        router.history.replace(
+            `${currentPathname}?${searchParams.toString()}${hash}`,
+            state,
+        )
+    }, [isSessionsIndex, pathname, router, sidebarHidden, sidebarSearch])
     const sidebar = useSidebarResize()
     const sidebarCollapse = useSidebarCollapsed()
-    const sidebarIsCollapsed = sidebarCollapse.sidebarCollapsed && !isSessionsIndex
+    const sidebarIsCollapsed = sidebarCollapse.sidebarCollapsed && !isSessionsIndex && shouldShowSidebar
     if (isSessionGuest) {
         return <div className="hapi-session-pane flex h-full min-h-0 flex-col bg-[var(--app-bg)]"><Outlet /></div>
     }
+    const handleSelectSession = useCallback((
+        sessionId: string,
+        targetMessageId?: string,
+        targetMessageQuery?: string
+    ) => {
+        // A content-search hit carries the message it matched, so the session
+        // opens on that message rather than the tail.
+        if (targetMessageId) {
+            navigate({
+                to: '/sessions/$sessionId',
+                params: { sessionId },
+                search: {
+                    ...(isSessionSidebarHidden(sidebarSearch) ? { sidebar: 'hidden' as const } : {}),
+                    messageId: targetMessageId,
+                    ...(targetMessageQuery ? { messageQuery: targetMessageQuery } : {})
+                },
+                ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+            })
+            return
+        }
+        navigate(getSessionListSelectionNavigation(
+            sessionId,
+            isSessionSidebarHidden(sidebarSearch) ? { sidebar: 'hidden' } : undefined,
+        ))
+    }, [navigate, sidebarSearch])
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
             to: '/sessions/new',
@@ -292,6 +361,16 @@ function SessionsPage() {
             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate])
+    const showSidebar = useCallback(() => {
+        if (!sidebarHidden) return
+        setIsSidebarVisible(true)
+        const { pathname: currentPathname, search, hash, state } = router.history.location
+        const searchParams = new URLSearchParams(search)
+        searchParams.delete('sidebar')
+        const nextSearch = searchParams.toString()
+        const nextHref = `${currentPathname}${nextSearch ? `?${nextSearch}` : ''}${hash}`
+        router.history.replace(nextHref, state)
+    }, [router, setIsSidebarVisible, sidebarHidden])
 
     return (
         <>
@@ -300,7 +379,7 @@ function SessionsPage() {
                 // min-w-0: without it, shrink-0 toolbar icons inflate the flex
                 // item's min-content past --sidebar-w and the shed never sees a
                 // tight budget (#2039 desktop overflow past the split).
-                className={`hapi-sessions-sidebar min-w-0 ${sidebarIsCollapsed ? 'sidebar-collapsed-rail hidden split:flex shrink-0 flex-col border-r border-[var(--app-divider)] bg-[var(--app-bg)]' : `${isSessionsIndex ? 'flex' : 'hidden split:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}`}
+                className={`hapi-sessions-sidebar min-w-0 ${sidebarIsCollapsed ? 'sidebar-collapsed-rail hidden split:flex shrink-0 flex-col border-r border-[var(--app-divider)] bg-[var(--app-bg)]' : `${shouldShowSidebar ? (isSessionsIndex ? 'flex' : 'hidden split:flex') : 'hidden'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}`}
                 style={!sidebarIsCollapsed ? { '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties : undefined}
             >
                 <div className="flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)]">
@@ -330,7 +409,7 @@ function SessionsPage() {
                                 })}
                             />
                         ) : undefined}
-                        onSelect={(sessionId) => navigate(getSessionListSelectionNavigation(sessionId))}
+                        onSelect={handleSelectSession}
                         onNewSession={() => navigate({
                             to: '/sessions/new',
                             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
@@ -339,7 +418,7 @@ function SessionsPage() {
                         onBrowse={canBrowse ? () => navigate({ to: '/browse' }) : undefined}
                         onRefresh={handleRefresh}
                         isLoading={isLoading}
-                        // Keep ranks: new 4, unread lens 5, settings 6,
+                        // Keep ranks: new 4, sort and filter 5, settings 6,
                         // mark-all 7, browse 8. Higher sheds into More first (#2039).
                         renderHeader
                         toolbarExtras={[
@@ -420,13 +499,21 @@ function SessionsPage() {
             </div>
 
             {/* Resize handle - desktop only */}
-            {!sidebarIsCollapsed ? <div
-                className="sidebar-resize-handle hidden split:block shrink-0"
-                data-dragging={sidebar.isDragging || undefined}
-                onPointerDown={sidebar.onPointerDown}
-            /> : null}
+            {shouldShowSidebar && !sidebarIsCollapsed ? (
+                <div
+                    className="sidebar-resize-handle hidden split:block shrink-0"
+                    data-dragging={sidebar.isDragging || undefined}
+                    onPointerDown={sidebar.onPointerDown}
+                />
+            ) : null}
 
-            <div className={`hapi-session-pane ${isSessionsIndex ? 'hidden split:flex' : 'flex'} min-w-0 flex-1 flex-col bg-[var(--app-bg)]`}>
+            <div className={`hapi-session-pane ${isSessionsIndex ? 'hidden split:flex' : 'flex'} relative min-w-0 flex-1 flex-col bg-[var(--app-bg)]`}>
+                {!shouldShowSidebar ? (
+                    <SidebarShowButton
+                        showLabel={t('session.sidebar.show')}
+                        onShow={showSidebar}
+                    />
+                ) : null}
                 <div className="flex-1 min-h-0">
                     <Outlet />
                 </div>
@@ -489,7 +576,17 @@ function SessionPage() {
     const queryClient = useQueryClient()
     const { addToast } = useToast()
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
-    const { outline, share } = useSearch({ from: '/sessions/$sessionId' })
+    const { outline, share, messageId, messageQuery } = useSearch({ from: '/sessions/$sessionId' })
+    const {
+        effectiveMessageId: effectiveInitialMessageId,
+        effectiveMessageQuery: effectiveInitialMessageQuery,
+        searchRequestId,
+        consume: consumeMessageTarget,
+        clear: clearConsumedMessageTarget,
+    } = useConsumedMessageTarget(sessionId, messageId, messageQuery)
+    const hasCompleteInitialMessageTarget = Boolean(
+        effectiveInitialMessageId?.trim() && effectiveInitialMessageQuery?.trim()
+    )
     const {
         session,
         error: sessionError,
@@ -507,15 +604,31 @@ function SessionPage() {
         isSyncingTail: messagesSyncingTail,
         isLoadingMore: messagesLoadingMore,
         hasMore: messagesHasMore,
+        hasMoreNewer: messagesHasMoreNewer,
         loadMore: loadMoreMessages,
+        loadNewer: loadNewerMessages,
         cancelLoadMore: cancelLoadMoreMessages,
         refetch: refetchMessages,
+        loadMessageContext: loadMessageContextForSession,
         viewMode: messagesViewMode,
         messagesVersion,
         historyVersion,
         tailRevision,
+        readThroughRevision,
         setViewMode,
-    } = useMessages(api, sessionId)
+        jumpToTail,
+    } = useMessages(api, sessionId, {
+        skipInitialTailSync: hasCompleteInitialMessageTarget
+    })
+
+    // Must stay above the `if (!session)` early return below: declaring it
+    // after that branch changes the hook count once session data resolves.
+    const handleLoadNewerMessages = useCallback(async (
+        resolvePreserveMessageId?: () => string | null
+    ): Promise<boolean> => {
+        const outcome = await loadNewerMessages(resolvePreserveMessageId)
+        return outcome.kind === 'caught-up'
+    }, [loadNewerMessages])
 
     // Tracks the most recent send the hub rejected (4xx/5xx/network), keyed
     // by the session the failed POST actually targeted (post-resolveSessionId).
@@ -725,11 +838,29 @@ function SessionPage() {
         }
     }, [api, navigate, queryClient, session])
 
+    const resolveVoiceSessionId = useCallback(async (currentSessionId: string) => {
+        if (!api) throw new Error('API unavailable')
+        return resolveVoiceSession(api, currentSessionId)
+    }, [api])
+
+    // Voice dictation direct-sends finish asynchronously after transcription
+    // and may complete long after the operator navigated away (stopAndSend is
+    // designed to survive unmount, #1435). Only navigate to the resumed
+    // session when the operator is still on the source session's page;
+    // otherwise the completed background send would yank them away from where
+    // they moved. The router instance is stable and its state is read live at
+    // callback time — a render-time pathname would be stale once the source
+    // SessionPage unmounts.
+    const router = useRouter()
+    const handleVoiceSessionResolved = useCallback((resolvedSessionId: string) => {
+        if (!isOnSessionPage(router.state.location.pathname, sessionId)) return
+        handleSessionResolved(resolvedSessionId)
+    }, [handleSessionResolved, router, sessionId])
+
     const {
         sendMessage,
         retryMessage,
         isSending,
-        sendSettlement,
     } = useSendMessage(api, sessionId, {
         isSessionThinking: session?.thinking ?? false,
         onSuccess: (sentSessionId) => {
@@ -809,6 +940,7 @@ function SessionPage() {
     } = useSkills(api, sessionId)
     // Mention pool is stricter than sidebar (#1506): titled sessions only; match via sessionMatchesQuery.
     const { sessions: allSessions } = useSessions(isSessionGuest ? null : api)
+    const { mentionInactiveCollapsed, setMentionInactiveCollapsed } = useMentionInactiveCollapsed()
     const { machines: mentionMachines } = useMachines(api, !isSessionGuest)
     const mentionMachineLabelsById = useMachineLabels(mentionMachines)
     // Same fallbacks as share picker / SessionList search.
@@ -822,52 +954,52 @@ function SessionPage() {
         return t('machine.unknown')
     }, [mentionMachineLabelsById, t])
 
-    const getAutocompleteSuggestions = useCallback(async (query: string) => {
+    const fileSuggestions = useMemo(() => createDeferredSuggestions(), [api, sessionId, agentType])
+
+    const getAutocompleteSuggestions = useCallback(async (query: string, context: SuggestionRequestContext) => {
         if (query.startsWith('@')) {
             const search = query.slice(1)
             // v1: plain-text expansion (same grammar as Copy reference) — #1213.
             // v2: segmented rich composer with inline session tokens — #1215.
-            // Match via sessionMatchesQuery (share/sidebar); label/insert via getSessionTitle.
-            const sessionHits = matchSessionsForMention(allSessions, search, {
+            // Match via sessionMatchesQuery (share/sidebar).
+            const sessionHits = buildSessionMentionSuggestions({
+                sessions: allSessions,
+                query: search,
                 excludeId: sessionId,
-                limit: 20,
                 resolveMachineLabel: resolveMentionMachineLabel,
-            }).map((s) => {
-                const title = getSessionTitle(s)
-                const mentionText = buildSessionReferenceText(title, s.id)
-                const idPrefix = s.id.slice(0, 8)
-                return {
-                    key: `session:${s.id}`,
-                    text: mentionText,
-                    label: `@${title || idPrefix}`,
-                    description: s.active
-                        ? `Session · ${idPrefix} · active`
-                        : `Session · ${idPrefix}`,
-                    // Rich composer atom; textarea path still inserts `text` prose.
-                    sessionMention: { id: s.id, title: title || idPrefix },
-                }
+                inactiveCollapsed: mentionInactiveCollapsed,
+                inactiveLabel: t('richComposer.inactiveSessions'),
+                toggleInactive: () => setMentionInactiveCollapsed(!mentionInactiveCollapsed),
             })
 
-            const fileHits: Suggestion[] = []
             if ((agentType === 'codex' || agentType === 'copilot') && api && sessionId) {
-                const response = await api.searchSessionFiles(sessionId, search, 50)
-                if (response.success && response.files) {
-                    for (const file of response.files) {
-                        // Codex App Server expects @"path"; Copilot CLI uses @path (relative preferred).
-                        const mentionText = agentType === 'copilot'
-                            ? `@${file.fullPath}`
-                            : `@"${file.fullPath.replace(/(["\\])/g, '\\$1')}"`
-                        fileHits.push({
-                            key: mentionText,
-                            text: mentionText,
-                            label: `@${file.fileName}`,
-                            description: file.filePath || file.fullPath,
-                        })
+                return fileSuggestions(JSON.stringify([sessionId, agentType, search]), sessionHits, async () => {
+                    const response = await api.searchSessionFiles(
+                        sessionId,
+                        buildFileMentionSearchQuery(search),
+                        50,
+                        context.signal
+                    )
+                    if (!response.success) throw new Error(response.error ?? 'File search failed')
+                    const fileHits: Suggestion[] = []
+                    if (response.files) {
+                        for (const file of response.files) {
+                            // Codex App Server expects @"path"; Copilot CLI uses @path (relative preferred).
+                            const mentionText = agentType === 'copilot'
+                                ? `@${file.fullPath}`
+                                : `@"${file.fullPath.replace(/(["\\])/g, '\\$1')}"`
+                            fileHits.push({
+                                key: mentionText,
+                                text: mentionText,
+                                label: `@${file.fileName}`,
+                                description: file.filePath || file.fullPath,
+                            })
+                        }
                     }
-                }
+                    return fileHits
+                }, context)
             }
-
-            return [...sessionHits, ...fileHits]
+            return sessionHits
         }
         if (query.startsWith('$')) {
             return await getSkillSuggestions(query)
@@ -875,9 +1007,13 @@ function SessionPage() {
         return await getSlashSuggestions(query)
     }, [
         agentType,
+        fileSuggestions,
         api,
         sessionId,
         allSessions,
+        mentionInactiveCollapsed,
+        setMentionInactiveCollapsed,
+        t,
         resolveMentionMachineLabel,
         getSkillSuggestions,
         getSlashSuggestions,
@@ -898,6 +1034,28 @@ function SessionPage() {
             ...PRESERVE_SESSION_SIDEBAR_SCROLL,
         })
     }, [navigate, sessionId])
+
+    const handleInitialMessageConsumed = useCallback(() => {
+        if (messageId) {
+            consumeMessageTarget()
+        }
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId },
+            replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
+    }, [consumeMessageTarget, messageId, navigate, sessionId])
+
+    const handleSearchTargetDismissed = useCallback(() => {
+        clearConsumedMessageTarget()
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId },
+            replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
+    }, [clearConsumedMessageTarget, navigate, sessionId])
 
     if (!session) {
         if (sessionError) {
@@ -943,6 +1101,7 @@ function SessionPage() {
 
     return (
         <SessionChat
+            readThroughRevision={readThroughRevision}
             api={api}
             baseUrl={baseUrl}
             titleSuggestionAvailable={titleSuggestionAvailable}
@@ -953,10 +1112,10 @@ function SessionPage() {
             messages={messages}
             messagesWarning={messagesWarning}
             hasMoreMessages={messagesHasMore}
+            hasMoreNewerMessages={messagesHasMoreNewer}
             isSyncingTail={messagesSyncingTail}
             isLoadingMoreMessages={messagesLoadingMore}
             isSending={isSending}
-            sendSettlement={sendSettlement}
             viewMode={messagesViewMode}
             messagesVersion={messagesVersion}
             historyVersion={historyVersion}
@@ -964,11 +1123,15 @@ function SessionPage() {
             onBack={goBack}
             onRefresh={refreshSelectedSession}
             onLoadMore={loadMoreMessages}
+            onLoadNewer={handleLoadNewerMessages}
             onCancelLoadMore={cancelLoadMoreMessages}
             onSend={sendMessage}
             resolveSessionIdForUpload={async (id) => (await resolveSessionId(id)).sessionId}
             onUploadSessionResolved={handleSessionResolved}
+            resolveSessionIdForVoice={resolveVoiceSessionId}
+            onVoiceSessionResolved={handleVoiceSessionResolved}
             onViewModeChange={setViewMode}
+            onJumpToTail={jumpToTail}
             onRetryMessage={retryMessage}
             onRetryCodexTurn={async () => {
                 try {
@@ -1001,6 +1164,12 @@ function SessionPage() {
             onSuppressSendErrorRestore={suppressSendErrorRestore}
             initialOutlineOpen={outline}
             onInitialOutlineConsumed={handleInitialOutlineConsumed}
+            initialTargetMessageId={hasCompleteInitialMessageTarget ? effectiveInitialMessageId : undefined}
+            initialTargetMessageQuery={hasCompleteInitialMessageTarget ? effectiveInitialMessageQuery : undefined}
+            searchRequestId={searchRequestId}
+            onLoadMessageContext={loadMessageContextForSession}
+            onInitialTargetConsumed={handleInitialMessageConsumed}
+            onSearchTargetDismissed={handleSearchTargetDismissed}
             onAbortRestore={(text) => {
                 sendErrorIdRef.current += 1
                 setSendErrors((prev) => ({
@@ -1251,12 +1420,21 @@ const sessionsIndexRoute = createRoute({
 const sessionDetailRoute = createRoute({
     getParentRoute: () => sessionsRoute,
     path: '$sessionId',
-    validateSearch: (search: Record<string, unknown>): { outline?: boolean; guest?: boolean; share?: string; lang?: 'en' | 'zh-CN' | 'ru' } => {
+    validateSearch: (search: Record<string, unknown>): { outline?: boolean; guest?: boolean; share?: string; lang?: 'en' | 'zh-CN' | 'ru'; sidebar?: 'hidden'; messageId?: string; messageQuery?: string } => {
         const outline = search.outline === true || search.outline === 'true'
         const guest = search.guest === true || search.guest === 'true'
         const share = typeof search.share === 'string' && search.share.length > 0 ? search.share : undefined
         const lang = search.lang === 'en' || search.lang === 'zh-CN' || search.lang === 'ru' ? search.lang : undefined
-        return { ...(outline ? { outline: true } : {}), ...(guest ? { guest: true } : {}), ...(share ? { share } : {}), ...(lang ? { lang } : {}) }
+        const sidebar = search.sidebar === 'hidden' ? 'hidden' : undefined
+        const messageTarget = normalizeMessageSearchTarget(search.messageId, search.messageQuery)
+        return {
+            ...(outline ? { outline: true } : {}),
+            ...(guest ? { guest: true } : {}),
+            ...(share ? { share } : {}),
+            ...(lang ? { lang } : {}),
+            ...(sidebar ? { sidebar } : {}),
+            ...messageTarget,
+        }
     },
     component: SessionDetailRoute,
 })

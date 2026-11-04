@@ -111,6 +111,7 @@ export function createEventsRoutes(
                 visibility,
                 resumeFrom,
                 send: (event, eventId) => stream.writeSSE({ data: JSON.stringify(event), id: eventId }),
+                close: () => stream.abort(),
                 sendHeartbeat: async () => {
                     await stream.writeSSE({
                         data: JSON.stringify({
@@ -157,6 +158,7 @@ export function createEventsRoutes(
                         }
                         resolve()
                     }
+                    if (stream.aborted || c.req.raw.signal.aborted) { done(); return }
                     if (guestShareToken && options?.isGuestTokenActive) {
                         guestCheckInterval = setInterval(() => {
                             if (!isGuestShareActive()) {

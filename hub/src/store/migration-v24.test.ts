@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Store } from './index'
+import { SCHEMA_VERSION, Store } from './index'
 
 const tempDirs: string[] = []
 
@@ -13,9 +13,99 @@ afterEach(() => {
     }
 })
 
-describe('schema migration v23 to v24', () => {
-    it('adds studio rooms and posts without changing existing sessions', () => {
+describe('schema migrations through v32', () => {
+    it('adds fcm_devices.push_key to a V23 database and keeps existing rows', () => {
         const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v24-'))
+        tempDirs.push(dir)
+        const dbPath = join(dir, 'hapi.db')
+
+        new Store(dbPath).close()
+        const legacy = new Database(dbPath)
+        legacy.exec(`
+            ALTER TABLE fcm_devices DROP COLUMN push_key;
+            INSERT INTO fcm_devices (namespace, token, platform, device_id, created_at, updated_at)
+            VALUES ('default', 'fcm-tok-1', 'phone', 'pixel-1', 1, 1);
+            PRAGMA user_version = 23;
+        `)
+        legacy.close()
+
+        const migrated = new Store(dbPath)
+        const internalDb = (migrated as unknown as { db: Database }).db
+        const columnsStatement = internalDb.prepare('PRAGMA table_info(fcm_devices)')
+        const versionStatement = internalDb.prepare('PRAGMA user_version')
+        const messageColumnsStatement = internalDb.prepare('PRAGMA table_info(messages)')
+        try {
+            const columns = columnsStatement.all() as Array<{ name: string }>
+            const version = versionStatement.get() as { user_version: number }
+
+            expect(columns.some((col) => col.name === 'push_key')).toBe(true)
+            const messageColumns = messageColumnsStatement.all() as Array<{ name: string }>
+            expect(messageColumns.some((col) => col.name === 'delivery_state')).toBe(true)
+            expect(version.user_version).toBe(SCHEMA_VERSION)
+
+            // Existing Android rows survive with a NULL push key.
+            const devices = migrated.fcm.getDevicesByNamespace('default')
+            expect(devices).toHaveLength(1)
+            expect(devices[0].token).toBe('fcm-tok-1')
+            expect(devices[0].pushKey).toBeNull()
+
+            // And the migrated DB accepts new iOS rows.
+            migrated.fcm.upsertDevice('default', {
+                token: 'a1b2',
+                platform: 'ios',
+                deviceId: 'iphone-1',
+                pushKey: Buffer.alloc(32, 7).toString('base64')
+            })
+            expect(migrated.fcm.getDevicesByNamespace('default', ['ios'])).toHaveLength(1)
+        } finally {
+            columnsStatement.finalize()
+            versionStatement.finalize()
+            messageColumnsStatement.finalize()
+            migrated.close()
+        }
+    })
+
+    it('adds messages.delivery_state to an already-upgraded V24 database', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v24-delivery-'))
+        tempDirs.push(dir)
+        const dbPath = join(dir, 'hapi.db')
+
+        new Store(dbPath).close()
+        const legacy = new Database(dbPath)
+        legacy.exec(`
+            -- V26/V27 indexes depend on delivery_state and did not exist in V24.
+            DROP INDEX idx_messages_immediate_queued;
+            DROP INDEX idx_messages_future_scheduled_queued;
+            ALTER TABLE messages DROP COLUMN delivery_state;
+            PRAGMA user_version = 24;
+        `)
+        legacy.close()
+
+        const migrated = new Store(dbPath)
+        const internalDb = (migrated as unknown as { db: Database }).db
+        const columnsStatement = internalDb.prepare('PRAGMA table_info(messages)')
+        const versionStatement = internalDb.prepare('PRAGMA user_version')
+        const indexesStatement = internalDb.prepare('PRAGMA index_list(messages)')
+        try {
+            const columns = columnsStatement.all() as Array<{ name: string }>
+            const version = versionStatement.get() as { user_version: number }
+            const indexes = indexesStatement.all() as Array<{ name: string }>
+            expect(columns.some((col) => col.name === 'delivery_state')).toBe(true)
+            expect(version.user_version).toBe(SCHEMA_VERSION)
+            expect(indexes.map((index) => index.name)).toEqual(expect.arrayContaining([
+                'idx_messages_immediate_queued',
+                'idx_messages_future_scheduled_queued'
+            ]))
+        } finally {
+            columnsStatement.finalize()
+            versionStatement.finalize()
+            indexesStatement.finalize()
+            migrated.close()
+        }
+    })
+
+    it('adds studio rooms and posts without changing existing sessions', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v24-studio-'))
         tempDirs.push(dir)
         const dbPath = join(dir, 'hapi.db')
 
@@ -37,17 +127,20 @@ describe('schema migration v23 to v24', () => {
         legacy.close()
 
         const migrated = new Store(dbPath)
-        const room = migrated.studios.createOrActivateRoom('session-1', 'default', 'Review room', 'contribute')
-        const post = migrated.studios.createPost({
-            roomId: room.id,
-            guestId: 'guest-12345678',
-            authorName: 'Guest',
-            kind: 'suggestion',
-            text: 'Please add a regression test.'
-        })
-        expect(room.shareToken.length).toBeGreaterThan(30)
-        expect(post.status).toBe('open')
-        expect(migrated.sessions.getSessionByNamespace('session-1', 'default')).not.toBeNull()
-        migrated.close()
+        try {
+            const room = migrated.studios.createOrActivateRoom('session-1', 'default', 'Review room', 'contribute')
+            const post = migrated.studios.createPost({
+                roomId: room.id,
+                guestId: 'guest-12345678',
+                authorName: 'Guest',
+                kind: 'suggestion',
+                text: 'Please add a regression test.'
+            })
+            expect(room.shareToken.length).toBeGreaterThan(30)
+            expect(post.status).toBe('open')
+            expect(migrated.sessions.getSessionByNamespace('session-1', 'default')).not.toBeNull()
+        } finally {
+            migrated.close()
+        }
     })
 })

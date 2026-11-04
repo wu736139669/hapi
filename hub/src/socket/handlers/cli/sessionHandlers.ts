@@ -2,13 +2,13 @@ import { CodexHistorySyncRequestSchema, type ClientToServerEvents } from '@hapi/
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import type { CopilotAgentMode } from '@hapi/protocol'
-import type { AgentState, CodexCollaborationMode, Metadata, PermissionMode } from '@hapi/protocol/types'
+import type { AgentState, BackgroundTask, CodexCollaborationMode, Metadata, PermissionMode } from '@hapi/protocol/types'
 import { getReasoningStreamId, isRedundantGoalStatusEventContent } from '@hapi/protocol/messages'
 import type { Store, StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
 import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
 import { extractTeamStateFromMessageContent, applyTeamStateDelta } from '../../../sync/teams'
-import { extractBackgroundTaskDelta } from '../../../sync/backgroundTasks'
+import { extractBackgroundTasks } from '../../../sync/backgroundTasks'
 import { shouldRecordSessionActivity } from '../../../sync/sessionActivity'
 import type { CliSocketWithData } from '../../socketTypes'
 import type { SessionEndReason } from '@hapi/protocol'
@@ -67,7 +67,13 @@ const updateStateSchema = z.object({
     agentState: z.unknown().nullable()
 })
 
-const HUB_OWNED_METADATA_KEYS = ['supersededBySessionId', 'opencodeClearOperation'] as const
+const HUB_OWNED_METADATA_KEYS = [
+    'supersededBySessionId',
+    'opencodeClearOperation',
+    'titleSuggestionAutoAttemptedAt',
+    'titleSuggestionTurn',
+    'promptTitle'
+] as const
 
 function preserveHubOwnedMetadata(incoming: unknown, current: unknown): unknown {
     if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return incoming
@@ -90,7 +96,7 @@ export type SessionHandlersDeps = {
     onSessionReady?: (payload: SessionReadyPayload) => void
     onSessionEnd?: (payload: SessionEndPayload) => void
     onWebappEvent?: (event: SyncEvent) => void
-    onBackgroundTaskDelta?: (sessionId: string, delta: { started: number; completed: number }) => void
+    onBackgroundTasks?: (sessionId: string, tasks: BackgroundTask[]) => void
     onSessionActivity?: (sessionId: string, updatedAt: number) => void
     /** tiann/hapi#1820: any message is agent progress, either direction. */
     onAgentProgress?: (sessionId: string, at: number) => void
@@ -102,7 +108,7 @@ export type SessionHandlersDeps = {
 }
 
 export function registerSessionHandlers(socket: CliSocketWithData, deps: SessionHandlersDeps): void {
-    const { store, resolveSessionAccess, emitAccessError, onSessionAlive, onSessionReady, onSessionEnd, onWebappEvent, onBackgroundTaskDelta, onSessionActivity, onAgentProgress, onSweepImmediateQueued, onMessagesConsumed } = deps
+    const { store, resolveSessionAccess, emitAccessError, onSessionAlive, onSessionReady, onSessionEnd, onWebappEvent, onBackgroundTasks, onSessionActivity, onAgentProgress, onSweepImmediateQueued, onMessagesConsumed } = deps
 
     socket.on('codex-history-sync', (data, ack) => {
         if (typeof ack !== 'function') return
@@ -172,6 +178,15 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
 
+        // A background-task snapshot is session state, not chat: apply it
+        // without storing a hidden row.
+        const backgroundTasks = extractBackgroundTasks(content)
+        if (backgroundTasks !== null) {
+            onBackgroundTasks?.(sid, backgroundTasks)
+            return
+        }
+
+        const wasStored = Boolean(localId && store.messages.lookupQueuedMessage(sid, localId).status !== 'absent')
         let msg = store.messages.addMessage(sid, content, localId, undefined, createdAt)
         if (localId && createdAt !== undefined) {
             // Native backfill may arrive after its latest tail preview. Keep
@@ -179,6 +194,12 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             // messages-consumed ACK (which is guarded by first-write-wins).
             store.messages.markMessagesInvoked(sid, [localId], Math.min(createdAt, Date.now()))
             msg = store.messages.addMessage(sid, content, localId)
+        }
+        // The durable row already exists; replay must not be mistaken for
+        // fresh agent progress or trigger another round of UI updates.
+        if (wasStored) {
+            ack?.({ ok: true })
+            return
         }
 
         // A reasoning stream arrives as a series of growing snapshots under one
@@ -246,11 +267,6 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             }
         }
 
-        const bgDelta = extractBackgroundTaskDelta(content)
-        if (bgDelta) {
-            onBackgroundTaskDelta?.(sid, bgDelta)
-        }
-
         const update = {
             id: randomUUID(),
             seq: msg.seq,
@@ -278,7 +294,8 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
                 localId: msg.localId,
                 content: msg.content,
                 createdAt: msg.createdAt,
-                invokedAt: msg.invokedAt
+                invokedAt: msg.invokedAt,
+                ...(msg.contentRevision ? { contentRevision: msg.contentRevision } : {})
             }
         })
         // ACK only after persistence and publication, including stable-ID replays.
@@ -482,14 +499,69 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         }
         // Emit only after the DB transaction succeeds. This is an ACK-level
         // batch contract, so preserve its original timestamp even when IDs are
-        // heterogeneous, replayed, or unknown.
-        onWebappEvent?.({
-            type: 'messages-consumed',
-            sessionId: data.sid,
-            localIds,
-            invokedAt,
-            ...(data.steered === true ? { steered: true } : {})
-        })
+        // heterogeneous, replayed, or unknown. `steered` is a live-only signal
+        // (never persisted) that marks mid-turn delivery for the web badge.
+        onWebappEvent?.({ type: 'messages-consumed', sessionId: data.sid, localIds, invokedAt, ...(data.steered === true ? { steered: true } : {}) })
+    })
+
+    socket.on('messages-indeterminate', (data: { sid: string; localIds: string[] }) => {
+        if (!data || typeof data.sid !== 'string' || !Array.isArray(data.localIds)) {
+            return
+        }
+        const localIds = data.localIds.filter((id): id is string => typeof id === 'string')
+        if (localIds.length === 0) return
+        const sessionAccess = resolveSessionAccess(data.sid)
+        if (!sessionAccess.ok) {
+            emitAccessError('session', data.sid, sessionAccess.reason)
+            return
+        }
+        try {
+            store.recordMessagesIndeterminate(data.sid, localIds, sessionAccess.value.namespace)
+        } catch (err) {
+            console.error('recordMessagesIndeterminate failed', err)
+            return
+        }
+        onWebappEvent?.({ type: 'messages-indeterminate', sessionId: data.sid, localIds })
+    })
+
+    socket.on('messages-steer-state', (
+        data: { sid: string; localIds: string[]; state: 'queued' | 'dispatching' },
+        ack?: (response: { ok: boolean }) => void
+    ) => {
+        const reply = typeof ack === 'function' ? ack : () => {}
+        if (!data || typeof data.sid !== 'string' || !Array.isArray(data.localIds)
+            || (data.state !== 'queued' && data.state !== 'dispatching')) {
+            reply({ ok: false })
+            return
+        }
+        const localIds = data.localIds.filter((id): id is string => typeof id === 'string')
+        if (localIds.length === 0) {
+            reply({ ok: false })
+            return
+        }
+        const sessionAccess = resolveSessionAccess(data.sid)
+        if (!sessionAccess.ok) {
+            emitAccessError('session', data.sid, sessionAccess.reason)
+            reply({ ok: false })
+            return
+        }
+        try {
+            const ok = store.recordSteerDeliveryState(
+                data.sid,
+                localIds,
+                data.state,
+                sessionAccess.value.namespace
+            )
+            reply({ ok })
+            if (ok) {
+                onWebappEvent?.(data.state === 'queued'
+                    ? { type: 'messages-requeued', sessionId: data.sid, localIds }
+                    : { type: 'messages-indeterminate', sessionId: data.sid, localIds, dispatching: true })
+            }
+        } catch (err) {
+            console.error('recordSteerDeliveryState failed', err)
+            reply({ ok: false })
+        }
     })
 
     socket.on('session-end', (data: SessionEndPayload) => {

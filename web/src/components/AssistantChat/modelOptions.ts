@@ -1,4 +1,5 @@
-import { getAgyModelLabel } from '@hapi/protocol'
+import { getAgyModelChoices, getAgyModelLabel, getClaudeModelChoices, getClaudeModelLabel } from '@hapi/protocol'
+import type { ClaudeModelSummary } from '@hapi/protocol/apiTypes'
 import { MODEL_OPTIONS } from '@/components/NewSession/types'
 import { CURSOR_AUTO_MODEL_LABEL } from '@/lib/cursorModelOptions'
 import { getClaudeComposerModelOptions, getNextClaudeComposerModel } from './claudeModelOptions'
@@ -53,22 +54,58 @@ function getClaudeModelOptions(currentModel?: string | null, customOptions?: Mod
         return getClaudeComposerModelOptions(currentModel)
     }
 
-    // Custom Claude models are configured (e.g. a custom ANTHROPIC_BASE_URL
-    // endpoint): show those plus the default entry. Merging the built-in
-    // Anthropic alias presets here would offer models the endpoint may not
-    // serve, and a "default" choice must stay available for unset models.
-    const options: ModelOption[] = [{ value: null, label: 'Default' }]
+    // The machine's catalog is the CLI's own /model list, so it replaces the
+    // built-in presets rather than extending them. This also covers a custom
+    // ANTHROPIC_BASE_URL endpoint: merging the built-in Anthropic alias presets
+    // would offer models the endpoint may not serve, and a "default" choice
+    // must stay available for unset models. A CLI that offers a 1M variant as
+    // a separate choice lists it as its own row (`opus[1m]`), so the built-in
+    // `[1m]` presets would only add choices the CLI does not offer. A saved
+    // model it does not list stays as the current model.
+    const listed: ModelOption[] = []
     for (const option of customOptions) {
-        const normalizedValue = normalizeCurrentModel(option.value)
-        if (!normalizedValue || options.some((existing) => existing.value === normalizedValue)) {
-            continue
+        const value = normalizeCurrentModel(option.value)
+        if (value && !listed.some((existing) => existing.value === value)) {
+            listed.push(option.group ? { value, label: option.label, group: option.group } : { value, label: option.label })
         }
-        options.push({ value: normalizedValue, label: option.label })
     }
 
-    // A session can be running a model that is no longer configured; keep it
-    // selectable so the switcher can still display the current value.
-    return withCurrentModelOption(options, currentModel)
+    return withCurrentModelOption(
+        [{ value: null, label: 'Default' }, ...listed],
+        currentModel,
+        getClaudeModelLabel
+    )
+}
+
+/**
+ * Create-session model options for Claude (`auto` = Default). A saved model the
+ * loaded catalog no longer offers stays selectable, labelled as such, so the
+ * form never silently switches it to another model.
+ */
+export function getClaudeLaunchModelOptions(
+    catalog: readonly ClaudeModelSummary[],
+    selectedModel: string,
+    notListedSuffix: string,
+    otherModelsLabel: string
+): Array<{ value: string; label: string; group?: string }> {
+    const catalogOptions = getClaudeCatalogOptions(catalog, otherModelsLabel)
+    const selected = normalizeCurrentModel(selectedModel)
+    const isGone = catalog.length > 0
+        && selected !== null
+        && !catalogOptions.some((option) => option.value === selected)
+
+    return getClaudeModelOptions(selectedModel, catalogOptions).map((option) => ({
+        ...option,
+        value: option.value ?? 'auto',
+        label: isGone && option.value === selected ? `${option.label} (${notListedSuffix})` : option.label
+    }))
+}
+
+/** Catalog options with earlier versions under `otherModelsLabel`, as Claude Code's model sheet lists them. */
+export function getClaudeCatalogOptions(catalog: readonly ClaudeModelSummary[], otherModelsLabel: string): ModelOption[] {
+    return getClaudeModelChoices(catalog).map(({ value, label, section }) => (
+        section === 'other' ? { value, label, group: otherModelsLabel } : { value, label }
+    ))
 }
 
 function getAgyModelOptions(currentModel?: string | null, customOptions?: ModelOption[]): ModelOption[] {
@@ -77,10 +114,9 @@ function getAgyModelOptions(currentModel?: string | null, customOptions?: ModelO
     const machineOptions = (customOptions ?? []).filter((option) => Boolean(option.value))
     const options = machineOptions.length > 0
         ? machineOptions
-        : MODEL_OPTIONS.agy.filter((m) => m.value !== 'auto').map((m) => ({
-            value: m.value,
-            label: m.label
-        }))
+        : getAgyModelChoices(MODEL_OPTIONS.agy.filter((m) => m.value !== 'auto').map((m) => ({
+            modelId: m.value, name: m.label
+        }))).map((m) => ({ value: m.modelId, label: m.name }))
     // A session can be running a model the machine no longer lists. It stays
     // selectable; the lookup only keeps a known preset readable.
     return withCurrentModelOption(options, currentModel, getAgyModelLabel)
@@ -127,9 +163,12 @@ export function getModelOptionsForFlavor(
     if (flavor === 'gemini') {
         return getGeminiModelOptions(currentModel)
     }
-    // OpenCode discovers models dynamically via the listOpencodeModels RPC. Until
-    // those options arrive, render an empty list rather than the Claude fallback —
-    // the latter would surface unrelated Claude models in an OpenCode session.
+    // OpenCode discovers models dynamically via the listOpencodeModels RPC. DSH
+    // is the same shape: its catalog arrives via the session's ACP model
+    // metadata (SessionChat's dshModelOptions). Until those options arrive,
+    // render an empty list rather than the Claude fallback — the latter would
+    // surface unrelated Claude models, and for DSH let the picker enqueue
+    // `sonnet`-style ids the ACP server rejects.
     if (flavor === 'opencode' || flavor === 'dsh') {
         return []
     }
@@ -192,11 +231,12 @@ export function getNextModelForFlavor(
     if (flavor === 'gemini') {
         return getNextGeminiModel(currentModel)
     }
-    // OpenCode discovers models dynamically via the listOpencodeModels RPC. Until
-    // those options arrive, pressing the Ctrl/Cmd+M shortcut must not fall through
-    // to the Claude preset cycler — that would post `sonnet`/`opus` into an
-    // OpenCode session and the next turn would attempt `session/set_model` with a
-    // Claude id. Keep the current model unchanged instead.
+    // OpenCode discovers models dynamically via the listOpencodeModels RPC. DSH
+    // arrives through the session's ACP metadata instead. Until either catalog
+    // arrives, pressing the Ctrl/Cmd+M shortcut must not fall through to the
+    // Claude preset cycler — that would post `sonnet`/`opus` into the session
+    // and the next turn would attempt `session/set_model` with a Claude id.
+    // Keep the current model unchanged instead.
     if (flavor === 'opencode' || flavor === 'dsh') {
         return normalizeCurrentModel(currentModel)
     }

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as Popover from '@radix-ui/react-popover'
 import { SessionListScrollAnchor } from './SessionListScrollAnchor'
-import type { SessionSummary } from '@/types/api'
+import type { SessionContentSearchResponse, SessionSummary } from '@/types/api'
 import { SESSION_LIFECYCLE_IDLE } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
 import {
@@ -13,12 +13,15 @@ import {
 } from '@/lib/sessionListSearch'
 import { useLongPress } from '@/hooks/useLongPress'
 import { usePlatform } from '@/hooks/usePlatform'
-import { useSessionActions } from '@/hooks/mutations/useSessionActions'
+import { sessionArchiveMutationKey, useSessionActions } from '@/hooks/mutations/useSessionActions'
+import { useIsMutating } from '@tanstack/react-query'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { CopyIcon, CheckIcon, MarkAllReadIcon } from '@/components/icons'
+import { ArchiveSessionDialog } from '@/components/ArchiveSessionDialog'
+import { DeleteSessionDialog } from '@/components/DeleteSessionDialog'
+import { ArchiveIcon, CheckIcon, CopyIcon, InfoIcon, LoaderIcon, MarkAllReadIcon } from '@/components/icons'
 
 function PinnedSectionIcon(props: { className?: string }) {
     return (
@@ -83,27 +86,36 @@ import { useTranslation } from '@/lib/use-translation'
 import { DEFAULT_SESSION_PREVIEW_LIMIT, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
 import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
+import { DEFAULT_SESSION_LIST_VIEW, useSessionListView, type SessionListView } from '@/hooks/useSessionListView'
+import { SessionListViewMenu } from '@/components/SessionListViewMenu'
 import { usePinInProgressSessions } from '@/hooks/usePinInProgressSessions'
 import { usePinActiveSessions } from '@/hooks/usePinActiveSessions'
 import { usePersonalPinnedSessions } from '@/hooks/usePersonalPinnedSessions'
+import {
+    compareDescWithKeyTiebreak,
+    compareSessionsByOrderKeyDesc
+} from '@hapi/protocol'
+import { createSessionComparator, filterSessionsByStatus, getSessionSortKey } from '@/lib/sessionListOrder'
 import { classifySessionAttention, sessionIsUnread } from '@/lib/sessionAttention'
 import {
     getSessionLastSeenAt,
     getSessionLastSeenSnapshot,
+    getSessionManualUnreadAt,
     getUnreadSessionCount,
     markAllSessionsSeen,
+    markSessionUnread,
     useSessionLastSeenVersion
 } from '@/lib/sessionLastSeen'
 import { useSessionRowTooltipIds } from '@/components/HoverTooltip'
-import { subscribeCodexImportedSessions } from '@/lib/codexImportedSessions'
 import { formatReopenError } from '@/lib/reopenError'
 import { resolveCursorReopenGate } from '@/lib/sessionResume'
 import { getSessionTitle, hasSessionTitleSignal } from '@/lib/sessionTitle'
 import { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
+import { getSessionProjectPath } from '@/lib/sessionProjectLabel'
 import { retargetSharePendingTransfer } from '@/lib/sharePendingState'
 import type { Machine } from '@/types/api'
 import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
-import { MachineFilterBar, MachineFilterMenu } from '@/components/MachineFilterBar'
+import { MachineFilterBar, MachineFilterMenu, MachineSummaryRow } from '@/components/MachineFilterBar'
 import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
 import { useTransientScrollbar } from '@/hooks/useTransientScrollbar'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
@@ -114,7 +126,6 @@ import { useToast } from '@/lib/toast-context'
 import { useSessionListToolbar } from '@/hooks/useSessionListToolbar'
 import { ForestAsset, ForestEmptyIllustration } from '@/components/skins/ForestAsset'
 import { ForestScenery } from '@/components/skins/ForestScenery'
-import { getPathDisplayName } from '@/utils/path'
 import {
     shedToolbarSlots,
     toolbarActionBudget,
@@ -153,10 +164,12 @@ type SessionGroup = {
     displayName: string
     machineId: string | null
     sessions: SessionSummary[]
-    latestUpdatedAt: number
+    latestOrderAt: number
     hasActiveSession: boolean
     hasPinnedSession: boolean
 }
+
+const MIN_CONTENT_SEARCH_QUERY_LENGTH = 2
 
 const RUNNING_BUCKETS = [
     { key: 'working', labelKey: 'session.item.running', colorClass: 'text-[var(--app-badge-success-text)]', pulse: true },
@@ -181,7 +194,7 @@ export function emptyRunningBuckets(): Record<RunningBucketKey, SessionSummary[]
 export function bucketRunningSessions(
     sessions: SessionSummary[],
     pinInProgressSessions: boolean,
-    compare: (a: SessionSummary, b: SessionSummary) => number = (a, b) => b.updatedAt - a.updatedAt,
+    compare: (a: SessionSummary, b: SessionSummary) => number = compareSessionsByOrderKeyDesc,
     pinActiveSessions = false,
     personalPinnedSessionIds?: ReadonlySet<string>
 ): Record<RunningBucketKey, SessionSummary[]> {
@@ -316,7 +329,7 @@ type MachineGroup = {
     totalSessions: number
     hasActiveSession: boolean
     hasPinnedSession: boolean
-    latestUpdatedAt: number
+    latestOrderAt: number
 }
 
 function getGroupDisplayName(directory: string): string {
@@ -385,6 +398,7 @@ export function deduplicateSessionsByAgentId(
 
 export function isSidebarEmptySessionStub(session: SessionSummary): boolean {
     if (session.active) return false
+    if (session.hasConversationContent) return false
     const meta = session.metadata
     if (!meta) return true
     if (meta.agentSessionId?.trim()) return false
@@ -442,11 +456,19 @@ export function getPreviousSessionVisibleCount(current: number, step: number): n
     return Math.max(normalizedStep, current - normalizedStep)
 }
 
-function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
+// Without a view this is the long-standing order: by the user's last message,
+// so agent output and liveness never reorder the list.
+const LEGACY_LIST_ORDER: Pick<SessionListView, 'sort' | 'activeFirst'> = { sort: 'last-message', activeFirst: false }
+
+export function groupSessionsByDirectory(
+    sessions: SessionSummary[],
+    order: Pick<SessionListView, 'sort' | 'activeFirst'> = LEGACY_LIST_ORDER
+): SessionGroup[] {
+    const compare = createSessionComparator(order)
     const groups = new Map<string, { directory: string; machineId: string | null; sessions: SessionSummary[] }>()
 
     sessions.forEach(session => {
-        const path = session.metadata?.worktree?.basePath ?? session.metadata?.path ?? 'Other'
+        const path = getSessionProjectPath(session.metadata) ?? 'Other'
         const machineId = session.metadata?.machineId ?? null
         const key = `${machineId ?? UNKNOWN_MACHINE_ID}::${path}`
         if (!groups.has(key)) {
@@ -463,13 +485,10 @@ function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
         .map(([key, group]) => {
             const sortedSessions = [...group.sessions].sort((a, b) => {
                 if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1
-                const rankA = a.active ? (a.pendingRequestsCount > 0 ? 0 : 1) : 2
-                const rankB = b.active ? (b.pendingRequestsCount > 0 ? 0 : 1) : 2
-                if (rankA !== rankB) return rankA - rankB
-                return b.updatedAt - a.updatedAt
+                return compare(a, b)
             })
-            const latestUpdatedAt = group.sessions.reduce(
-                (max, s) => (s.updatedAt > max ? s.updatedAt : max),
+            const latestOrderAt = group.sessions.reduce(
+                (max, s) => Math.max(max, getSessionSortKey(s, order.sort)),
                 -Infinity
             )
             const hasActiveSession = group.sessions.some(s => s.active)
@@ -482,7 +501,7 @@ function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
                 displayName,
                 machineId: group.machineId,
                 sessions: sortedSessions,
-                latestUpdatedAt,
+                latestOrderAt,
                 hasActiveSession,
                 hasPinnedSession
             }
@@ -491,13 +510,15 @@ function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
             if (a.hasPinnedSession !== b.hasPinnedSession) {
                 return a.hasPinnedSession ? -1 : 1
             }
-            if (a.hasActiveSession !== b.hasActiveSession) {
+            if (order.activeFirst && a.hasActiveSession !== b.hasActiveSession) {
                 return a.hasActiveSession ? -1 : 1
             }
-            return b.latestUpdatedAt - a.latestUpdatedAt
+            return compareDescWithKeyTiebreak(
+                { key: a.key, order: a.latestOrderAt },
+                { key: b.key, order: b.latestOrderAt }
+            )
         })
 }
-
 
 export function expandSelectedSessionCollapseOverrides(
     overrides: Map<string, boolean>,
@@ -530,7 +551,7 @@ function groupByMachine(
                 totalSessions: 0,
                 hasActiveSession: false,
                 hasPinnedSession: false,
-                latestUpdatedAt: 0,
+                latestOrderAt: -Infinity,
             }
             map.set(key, mg)
         }
@@ -538,12 +559,14 @@ function groupByMachine(
         mg.totalSessions += g.sessions.length
         if (g.hasActiveSession) mg.hasActiveSession = true
         if (g.hasPinnedSession) mg.hasPinnedSession = true
-        if (g.latestUpdatedAt > mg.latestUpdatedAt) mg.latestUpdatedAt = g.latestUpdatedAt
+        if (g.latestOrderAt > mg.latestOrderAt) mg.latestOrderAt = g.latestOrderAt
     }
     return [...map.values()].sort((a, b) => {
         if (a.hasPinnedSession !== b.hasPinnedSession) return a.hasPinnedSession ? -1 : 1
-        if (a.hasActiveSession !== b.hasActiveSession) return a.hasActiveSession ? -1 : 1
-        return b.latestUpdatedAt - a.latestUpdatedAt
+        return compareDescWithKeyTiebreak(
+            { key: a.machineId ?? UNKNOWN_MACHINE_ID, order: a.latestOrderAt },
+            { key: b.machineId ?? UNKNOWN_MACHINE_ID, order: b.latestOrderAt }
+        )
     })
 }
 
@@ -613,6 +636,52 @@ function XIcon(props: { className?: string }) {
         >
             <path d="M18 6 6 18" />
             <path d="m6 6 12 12" />
+        </svg>
+    )
+}
+
+/** Metadata scope: an ID card, for title/summary/path/Agent/machine/ID. */
+function ScopeMetadataIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+            aria-hidden="true"
+        >
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <circle cx="8.5" cy="10" r="1.8" />
+            <path d="M5.5 16.6c.5-1.3 1.6-2 3-2s2.5.7 3 2" />
+            <path d="M14.5 9.5h4M14.5 13.5h4" />
+        </svg>
+    )
+}
+
+/** Content scope: a speech bubble with text, for the message full-text index. */
+function ScopeContentIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+            aria-hidden="true"
+        >
+            <path d="M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2Z" />
+            <path d="M8 8.5h9M8 12.5h6" />
         </svg>
     )
 }
@@ -710,6 +779,7 @@ export function getVisibleSessionPreview(
         expanded?: boolean
         selectedSessionId?: string | null
         limit?: number
+        isUnread?: (session: SessionSummary) => boolean
     } = {}
 ): SessionSummary[] {
     const limit = options.limit ?? GROUP_SESSION_PREVIEW_LIMIT
@@ -717,7 +787,8 @@ export function getVisibleSessionPreview(
 
     const requiredIds = new Set<string>()
     for (const session of sessions) {
-        if (session.pendingRequestsCount > 0) requiredIds.add(session.id)
+        if (session.active && session.pendingRequestsCount > 0) requiredIds.add(session.id)
+        else if (options.isUnread?.(session)) requiredIds.add(session.id)
     }
     if (options.selectedSessionId && sessions.some(session => session.id === options.selectedSessionId)) {
         requiredIds.add(options.selectedSessionId)
@@ -870,14 +941,16 @@ function SessionDateRangePicker(props: {
 export function SessionListSearch(props: {
     value: string
     onChange: (value: string) => void
-    customStart: string
-    customEnd: string
-    sessionActivityDates: ReadonlySet<string>
-    onDateRangeChange: (start: string, end: string) => void
     expanded: boolean
     onExpandedChange: (expanded: boolean) => void
     showSearch?: boolean
     showDateFilter?: boolean
+    searchMode?: 'metadata' | 'content'
+    onSearchModeChange?: (mode: 'metadata' | 'content') => void
+    customStart?: string
+    customEnd?: string
+    sessionActivityDates?: ReadonlySet<string>
+    onDateRangeChange?: (start: string, end: string) => void
     /** Minimum width of icon + clear + calendar. Query text may shrink; these may not. */
     chromeMinPx?: number
     /**
@@ -887,9 +960,9 @@ export function SessionListSearch(props: {
     maxWidthPx?: number
 }) {
     const { t } = useTranslation()
-    const [datePickerOpen, setDatePickerOpen] = useState(false)
     const inputRef = useRef<HTMLInputElement>(null)
     const collapsedButtonRef = useRef<HTMLButtonElement>(null)
+    const [datePickerOpen, setDatePickerOpen] = useState(false)
     const dateButtonRef = useRef<HTMLButtonElement>(null)
     const hasDateRange = Boolean(props.customStart && props.customEnd)
     const showSearch = props.showSearch ?? true
@@ -975,12 +1048,12 @@ export function SessionListSearch(props: {
                 }}
             />
             <SessionDateRangePicker
-                start={props.customStart}
-                end={props.customEnd}
-                sessionActivityDates={props.sessionActivityDates}
-                onChange={props.onDateRangeChange}
+                start={props.customStart ?? ''}
+                end={props.customEnd ?? ''}
+                sessionActivityDates={props.sessionActivityDates ?? new Set()}
+                onChange={props.onDateRangeChange ?? (() => {})}
                 onClear={() => {
-                    props.onDateRangeChange('', '')
+                    props.onDateRangeChange?.('', '')
                     // The footer Clear button unmounts once the range is
                     // empty; return focus so it does not drop to <body>.
                     returnDateFocus()
@@ -994,7 +1067,44 @@ export function SessionListSearch(props: {
         </>
     ) : null
 
-    const searchLabel = t('sessions.search.open')
+    const searchMode = props.searchMode ?? 'metadata'
+    const canSearchContent = Boolean(props.onSearchModeChange)
+    const searchLabel = searchMode === 'content'
+        ? t('sessions.search.content.placeholder')
+        : t('sessions.search.open')
+
+    // A two-state toggle, not a menu: one tap flips the scope, and the glyph
+    // (ID card vs speech bubble) carries the mode without a chrome label.
+    const otherSearchMode = searchMode === 'content' ? 'metadata' : 'content'
+    const scopeHint = t('sessions.search.scope.' + searchMode + '.description')
+        + '. '
+        + t('sessions.search.scope.switch', {
+            scope: t('sessions.search.scope.' + otherSearchMode + '.name'),
+        })
+    const ScopeIcon = searchMode === 'content' ? ScopeContentIcon : ScopeMetadataIcon
+
+    const renderSearchMode = () => canSearchContent ? (
+        <button
+            type="button"
+            data-testid="session-list-search-scope"
+            data-search-scope={searchMode}
+            onClick={() => props.onSearchModeChange?.(otherSearchMode)}
+            // Hit target matches the clear endcap so the scope is as tappable
+            // as the action beside it (tiann/hapi#2081).
+            className={cn(
+                'session-list-search-scope flex min-h-[48px] min-w-[48px] shrink-0 items-center justify-center',
+                'border-r border-[var(--app-border)] transition-colors',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] focus-visible:ring-inset',
+                searchMode === 'content'
+                    ? 'bg-[var(--app-subtle-bg)] text-[var(--app-link)] hover:bg-[var(--app-secondary-bg)]'
+                    : 'text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
+            )}
+            title={scopeHint}
+            aria-label={scopeHint}
+        >
+            <ScopeIcon className="h-5 w-5 shrink-0" />
+        </button>
+    ) : null
 
     if (!showSearch) {
         return showDateFilter ? (
@@ -1007,7 +1117,7 @@ export function SessionListSearch(props: {
 
     if (!props.expanded) {
         const hasTextQuery = props.value.length > 0
-        const collapsedLabel = hasTextQuery ? `${searchLabel}: ${props.value}` : searchLabel
+        const collapsedLabel = hasTextQuery ? searchLabel + ': ' + props.value : searchLabel
         // Idle: shrink-0 so the icon does not crush under neighbors (#2039).
         // Active query: maxWidth reserves machine menu + More before the 9rem
         // chip can take ~240px and shove More off a 320px / 130% row (#2040).
@@ -1029,7 +1139,7 @@ export function SessionListSearch(props: {
                     : undefined}
                 className={cn(
                     'relative flex max-w-full flex-nowrap items-center gap-1',
-                    // Query text shrinks. minWidth is the icon/clear/calendar floor
+                    // Query text shrinks. minWidth is the icon/clear floor
                     // so a flex-1 actions box cannot crush those hit targets.
                     hasTextQuery ? 'min-w-0 max-w-full shrink' : 'shrink-0'
                 )}
@@ -1055,8 +1165,20 @@ export function SessionListSearch(props: {
                         title={collapsedLabel}
                         aria-label={collapsedLabel}
                     >
-                        <span data-toolbar-chrome="" className="inline-flex shrink-0">
-                            <SearchIcon className="h-5 w-5 shrink-0" />
+                        <span
+                            data-toolbar-chrome=""
+                            data-search-scope={hasTextQuery ? searchMode : undefined}
+                            className="inline-flex shrink-0"
+                        >
+                            {/*
+                              * The applying chip keeps the scope glyph so a content-scoped
+                              * query stays readable once the field collapses. Idle (no
+                              * query) stays a magnifier: there is no scope in effect yet,
+                              * and this is also the button that opens search.
+                              */}
+                            {hasTextQuery && searchMode === 'content'
+                                ? <ScopeContentIcon className="h-5 w-5 shrink-0" />
+                                : <SearchIcon className="h-5 w-5 shrink-0" />}
                         </span>
                         {hasTextQuery ? (
                             <span className="min-w-0 truncate text-xs font-medium">{props.value}</span>
@@ -1067,8 +1189,6 @@ export function SessionListSearch(props: {
                             type="button"
                             onClick={() => {
                                 props.onChange('')
-                                // The clear button unmounts with the query; keep focus on
-                                // the collapsed search trigger instead of dropping to body.
                                 collapsedButtonRef.current?.focus()
                             }}
                             data-toolbar-chrome=""
@@ -1098,27 +1218,28 @@ export function SessionListSearch(props: {
             }}
         >
             <div className="relative flex min-h-12 min-w-0 items-stretch rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] transition-colors focus-within:border-[var(--app-link)]">
-                <div className="pointer-events-none flex shrink-0 items-center pl-2.5 text-[var(--app-hint)]">
-                    <SearchIcon className="h-3.5 w-3.5" />
+                <div className="pointer-events-none flex shrink-0 items-center pl-2 text-[var(--app-hint)]">
+                    <SearchIcon className="h-5 w-5" />
                 </div>
+                {renderSearchMode()}
+                {showDateFilter ? renderDateButton('embedded') : null}
                 <input
                     ref={inputRef}
                     type="search"
                     value={props.value}
                     onChange={(event) => props.onChange(event.target.value)}
-                    placeholder={t('sessions.search.placeholder')}
+                    placeholder={searchMode === 'content'
+                        ? t('sessions.search.content.placeholder')
+                        : t('sessions.search.placeholder')}
                     aria-label={searchLabel}
                     title={searchLabel}
                     className="min-w-0 flex-1 appearance-none bg-transparent px-2 py-1.5 text-sm text-[var(--app-fg)] outline-none placeholder:text-[var(--app-hint)] [text-overflow:ellipsis] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
                 />
-                {showDateFilter ? renderDateButton('embedded') : null}
                 {props.value ? (
                     <button
                         type="button"
                         onClick={() => {
                             props.onChange('')
-                            // The clear button unmounts with the query; keep focus off <body>
-                            // so a later outside click still routes blur through the wrapper.
                             inputRef.current?.focus()
                         }}
                         className="session-list-search-clear-endcap flex min-h-[48px] min-w-[48px] shrink-0 items-center justify-center border-l border-[var(--app-border)] bg-[var(--app-subtle-bg)] text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] focus-visible:ring-inset"
@@ -1129,14 +1250,44 @@ export function SessionListSearch(props: {
                     </button>
                 ) : null}
             </div>
-            {datePicker}
         </div>
     )
 }
 
-function SessionItem(props: {
+// A row with an open menu or dialog holds its collapsed panel mounted.
+const CollapsiblePanelHoldContext = createContext<((held: boolean) => void) | null>(null)
+
+// Collapsed rows unmount after the close transition; mounted-but-hidden rows
+// would otherwise re-render on every session or machine update.
+function CollapsiblePanel(props: { open: boolean; children: ReactNode }) {
+    const [settled, setSettled] = useState(!props.open)
+    const [holds, setHolds] = useState(0)
+    const hold = useCallback((held: boolean) => setHolds((count) => count + (held ? 1 : -1)), [])
+    if (props.open && settled) {
+        setSettled(false)
+    }
+    return (
+        <div
+            className="collapsible-panel"
+            data-open={props.open || undefined}
+            onTransitionEnd={(event) => {
+                if (!props.open && event.target === event.currentTarget) {
+                    setSettled(true)
+                }
+            }}
+        >
+            <div className="collapsible-inner">
+                <CollapsiblePanelHoldContext.Provider value={hold}>
+                    {!settled || holds > 0 ? props.children : null}
+                </CollapsiblePanelHoldContext.Provider>
+            </div>
+        </div>
+    )
+}
+
+const SessionItem = memo(function SessionItem(props: {
     session: SessionSummary
-    onSelect: (sessionId: string) => void
+    onSelect: (sessionId: string, targetMessageId?: string, targetMessageQuery?: string) => void
     compact?: boolean
     showPath?: boolean
     api: ApiClient | null
@@ -1150,6 +1301,11 @@ function SessionItem(props: {
     projectLabel?: string
     machineLabel?: string
     shared?: boolean
+    contentSnippet?: string
+    contentSearchTruncated?: boolean
+    targetMessageId?: string
+    targetMessageQuery?: string
+    lastSeenVersion: number
 }) {
     const { t } = useTranslation()
     const { addToast } = useToast()
@@ -1168,7 +1324,12 @@ function SessionItem(props: {
         onTransferPersonalPinned,
         projectLabel,
         machineLabel,
-        shared = false
+        shared = false,
+        contentSnippet,
+        contentSearchTruncated,
+        targetMessageId,
+        targetMessageQuery,
+        lastSeenVersion
     } = props
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
@@ -1177,6 +1338,8 @@ function SessionItem(props: {
     const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
+    const [forkOpen, setForkOpen] = useState(false)
+    const [forkPending, setForkPending] = useState(false)
     const {
         status: cursorChatStoreStatus,
         isApplicable: cursorChatStoreApplicable,
@@ -1208,6 +1371,13 @@ function SessionItem(props: {
         s.metadata?.flavor ?? null
     )
     const [reopenError, setReopenError] = useState<string | null>(null)
+    const holdPanel = useContext(CollapsiblePanelHoldContext)
+    const overlayOpen = menuOpen || renameOpen || exportOpen || archiveOpen || deleteOpen || forkOpen || reopenError !== null
+    useEffect(() => {
+        if (!overlayOpen || !holdPanel) return
+        holdPanel(true)
+        return () => holdPanel(false)
+    }, [overlayOpen, holdPanel])
 
     const handleSetPinMode = async (mode: 'none' | 'project' | 'global') => {
         try {
@@ -1222,7 +1392,7 @@ function SessionItem(props: {
         }
     }
 
-    const handleReopen = async () => {
+    const handleReopen = async (onError: (message: string) => void = setReopenError) => {
         setReopenError(null)
         try {
             const result = await reopenSession()
@@ -1240,9 +1410,59 @@ function SessionItem(props: {
                 )
             }
         } catch (error) {
-            setReopenError(formatReopenError(error))
+            onError(formatReopenError(error))
         }
     }
+
+    // Hover archive: an idle session archives in one click with a Reopen toast;
+    // one that is replying, waiting on approval or running background work
+    // still goes through the confirmation, since archiving stops its agent.
+    // Read from the shared mutation cache, not row state: the row remounts when
+    // an archived session moves between sections (e.g. out of Active), and the
+    // spinner must survive that until the request settles.
+    const quickArchivePending = useIsMutating({ mutationKey: sessionArchiveMutationKey(s.id), exact: true }) > 0
+    const archiveNeedsConfirmation = s.thinking || s.pendingRequestsCount > 0 || (s.backgroundTaskCount ?? 0) > 0
+    // The row can turn inactive before the archive request settles (the hub
+    // still confirms cleanup); keep the spinner until it does.
+    const showQuickArchive = s.active || quickArchivePending
+    const handleQuickArchive = async () => {
+        if (archiveNeedsConfirmation) {
+            setArchiveOpen(true)
+            return
+        }
+        try {
+            await archiveSession()
+            addToast({
+                title: t('session.archived.title'),
+                body: getSessionTitle(s),
+                sessionId: s.id,
+                url: `/sessions/${s.id}`,
+                action: {
+                    label: t('session.action.reopen'),
+                    onClick: () => void handleReopen((message) => addToast({
+                        title: t('dialog.reopen.errorTitle'),
+                        body: message,
+                        sessionId: s.id,
+                        url: `/sessions/${s.id}`
+                    }))
+                }
+            })
+        } catch (error) {
+            addToast({
+                title: t('dialog.archive.error'),
+                body: error instanceof Error ? error.message : t('dialog.error.default'),
+                sessionId: s.id,
+                url: `/sessions/${s.id}`
+            })
+        }
+    }
+
+    const supportsCurrentFork = s.active && s.metadata?.flavor === 'codex'
+        && s.metadata?.conversationHistory?.forkCurrent === true
+    const supportsArchivedFork = !s.active && s.metadata?.flavor === 'codex'
+        && s.metadata?.lifecycleState === 'archived'
+        && Boolean(s.metadata.agentSessionId && s.metadata.machineId)
+    const forkDisabledReason = supportsCurrentFork && s.thinking ? t('session.action.forkRunning') : undefined
 
     const longPressHandlers = useLongPress({
         onLongPress: (point) => {
@@ -1252,7 +1472,7 @@ function SessionItem(props: {
         },
         onClick: () => {
             if (!menuOpen) {
-                onSelect(s.id)
+                onSelect(s.id, targetMessageId, targetMessageQuery)
             }
         },
         threshold: 500
@@ -1263,10 +1483,11 @@ function SessionItem(props: {
         () => showDetailedStatus
             ? classifySessionAttention(s, {
                 selected,
-                lastSeenAt: getSessionLastSeenAt(s.id)
+                lastSeenAt: getSessionLastSeenAt(s.id),
+                manualUnreadAt: getSessionManualUnreadAt(s.id, s.readState)
             })
             : null,
-        [s, selected, showDetailedStatus]
+        [s, selected, showDetailedStatus, lastSeenVersion]
     )
     const hasScheduleTooltip = showDetailedStatus && s.futureScheduledMessageCount > 0
     const { attentionId, scheduleId, describedBy } = useSessionRowTooltipIds(
@@ -1275,31 +1496,55 @@ function SessionItem(props: {
     )
     return (
         <>
-            <button
-                type="button"
-                {...longPressHandlers}
-                className={`session-list-item ${compact ? 'hapi-session-compact' : ''} group/session-row flex w-full flex-col text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg ${compact ? 'gap-0 py-1 pl-1.5 pr-1' : 'gap-1 py-2 pl-2.5 pr-2'} ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
-                style={{ WebkitTouchCallout: 'none' }}
-                aria-current={selected ? 'page' : undefined}
-                aria-describedby={describedBy}
+            <div
+                className="session-list-row relative"
+                data-quick-action-pending={quickArchivePending ? '' : undefined}
             >
-                <SessionRowSummary
-                    session={s}
-                    compact={compact}
-                    showPath={showPath}
-                    showDetailedStatus={showDetailedStatus}
-                    selected={selected}
-                    nestedTooltips
-                    attentionTooltipId={attentionId}
-                    scheduleTooltipId={scheduleId}
-                    // Compact rows keep activity as a dot/spinner rather than
-                    // expanding into status labels that would crowd the rail.
-                    inRunningSection={compact || inRunningSection}
-                    projectLabel={projectLabel}
-                    machineLabel={machineLabel}
-                    shared={shared}
-                />
-            </button>
+                <button
+                    type="button"
+                    {...longPressHandlers}
+                    data-session-scroll-anchor
+                    className={`session-list-item ${compact ? 'hapi-session-compact' : ''} group/session-row flex w-full flex-col text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg ${compact ? 'gap-0 py-1 pl-1.5 pr-1' : 'gap-1 py-2 pl-2.5 pr-2'} ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
+                    style={{ WebkitTouchCallout: 'none' }}
+                    aria-current={selected ? 'page' : undefined}
+                    aria-describedby={describedBy}
+                >
+                    <SessionRowSummary
+                        session={s}
+                        compact={compact}
+                        showPath={showPath}
+                        showDetailedStatus={showDetailedStatus}
+                        selected={selected}
+                        nestedTooltips
+                        attentionTooltipId={attentionId}
+                        lastSeenVersion={lastSeenVersion}
+                        scheduleTooltipId={scheduleId}
+                        // Compact rows keep activity as a dot/spinner rather than
+                        // expanding into status labels that would crowd the rail.
+                        inRunningSection={compact || inRunningSection}
+                        projectLabel={projectLabel}
+                        machineLabel={machineLabel}
+                        shared={shared}
+                        contentSnippet={contentSnippet}
+                        contentSearchTruncated={contentSearchTruncated}
+                        trailingClassName={showQuickArchive ? 'session-row-trailing' : undefined}
+                    />
+                </button>
+                {showQuickArchive ? (
+                    <button
+                        type="button"
+                        className="session-row-quick-action absolute right-1 top-1.5 h-7 w-7 items-center justify-center rounded-md text-[var(--app-hint)] transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:cursor-wait"
+                        aria-label={t('session.action.archive')}
+                        title={t('session.action.archive')}
+                        disabled={quickArchivePending}
+                        onClick={() => void handleQuickArchive()}
+                    >
+                        {quickArchivePending
+                            ? <LoaderIcon className="h-4 w-4 animate-spin" />
+                            : <ArchiveIcon className="h-4 w-4" />}
+                    </button>
+                ) : null}
+            </div>
 
             <SessionActionMenu
                 isOpen={menuOpen}
@@ -1314,13 +1559,42 @@ function SessionItem(props: {
                 onSetPersonalPinned={onSetPersonalPinned}
                 onRename={() => setRenameOpen(true)}
                 onExport={() => setExportOpen(true)}
+                onMarkUnread={() => markSessionUnread(s.id, s.readState)}
+                onForkSession={api && ((supportsCurrentFork && !s.thinking) || supportsArchivedFork)
+                    ? () => setForkOpen(true)
+                    : undefined}
+                forkDisabledReason={forkDisabledReason}
                 onArchive={() => setArchiveOpen(true)}
-                onReopen={cursorReopenDisabledReason ? undefined : handleReopen}
+                onReopen={cursorReopenDisabledReason ? undefined : () => void handleReopen()}
                 reopenDisabledReason={cursorReopenDisabledReason}
                 reopenHint={cursorReopenUnverifiedHint}
                 onDelete={() => setDeleteOpen(true)}
                 anchorPoint={menuAnchorPoint}
             />
+
+            {forkOpen ? (
+                <ConfirmDialog
+                    isOpen={true}
+                    onClose={() => { if (!forkPending) setForkOpen(false) }}
+                    title={t('dialog.sessionFork.title')}
+                    description={t('dialog.sessionFork.description')}
+                    confirmLabel={t('dialog.sessionFork.confirm')}
+                    confirmingLabel={t('dialog.sessionFork.confirming')}
+                    isPending={forkPending}
+                    destructive
+                    centerTitle
+                    onConfirm={async () => {
+                        if (!api) return
+                        setForkPending(true)
+                        try {
+                            const result = await api.forkConversation(s.id)
+                            onSelect(result.sessionId)
+                        } finally {
+                            setForkPending(false)
+                        }
+                    }}
+                />
+            ) : null}
 
             {reopenError ? (
                 <ConfirmDialog
@@ -1341,6 +1615,8 @@ function SessionItem(props: {
                     isOpen={true}
                     onClose={() => setRenameOpen(false)}
                     currentName={sessionName}
+                    currentTitleLocked={s.metadata?.titleLocked === true}
+                    sessionId={s.id}
                     onRename={renameSession}
                     onSuggestTitle={api && titleSuggestionAvailable ? suggestSessionTitle : undefined}
                     onUpdateSummary={api && titleSuggestionAvailable ? updateSessionSummary : undefined}
@@ -1358,37 +1634,30 @@ function SessionItem(props: {
             ) : null}
 
             {archiveOpen ? (
-                <ConfirmDialog
+                <ArchiveSessionDialog
                     isOpen={true}
                     onClose={() => setArchiveOpen(false)}
-                    title={t('dialog.archive.title')}
-                    description={t('dialog.archive.description', { name: sessionName })}
-                    confirmLabel={t('dialog.archive.confirm')}
-                    confirmingLabel={t('dialog.archive.confirming')}
+                    sessionId={s.id}
+                    sessionName={sessionName}
+                    active={s.active}
                     onConfirm={archiveSession}
                     isPending={isPending}
-                    destructive
-                    centerTitle
                 />
             ) : null}
 
             {deleteOpen ? (
-                <ConfirmDialog
+                <DeleteSessionDialog
                     isOpen={true}
+                    sessionId={s.id}
                     onClose={() => setDeleteOpen(false)}
-                    title={t('dialog.delete.title')}
                     description={t('dialog.delete.description', { name: sessionName })}
-                    confirmLabel={t('dialog.delete.confirm')}
-                    confirmingLabel={t('dialog.delete.confirming')}
                     onConfirm={deleteSession}
                     isPending={isPending}
-                    destructive
-                    centerTitle
                 />
             ) : null}
         </>
     )
-}
+})
 
 type PullToRefreshState = 'idle' | 'pulling' | 'ready'
 
@@ -1425,7 +1694,7 @@ function PullRefreshIcon(props: { rotation: number }) {
 
 export function SessionList(props: {
     sessions: SessionSummary[]
-    onSelect: (sessionId: string) => void
+    onSelect: (sessionId: string, targetMessageId?: string, targetMessageQuery?: string) => void
     onNewSession: () => void
     onNewSessionInDirectory?: (args: { machineId: string | null; directory: string }) => void
     onBrowse?: () => void
@@ -1461,8 +1730,20 @@ export function SessionList(props: {
     const { sessionPreviewLimit } = useSessionPreviewLimit()
     const { sessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly } = useShowActiveSessionsOnly()
+    const { view: listView, setView: setListView } = useSessionListView()
+    const listComparator = useMemo(() => createSessionComparator(listView), [listView])
+    const lastSeenVersion = useSessionLastSeenVersion()
     // Transient unread lens — not a Settings preference. Cleared on reload; rows drop as they're seen.
     const [showUnreadOnly, setShowUnreadOnly] = useState(false)
+    // Unread rows stay visible without a filter: collapsed project groups still
+    // show them, and the preview limit never hides them.
+    const isSessionUnread = useCallback(
+        (session: SessionSummary) => sessionIsUnread(session, {
+            lastSeenAt: getSessionLastSeenAt(session.id),
+            manualUnreadAt: getSessionManualUnreadAt(session.id, session.readState)
+        }),
+        [lastSeenVersion] // eslint-disable-line react-hooks/exhaustive-deps
+    )
     const { pinInProgressSessions } = usePinInProgressSessions()
     const { pinActiveSessions } = usePinActiveSessions()
     const { preferences: toolbarPreferences, setPreference: setToolbarPreference } = useSessionListToolbar()
@@ -1470,11 +1751,14 @@ export function SessionList(props: {
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
     const [searchQuery, setSearchQuery] = useState('')
+    const [searchMode, setSearchMode] = useState<'metadata' | 'content'>('metadata')
+    const [contentSearchResponse, setContentSearchResponse] = useState<SessionContentSearchResponse | null>(null)
+    const [contentSearchLoading, setContentSearchLoading] = useState(false)
+    const [contentSearchError, setContentSearchError] = useState(false)
     const [searchExpanded, setSearchExpanded] = useState(false)
     const [markAllReadOpen, setMarkAllReadOpen] = useState(false)
     const [customStart, setCustomStart] = useState('')
     const [customEnd, setCustomEnd] = useState('')
-    const [, setCodexImportedSessionsVersion] = useState(0)
     // Actions-box width is the real icon budget (#2039). Measuring the full
     // row and subtracting a guessed search reserve left empty space after More.
     const headerRowRef = useRef<HTMLDivElement>(null)
@@ -1532,13 +1816,14 @@ export function SessionList(props: {
     const normalizedQuery = normalizeSearch(searchQuery)
     const timeRange = getSessionTimeRange(customStart, customEnd)
     const isFiltering = normalizedQuery.length > 0 || timeRange !== null
-
-    useEffect(() => {
-        // 中文注释：监听导入标记变化，让列表在“导入完成”或“用户已在 Hapi 中继续会话”后立即刷新时间文案。
-        return subscribeCodexImportedSessions(() => {
-            setCodexImportedSessionsVersion((value) => value + 1)
-        })
-    }, [])
+    const contentSearchActive = searchMode === 'content' && normalizedQuery.length > 0
+    const contentSearchReady = contentSearchActive
+        && Array.from(normalizedQuery).length >= MIN_CONTENT_SEARCH_QUERY_LENGTH
+    const contentSearchHasIncompleteResults = contentSearchActive
+        && contentSearchReady
+        && !contentSearchLoading
+        && !contentSearchError
+        && contentSearchResponse?.hasPotentiallyIncompleteResults === true
 
     const resolveMachineLabel = (machineId: string | null): string => {
         if (machineId && machineLabelsById[machineId]) {
@@ -1550,7 +1835,6 @@ export function SessionList(props: {
         return t('machine.unknown')
     }
 
-    const lastSeenVersion = useSessionLastSeenVersion()
     const readableSessions = useMemo(
         () => props.sessions.filter(session => shouldShowSessionInSidebar(session, selectedSessionId, personalPinnedSessionIds)),
         [props.sessions, selectedSessionId, personalPinnedSessionIds]
@@ -1562,17 +1846,18 @@ export function SessionList(props: {
     const allSessions = useMemo(
         () => {
             const prepared = prepareSidebarSessions(props.sessions, selectedSessionId, personalPinnedSessionIds)
+            const statusFiltered = filterSessionsByStatus(prepared, listView.status, selectedSessionId)
             return showActiveSessionsOnly
-                ? filterActiveSessionsOnly(prepared, selectedSessionId)
-                : prepared
+                ? filterActiveSessionsOnly(statusFiltered, selectedSessionId)
+                : statusFiltered
         },
-        [props.sessions, selectedSessionId, showActiveSessionsOnly, personalPinnedSessionIds]
+        [props.sessions, selectedSessionId, showActiveSessionsOnly, personalPinnedSessionIds, listView.status]
     )
     const sessionActivityDates = useMemo(
         () => new Set(allSessions.map(session => formatDateValue(new Date(session.updatedAt)))),
         [allSessions]
     )
-    const hasTextQuery = normalizedQuery.length > 0
+    const hasTextQuery = normalizedQuery.length > 0 && !contentSearchActive
     const timeScopedSessions = useMemo(
         () => timeRange === null
             ? allSessions
@@ -1587,6 +1872,11 @@ export function SessionList(props: {
     )
     const visibleSessions = useMemo(
         () => {
+            if (contentSearchActive) {
+                const results = contentSearchResponse?.results.map((result) => result.session) ?? []
+                const prepared = prepareSidebarSessions(results, selectedSessionId)
+                return filterSessionsByStatus(prepared, listView.status, selectedSessionId)
+            }
             if (!isFiltering) return allSessions
             const matched = hasTextQuery && searchScoreIndex
                 ? timeScopedSessions.filter(session => searchScoreIndex.matchedIds.has(session.id))
@@ -1602,8 +1892,29 @@ export function SessionList(props: {
             }
             return matched
         },
-        [allSessions, hasTextQuery, isFiltering, normalizedQuery, searchScoreIndex, timeScopedSessions, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
+        [allSessions, contentSearchActive, contentSearchResponse, hasTextQuery, isFiltering, normalizedQuery, searchScoreIndex, selectedSessionId, listView.status, timeScopedSessions, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
     )
+    const contentSnippetBySessionId = useMemo(() => {
+        const snippets = new Map<string, string>()
+        for (const result of contentSearchResponse?.results ?? []) {
+            snippets.set(result.session.id, result.match.snippet)
+        }
+        return snippets
+    }, [contentSearchResponse])
+    const contentTargetMessageIdBySessionId = useMemo(() => {
+        const messageIds = new Map<string, string>()
+        for (const result of contentSearchResponse?.results ?? []) {
+            messageIds.set(result.session.id, result.match.messageId)
+        }
+        return messageIds
+    }, [contentSearchResponse])
+    const contentSearchTruncatedBySessionId = useMemo(() => {
+        const truncated = new Set<string>()
+        for (const result of contentSearchResponse?.results ?? []) {
+            if (result.match.truncated) truncated.add(result.session.id)
+        }
+        return truncated
+    }, [contentSearchResponse])
     const allGroups = useMemo(
         () => groupSessionsByDirectory(allSessions),
         [allSessions]
@@ -1631,6 +1942,28 @@ export function SessionList(props: {
     // Keep the selected machine filter active in compact mode; only hide the
     // controls that cannot fit in the narrow rail.
     const showMachineFilterBar = !compact && hasMachineFilter
+    // With a single machine there is nothing to filter, but health and the
+    // session count still belong in the sidebar: render a compact summary
+    // row instead of the filter bar. The row is derived from session groups,
+    // but those disappear when the sole machine has no visible sessions
+    // (fresh install, or "active only" filtering); fall back to the machines
+    // list so its health stays visible (#1259).
+    const soleRegisteredMachine = machineFilters.length === 0 && Object.keys(machinesById).length === 1
+        ? Object.values(machinesById)[0]
+        : null
+    const singleMachineItem = machineFilters.length === 1
+        ? machineFilterItems[0]
+        : soleRegisteredMachine
+            ? {
+                id: soleRegisteredMachine.id,
+                label: resolveMachineLabel(soleRegisteredMachine.id),
+                sessionCount: 0,
+                healthPresentation: presentMachineHealth(
+                    soleRegisteredMachine.health,
+                    getMachinePlatform(soleRegisteredMachine)
+                )
+            }
+            : null
     // A persisted filter whose machine no longer has sessions falls back to
     // "All"; with at most one machine the bar is hidden and never filters.
     const activeMachineFilter = hasMachineFilter && machineFilter !== null
@@ -1649,6 +1982,67 @@ export function SessionList(props: {
             id => lastSeenById[id] ?? 0
         )
     }, [visibleSessions, selectedSessionId, showUnreadOnly])
+    const contentSearchCandidateSessions = useMemo(
+        () => activeMachineFilter === null
+            ? allSessions
+            : allSessions.filter(session =>
+                (session.metadata?.machineId ?? UNKNOWN_MACHINE_ID) === activeMachineFilter
+            ),
+        [allSessions, activeMachineFilter]
+    )
+    const contentSearchSessionIds = useMemo(
+        () => contentSearchCandidateSessions.map(session => session.id),
+        [contentSearchCandidateSessions]
+    )
+
+    useEffect(() => {
+        if (!contentSearchReady || !api) {
+            setContentSearchResponse(null)
+            setContentSearchLoading(false)
+            setContentSearchError(false)
+            return
+        }
+
+        // Do not leave the previous query's targets clickable while the new
+        // request is waiting for its debounce window.
+        setContentSearchResponse(null)
+        setContentSearchError(false)
+        if (contentSearchSessionIds.length === 0) {
+            setContentSearchResponse({ results: [], hasPotentiallyIncompleteResults: false })
+            setContentSearchLoading(false)
+            return
+        }
+
+        const controller = new AbortController()
+        setContentSearchLoading(true)
+        const timer = window.setTimeout(() => {
+            const limit = Math.min(100, Math.max(50, contentSearchSessionIds.length))
+            void api.searchSessionContent(
+                normalizedQuery,
+                limit,
+                controller.signal,
+                contentSearchSessionIds
+            )
+                .then((response) => {
+                    if (controller.signal.aborted) return
+                    setContentSearchResponse(response)
+                })
+                .catch(() => {
+                    if (controller.signal.aborted) return
+                    setContentSearchResponse({ results: [], hasPotentiallyIncompleteResults: false })
+                    setContentSearchError(true)
+                })
+                .finally(() => {
+                    if (!controller.signal.aborted) setContentSearchLoading(false)
+                })
+        }, 180)
+
+        return () => {
+            window.clearTimeout(timer)
+            controller.abort()
+        }
+    }, [api, contentSearchReady, contentSearchSessionIds, normalizedQuery])
+
     const machineFilteredSessions = useMemo(
         () => activeMachineFilter === null
             ? unreadFilteredSessions
@@ -1662,8 +2056,8 @@ export function SessionList(props: {
         if (searchScoreIndex && hasTextQuery) {
             return sortSessionsBySearchRelevance(pinned, searchScoreIndex)
         }
-        return [...pinned].sort((a, b) => b.updatedAt - a.updatedAt)
-    }, [machineFilteredSessions, personalPinnedSessionIds, searchScoreIndex, hasTextQuery])
+        return [...pinned].sort(listComparator)
+    }, [machineFilteredSessions, personalPinnedSessionIds, searchScoreIndex, hasTextQuery, listComparator])
     const personalPinnedSessions = useMemo(() => {
         return machineFilteredSessions
             .filter((session) => personalPinnedSessionIds.has(session.id))
@@ -1674,10 +2068,10 @@ export function SessionList(props: {
             if (searchScoreIndex && hasTextQuery) {
                 return compareSessionsBySearchRelevance(a, b, searchScoreIndex)
             }
-            return b.updatedAt - a.updatedAt
+            return listComparator(a, b)
         }
         return bucketRunningSessions(machineFilteredSessions, pinInProgressSessions, byRelevanceOrRecent, pinActiveSessions, personalPinnedSessionIds)
-    }, [machineFilteredSessions, pinActiveSessions, pinInProgressSessions, personalPinnedSessionIds, searchScoreIndex, hasTextQuery])
+    }, [machineFilteredSessions, pinActiveSessions, pinInProgressSessions, personalPinnedSessionIds, searchScoreIndex, hasTextQuery, listComparator])
     const runningSessionTotal = runningSessions.working.length
         + runningSessions.pending.length
     const activeSessionTotal = runningSessions.active.length + runningSessions.idle.length
@@ -1691,25 +2085,29 @@ export function SessionList(props: {
                         || (pinInProgressSessions && isPinnedInProgressSession(session))
                     )) return false
                     return true
-                })
+                }),
+                // Search keeps its own contract: relevance first, then the stable
+                // last-message order for ties, whatever the list view says.
+                hasTextQuery ? undefined : listView
             )
             if (searchScoreIndex && hasTextQuery) {
                 return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
             }
             return grouped
         },
-        [machineFilteredSessions, pinActiveSessions, pinInProgressSessions, personalPinnedSessionIds, searchScoreIndex, hasTextQuery]
+        [machineFilteredSessions, pinActiveSessions, pinInProgressSessions, personalPinnedSessionIds, searchScoreIndex, hasTextQuery, listView]
     )
     // Directory groups whose rows all floated to the pinned sections still
     // render an action-only header so copy-path / new-session-in-directory
     // stay available (no rows to group, but the project itself is live).
-    // Based on the same machineFilteredSessions set as `groups` so machine /
-    // unread filters stay consistent.
+    // Based on the same machineFilteredSessions set as `groups` so the machine
+    // filter stays consistent.
     const allDirectoryGroups = useMemo(
         () => groupSessionsByDirectory(
-            machineFilteredSessions.filter((session) => !session.globalPinned)
+            machineFilteredSessions.filter((session) => !session.globalPinned),
+            listView
         ),
-        [machineFilteredSessions]
+        [machineFilteredSessions, listView]
     )
     const actionOnlyGroups = useMemo(() => {
         if (!pinInProgressSessions && !pinActiveSessions) {
@@ -1717,8 +2115,11 @@ export function SessionList(props: {
         }
         const visibleKeys = new Set(groups.map((group) => group.key))
         return allDirectoryGroups.filter((group) => !visibleKeys.has(group.key))
-    }, [groups, allDirectoryGroups, pinInProgressSessions])
+    }, [groups, allDirectoryGroups, pinActiveSessions, pinInProgressSessions])
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
+        () => new Map()
+    )
+    const [filterCollapseOverrides, setFilterCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
     )
     const [runningSectionCollapsed, setRunningSectionCollapsed] = useState(false)
@@ -1727,9 +2128,16 @@ export function SessionList(props: {
     const [pinnedSectionCollapsed, setPinnedSectionCollapsed] = useState(false)
     const autoExpandedSelectedSessionKeyRef = useRef<string | null>(null)
     const isGroupCollapsed = (group: SessionGroup): boolean => {
-        if (isFiltering) return false
-        const override = collapseOverrides.get(group.key)
+        const override = isFiltering
+            ? filterCollapseOverrides.get(group.key)
+            : collapseOverrides.get(group.key)
         if (override !== undefined) return override
+        // Keep matching groups open by default while filtering. Explicit
+        // header clicks use a temporary override for the active filter.
+        if (isFiltering) return false
+        // Archived-only would otherwise collapse every group (none has an
+        // active session), hiding exactly what was asked for.
+        if (listView.status === 'archived') return false
         const hasSelectedSession = selectedSessionId
             ? group.sessions.some(session => session.id === selectedSessionId)
             : false
@@ -1737,12 +2145,18 @@ export function SessionList(props: {
     }
 
     const toggleGroup = (groupKey: string, isCollapsed: boolean) => {
-        setCollapseOverrides(prev => {
+        const setOverrides = isFiltering ? setFilterCollapseOverrides : setCollapseOverrides
+        setOverrides(prev => {
             const next = new Map(prev)
             next.set(groupKey, !isCollapsed)
             return next
         })
     }
+
+    useEffect(() => {
+        if (isFiltering) return
+        setFilterCollapseOverrides(prev => prev.size === 0 ? prev : new Map())
+    }, [isFiltering])
 
     // Per-group reveal cap for paginated session previews. Absent = the configured
     // preview limit; expand/collapse controls move the cap by one preview-sized batch.
@@ -1763,7 +2177,8 @@ export function SessionList(props: {
             )
             const currentVisibleCount = getVisibleSessionPreview(group.sessions, {
                 selectedSessionId,
-                limit: currentLimit
+                limit: currentLimit,
+                isUnread: isSessionUnread
             }).length
             next.set(group.key, getNextSessionVisibleCount(
                 Math.max(currentLimit, currentVisibleCount),
@@ -1796,7 +2211,8 @@ export function SessionList(props: {
             group.sessions,
             {
                 selectedSessionId,
-                limit: getGroupVisibleCount(group)
+                limit: getGroupVisibleCount(group),
+                isUnread: isSessionUnread
             }
         )
     }
@@ -1848,8 +2264,7 @@ export function SessionList(props: {
                         ({count})
                     </span>
                 </div>
-                <div className="collapsible-panel" data-open={(!collapsed || isFiltering) || undefined}>
-                    <div className="collapsible-inner">
+                <CollapsiblePanel open={!collapsed || isFiltering}>
                     <div className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
                         {bucketKeys.map((bucketKey) => {
                             const bucket = RUNNING_BUCKETS.find((b) => b.key === bucketKey)
@@ -1877,14 +2292,18 @@ export function SessionList(props: {
                                             projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
                                             shared={sharedSessionIds.has(s.id)}
+                                            contentSnippet={contentSnippetBySessionId.get(s.id)}
+                                            contentSearchTruncated={contentSearchTruncatedBySessionId.has(s.id)}
+                                            targetMessageId={contentTargetMessageIdBySessionId.get(s.id)}
+                                            targetMessageQuery={contentSearchActive ? normalizedQuery : undefined}
+                                            lastSeenVersion={lastSeenVersion}
                                         />
                                     ))}
                                 </div>
                             )
                         })}
                     </div>
-                    </div>
-                </div>
+                </CollapsiblePanel>
             </div>
         )
     }
@@ -1927,8 +2346,36 @@ export function SessionList(props: {
         )
     }
 
+    const renderGroupSessionItem = (s: SessionSummary) => (
+        <SessionItem
+            session={s}
+            onSelect={props.onSelect}
+            compact={compact}
+            showPath={false}
+            api={api}
+            titleSuggestionAvailable={titleSuggestionAvailable}
+            selected={s.id === selectedSessionId}
+            showDetailedStatus={showDetailedStatus}
+            onSetPersonalPinned={(pinned) => setPersonalPinned(s.id, pinned)}
+            onTransferPersonalPinned={transferPersonalPinned}
+            shared={sharedSessionIds.has(s.id)}
+            contentSnippet={contentSnippetBySessionId.get(s.id)}
+            contentSearchTruncated={contentSearchTruncatedBySessionId.has(s.id)}
+            targetMessageId={contentTargetMessageIdBySessionId.get(s.id)}
+            targetMessageQuery={contentSearchActive ? normalizedQuery : undefined}
+            lastSeenVersion={lastSeenVersion}
+        />
+    )
+
     const renderDirectoryGroup = (group: SessionGroup) => {
         const isCollapsed = isGroupCollapsed(group)
+        // A collapsed group still shows its unread rows, so new output in a
+        // quiet project is never folded out of sight. With pin-active on, any
+        // remaining project rows stay visible too: the group only collapsed
+        // because its active sessions floated to the pinned section.
+        const collapsedUnreadSessions = isCollapsed
+            ? (pinActiveSessions ? group.sessions : group.sessions.filter(isSessionUnread))
+            : []
         const visibleGroupSessions = compact ? group.sessions : getVisibleGroupSessions(group)
         const hiddenSessionCount = group.sessions.length - visibleGroupSessions.length
         const currentLimit = Math.min(
@@ -1938,7 +2385,8 @@ export function SessionList(props: {
         const previousLimit = getPreviousSessionVisibleCount(currentLimit, sessionPreviewLimit)
         const previousGroupSessions = getVisibleSessionPreview(group.sessions, {
             selectedSessionId,
-            limit: previousLimit
+            limit: previousLimit,
+            isUnread: isSessionUnread
         })
         const collapseCount = visibleGroupSessions.length - previousGroupSessions.length
         const canShowFewerSessions = previousLimit < currentLimit && collapseCount > 0
@@ -1988,9 +2436,18 @@ export function SessionList(props: {
                     </span>
                 </div>
 
+                {collapsedUnreadSessions.length > 0 ? (
+                    <div data-testid="session-group-unread-peek" className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
+                        {collapsedUnreadSessions.map((s) => (
+                            <div key={s.id} className="contents">
+                                {renderGroupSessionItem(s)}
+                            </div>
+                        ))}
+                    </div>
+                ) : null}
+
                 {/* Sessions */}
-                <div className="collapsible-panel" data-open={!isCollapsed || undefined}>
-                    <div className="collapsible-inner">
+                <CollapsiblePanel open={!isCollapsed}>
                     <div className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
                         {visibleGroupSessions.map((s, index) => (
                             <div key={s.id} className="contents">
@@ -2001,19 +2458,7 @@ export function SessionList(props: {
                                         aria-hidden="true"
                                     />
                                 ) : null}
-                                <SessionItem
-                                    session={s}
-                                    onSelect={props.onSelect}
-                                    compact={compact}
-                                    showPath={false}
-                                    api={api}
-                                    titleSuggestionAvailable={titleSuggestionAvailable}
-                                    selected={s.id === selectedSessionId}
-                                    showDetailedStatus={showDetailedStatus}
-                                    onSetPersonalPinned={(pinned) => setPersonalPinned(s.id, pinned)}
-                                    onTransferPersonalPinned={transferPersonalPinned}
-                                    shared={sharedSessionIds.has(s.id)}
-                                />
+                                {renderGroupSessionItem(s)}
                             </div>
                         ))}
                         {!compact && group.sessions.length > sessionPreviewLimit && (hiddenSessionCount > 0 || canShowFewerSessions) ? (
@@ -2041,8 +2486,7 @@ export function SessionList(props: {
                             </div>
                         ) : null}
                     </div>
-                    </div>
-                </div>
+                </CollapsiblePanel>
             </div>
         )
     }
@@ -2069,7 +2513,9 @@ export function SessionList(props: {
             // (e.g. it moved to the pinned "in progress" section). Drop the
             // guard so it auto-expands again when it transitions back into a
             // group later.
-            autoExpandedSelectedSessionKeyRef.current = null
+            if (!isFiltering) {
+                autoExpandedSelectedSessionKeyRef.current = null
+            }
             return
         }
 
@@ -2077,8 +2523,9 @@ export function SessionList(props: {
         if (autoExpandedSelectedSessionKeyRef.current === autoExpandKey) return
         autoExpandedSelectedSessionKeyRef.current = autoExpandKey
 
-        setCollapseOverrides(prev => expandSelectedSessionCollapseOverrides(prev, group))
-    }, [selectedSessionId, groups])
+        const setOverrides = isFiltering ? setFilterCollapseOverrides : setCollapseOverrides
+        setOverrides(prev => expandSelectedSessionCollapseOverrides(prev, group))
+    }, [selectedSessionId, groups, isFiltering])
 
     // Clean up stale collapse overrides
     useEffect(() => {
@@ -2300,6 +2747,12 @@ export function SessionList(props: {
                         <SessionListSearch
                             value={searchQuery}
                             onChange={setSearchQuery}
+                            expanded={searchExpanded}
+                            onExpandedChange={setSearchExpanded}
+                            showSearch={showSearch}
+                            showDateFilter={showDateFilter}
+                            searchMode={searchMode}
+                            onSearchModeChange={setSearchMode}
                             customStart={customStart}
                             customEnd={customEnd}
                             sessionActivityDates={sessionActivityDates}
@@ -2307,10 +2760,6 @@ export function SessionList(props: {
                                 setCustomStart(start)
                                 setCustomEnd(end)
                             }}
-                            expanded={searchExpanded}
-                            onExpandedChange={setSearchExpanded}
-                            showSearch={showSearch}
-                            showDateFilter={showDateFilter}
                             chromeMinPx={searchQuery.length > 0 ? searchChromePx : 0}
                             maxWidthPx={searchQuery.length > 0 ? searchMaxPx : 0}
                         />
@@ -2348,75 +2797,18 @@ export function SessionList(props: {
                                     return measured > 0 ? measured : fallback
                                 }
                                 const definedSlots: Array<ToolbarShedSlot & { node: ReactNode }> = []
-                                if (showToolbarCollapse) {
-                                    definedSlots.push({
-                                        id: 'toolbar-collapse',
-                                        keep: 3,
-                                        widthPx: slotWidth('toolbar-collapse', TOOLBAR_ICON_PX),
-                                        node: (
-                                            <button
-                                                type="button"
-                                                onClick={() => setToolbarPreference('collapsed', !toolbarPreferences.collapsed)}
-                                                aria-expanded={!toolbarPreferences.collapsed}
-                                                title={toolbarPreferences.collapsed ? t('sessions.toolbar.expand') : t('sessions.toolbar.collapse')}
-                                                aria-label={toolbarPreferences.collapsed ? t('sessions.toolbar.expand') : t('sessions.toolbar.collapse')}
-                                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                                            >
-                                                <ToolbarCollapseIcon collapsed={toolbarPreferences.collapsed} className="h-4 w-4" />
-                                            </button>
-                                        )
-                                    })
-                                }
-                                if (showUnreadFilter && unreadSessionCount > 0) {
-                                    definedSlots.push({
-                                        id: 'mark-all',
-                                        keep: 7,
-                                        widthPx: slotWidth('mark-all', TOOLBAR_ICON_PX),
-                                        node: (
-                                            <button
-                                                type="button"
-                                                onClick={() => setMarkAllReadOpen(true)}
-                                                title={t('sessions.markAllRead.button', { count: unreadSessionCount })}
-                                                aria-label={t('sessions.markAllRead.button', { count: unreadSessionCount })}
-                                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                                            >
-                                                <MarkAllReadIcon className="h-5 w-5" />
-                                            </button>
-                                        )
-                                    })
-                                }
-                                if (showUnreadFilter) {
-                                    definedSlots.push({
-                                        id: 'unread',
-                                        keep: 5,
-                                        widthPx: slotWidth('unread', TOOLBAR_ICON_PX),
-                                        node: (
-                                            <button
-                                                type="button"
-                                                onClick={() => setShowUnreadOnly(!showUnreadOnly)}
-                                                aria-pressed={showUnreadOnly}
-                                                title={t('sessions.unreadFilter.toggle')}
-                                                aria-label={t('sessions.unreadFilter.toggle')}
-                                                className={cn(
-                                                    'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
-                                                    showUnreadOnly
-                                                        ? 'bg-[var(--app-subtle-bg)]'
-                                                        : 'hover:bg-[var(--app-subtle-bg)]'
-                                                )}
-                                            >
-                                                <span
-                                                    aria-hidden
-                                                    className={cn(
-                                                        'inline-flex h-2.5 w-2.5 shrink-0 rounded-full',
-                                                        showUnreadOnly
-                                                            ? 'bg-[var(--app-link)]'
-                                                            : 'bg-[var(--app-hint)]'
-                                                    )}
-                                                />
-                                            </button>
-                                        )
-                                    })
-                                }
+                                definedSlots.push({
+                                    id: 'view',
+                                    keep: 5,
+                                    widthPx: slotWidth('view', TOOLBAR_ICON_PX),
+                                    node: (
+                                        <SessionListViewMenu
+                                            view={listView}
+                                            onChange={setListView}
+                                            onReset={() => setListView(DEFAULT_SESSION_LIST_VIEW)}
+                                        />
+                                    )
+                                })
                                 if (renderHeader) {
                                     definedSlots.push({
                                         id: 'new',
@@ -2450,6 +2842,26 @@ export function SessionList(props: {
                                         node: props.headerActions
                                     })
                                 }
+                                // Conditional, so it goes last: appearing or clearing
+                                // it never shifts the controls before it.
+                                if (showUnreadFilter && unreadSessionCount > 0) {
+                                    definedSlots.push({
+                                        id: 'mark-all',
+                                        keep: 7,
+                                        widthPx: slotWidth('mark-all', TOOLBAR_ICON_PX),
+                                        node: (
+                                            <button
+                                                type="button"
+                                                onClick={() => setMarkAllReadOpen(true)}
+                                                title={t('sessions.markAllRead.button', { count: unreadSessionCount })}
+                                                aria-label={t('sessions.markAllRead.button', { count: unreadSessionCount })}
+                                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                            >
+                                                <MarkAllReadIcon className="h-5 w-5" />
+                                            </button>
+                                        )
+                                    })
+                                }
                                 const { visibleIds, overflowIds } = shedToolbarSlots(definedSlots, budget, {
                                     morePx: toolbarChrome.morePx,
                                     gapPx: toolbarChrome.gapPx
@@ -2472,6 +2884,47 @@ export function SessionList(props: {
                                             ))}
                                             <span data-measure-id="__more" className="inline-flex h-9 w-9 shrink-0" />
                                         </div>
+                                        {showToolbarCollapse ? (
+                                            <span className="inline-flex shrink-0">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setToolbarPreference('collapsed', !toolbarPreferences.collapsed)}
+                                                    aria-expanded={!toolbarPreferences.collapsed}
+                                                    title={toolbarPreferences.collapsed ? t('sessions.toolbar.expand') : t('sessions.toolbar.collapse')}
+                                                    aria-label={toolbarPreferences.collapsed ? t('sessions.toolbar.expand') : t('sessions.toolbar.collapse')}
+                                                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                                                >
+                                                    <ToolbarCollapseIcon collapsed={toolbarPreferences.collapsed} className="h-4 w-4" />
+                                                </button>
+                                            </span>
+                                        ) : null}
+                                        {showUnreadFilter ? (
+                                            <span className="inline-flex shrink-0">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowUnreadOnly(!showUnreadOnly)}
+                                                    aria-pressed={showUnreadOnly}
+                                                    title={t('sessions.unreadFilter.toggle')}
+                                                    aria-label={t('sessions.unreadFilter.toggle')}
+                                                    className={cn(
+                                                        'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]',
+                                                        showUnreadOnly
+                                                            ? 'bg-[var(--app-subtle-bg)]'
+                                                            : 'hover:bg-[var(--app-subtle-bg)]'
+                                                    )}
+                                                >
+                                                    <span
+                                                        aria-hidden
+                                                        className={cn(
+                                                            'inline-flex h-2.5 w-2.5 shrink-0 rounded-full',
+                                                            showUnreadOnly
+                                                                ? 'bg-[var(--app-link)]'
+                                                                : 'bg-[var(--app-hint)]'
+                                                        )}
+                                                    />
+                                                </button>
+                                            </span>
+                                        ) : null}
                                         {showMachineFilterBar ? (
                                             <div
                                                 ref={machineMenuRef}
@@ -2515,6 +2968,8 @@ export function SessionList(props: {
                     value={activeMachineFilter}
                     onChange={setMachineFilter}
                 />
+            ) : singleMachineItem ? (
+                <MachineSummaryRow machine={singleMachineItem} />
             ) : null}
             </div>
 
@@ -2549,9 +3004,42 @@ export function SessionList(props: {
                     />
                 ) : null}
 
-                {props.sessions.length > 0 && (isFiltering || activeMachineFilter !== null || showUnreadOnly) && groups.length === 0 && runningSessionTotal === 0 && activeSessionTotal === 0 && personalPinnedSessions.length === 0 && globalPinnedSessions.length === 0 ? (
+                {props.sessions.length > 0 && contentSearchLoading ? (
                     <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
-                        {t('sessions.search.noResults')}
+                        {t('sessions.search.content.loading')}
+                    </div>
+                ) : null}
+
+                {props.sessions.length > 0 && contentSearchError ? (
+                    <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
+                        {t('sessions.search.content.error')}
+                    </div>
+                ) : null}
+
+                {props.sessions.length > 0 && contentSearchHasIncompleteResults ? (
+                    <div
+                        role="status"
+                        aria-live="polite"
+                        className="mx-2 my-1 flex items-start gap-1.5 rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-2.5 py-2 text-xs text-[var(--app-hint)]"
+                    >
+                        <InfoIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        <span>
+                            {contentSearchResponse?.results.length
+                                ? t('sessions.search.content.incomplete')
+                                : t('sessions.search.content.noResultsIncomplete')}
+                        </span>
+                    </div>
+                ) : null}
+
+                {props.sessions.length > 0 && !contentSearchLoading && !contentSearchError && !contentSearchHasIncompleteResults && (isFiltering || activeMachineFilter !== null || showUnreadOnly || listView.status !== 'all') && groups.length === 0 && runningSessionTotal === 0 && activeSessionTotal === 0 && personalPinnedSessions.length === 0 && globalPinnedSessions.length === 0 ? (
+                    <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
+                        {contentSearchActive
+                            ? contentSearchReady
+                                ? contentSearchResponse?.hasPotentiallyIncompleteResults
+                                    ? t('sessions.search.content.noResultsIncomplete')
+                                    : t('sessions.search.content.noResults')
+                                : t('sessions.search.content.minQuery')
+                            : t('sessions.search.noResults')}
                     </div>
                 ) : null}
 
@@ -2604,6 +3092,7 @@ export function SessionList(props: {
                                             projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
                                             shared={sharedSessionIds.has(s.id)}
+                                            lastSeenVersion={lastSeenVersion}
                                         />
                                     ))}
                                 </div>
@@ -2640,8 +3129,7 @@ export function SessionList(props: {
                                 ({globalPinnedSessions.length})
                             </span>
                         </div>
-                        <div className="collapsible-panel" data-open={(!pinnedSectionCollapsed || isFiltering) || undefined}>
-                            <div className="collapsible-inner">
+                        <CollapsiblePanel open={!pinnedSectionCollapsed || isFiltering}>
                                 <div className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
                                     {globalPinnedSessions.map((s) => (
                                         <SessionItem
@@ -2660,11 +3148,15 @@ export function SessionList(props: {
                                             projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
                                             shared={sharedSessionIds.has(s.id)}
+                                            contentSnippet={contentSnippetBySessionId.get(s.id)}
+                                            contentSearchTruncated={contentSearchTruncatedBySessionId.has(s.id)}
+                                            targetMessageId={contentTargetMessageIdBySessionId.get(s.id)}
+                                            targetMessageQuery={contentSearchActive ? normalizedQuery : undefined}
+                                            lastSeenVersion={lastSeenVersion}
                                         />
                                     ))}
                                 </div>
-                            </div>
-                        </div>
+                        </CollapsiblePanel>
                     </div>
                 ) : null}
 

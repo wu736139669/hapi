@@ -14,6 +14,7 @@ import { codexHome, saveRuntime, runtimeDirectory, runtimeAuthHash, findColdBind
 import { startCodexGateway, record, string, type Envelope } from './gateway';
 import { resolveSharedCodex, sharedLaunchConfig, initializeSharedClient, checkSharedCapabilities, takeReservedSessionId, type SharedLaunchOptions } from './launch';
 import { SharedCodexRoot } from './root';
+import { buildForkSessionSummary } from '@hapi/protocol';
 
 export type RuntimeReady = { sessionId: string; runtime: CodexRuntimeRecord };
 type Reservation = { root: SharedCodexRoot; resumeId?: string };
@@ -176,14 +177,29 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
     };
     const prepare = async (cwd: string, existingSessionId?: string, parent?: SharedCodexRoot): Promise<SharedCodexRoot> => {
         assertRunning();
+        // Seed the generated title before Shared Codex replays inherited history.
+        // A historical change_title item must not replace this fork identity.
+        const forkSummary = parent ? buildForkSessionSummary(parent.session.getMetadata()) : undefined;
         const shared = { flavor: 'codex', startedBy: options.startedBy ?? 'terminal', workingDirectory: cwd,
-            exportSessionEnv: false, reportStarted: false, metadataOverrides: { capabilities: { terminal: true, concurrentClients: true },
-                ...(parent ? { forkedFrom: parent.session.sessionId } : {}) } } as const;
+            exportSessionEnv: false, reportStarted: false, metadataOverrides: {
+                ...(forkSummary ? { summary: forkSummary } : {}),
+                capabilities: {
+                    terminal: true,
+                    concurrentClients: true,
+                    ...(existingSessionId ? { conversationHistory: undefined } : {})
+                },
+                ...(parent ? { forkedFrom: parent.session.sessionId } : {})
+            }
+        } as const;
         // reservedSessionId names one preallocated hub row — single-use. A second
         // create()/fork must mint a fresh row, not re-adopt (#1911 Opus Major).
         const reservedSessionId = takeReservedSessionId(options);
         const bootstrap = existingSessionId
-            ? await bootstrapExistingSession({ ...shared, sessionId: existingSessionId })
+            ? await bootstrapExistingSession({
+                ...shared,
+                sessionId: existingSessionId,
+                requireMetadataFlush: metadata => Boolean(metadata?.capabilities?.conversationHistory)
+            })
             : await bootstrapSession({
                 ...shared,
                 reservedSessionId,
@@ -217,13 +233,20 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
         roots.set(threadId, root);
         const effective = await root.bind(threadId, response, subscribe);
         assertRunning();
+        assertRunning();
         await root.activate(initialOptions);
         await root.session.flush();
         await persist();
         // The runner kills a child whose "session started" webhook misses its
         // bounded wait. Report ownership as soon as the session is controllable;
         // the native-history replay below can take minutes on large threads.
-        await notifyRunnerSessionStarted(root.session.sessionId, root.session.getMetadata() ?? root.bootstrap.metadata);
+        // The marker must come from the local bootstrap: a hub without the field
+        // strips hostStartMarker, and an untracked runner-started webhook needs
+        // it to prove its process generation.
+        await notifyRunnerSessionStarted(root.session.sessionId, {
+            ...(root.session.getMetadata() ?? root.bootstrap.metadata),
+            hostStartMarker: root.bootstrap.metadata.hostStartMarker
+        });
         // Cold-resumed threads predate the control connection's automatic
         // new-thread subscription. Subscribe once without changing settings.
         // New threads already subscribe all initialized connections. Native

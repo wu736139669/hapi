@@ -4,7 +4,8 @@ export type DshModelOption = { value: string; label: string }
 export type DshReasoningOption = { value: string; name?: string }
 
 function isCurrentModel(model: DshModelSummary, current: DshModelSelection | null): boolean {
-    return model.provider === current?.provider && model.modelId === current.modelId
+    if (!current) return false
+    return model.provider === current.provider && model.modelId === current.modelId
 }
 
 export function getDshModelValue(
@@ -44,7 +45,7 @@ export function getDshReasoningOptions(
             || `${model.provider}/${model.modelId}` === selectedModel
         ))
         : models.find((model) => isCurrentModel(model, current))
-    return selection?.reasoningEfforts.map((effort) => ({
+    return selection?.reasoningEfforts?.map((effort) => ({
         value: effort.id,
         name: effort.name
     })) ?? []

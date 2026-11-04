@@ -8,6 +8,7 @@ import { ApiError, type ApiClient } from '@/api/client'
 import type {
     AgyModelSummary,
     AttachmentMetadata,
+    ClaudeModelSummary,
     CodexCollaborationMode,
     CodexModelSummary,
     CopilotAgentMode,
@@ -18,7 +19,7 @@ import type {
     SlashCommand
 } from '@/types/api'
 import type { ChatBlock, NormalizedMessage } from '@/chat/types'
-import type { Suggestion } from '@/hooks/useActiveSuggestions'
+import type { SuggestionHandler, Suggestion } from '@/hooks/useActiveSuggestions'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
 import { getRetryableCodexTurnMessageId } from '@/chat/codexRetry'
 import { reduceChatBlocks } from '@/chat/reducer'
@@ -29,6 +30,7 @@ import { useUnseenBlockCount } from '@/hooks/useUnseenBlockCount'
 import { useCodexExplorationCollapse } from '@/hooks/useCodexExplorationCollapse'
 import { useExecutionProcess } from '@/hooks/useExecutionProcess'
 import { isQueuedForInvocation } from '@/lib/messages'
+import { sendVoiceMessage } from '@/lib/dictationSend'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import {
     getCodexModelReasoningEfforts,
@@ -63,6 +65,8 @@ import {
 import type { MessageDeliveryMode } from '@hapi/protocol'
 import { isSteeringSupportedForSession } from '@hapi/protocol'
 import type { OlderLoadOutcome } from '@/lib/message-window-store'
+import { AGY_MODEL_LABELS, AGY_MODEL_PRESETS, getAgyModelChoices, splitAgyModelSelection, getClaudeEffortLevelsForModel, resolveClaudeEffortForModel } from '@hapi/protocol'
+import { getClaudeCatalogOptions } from '@/components/AssistantChat/modelOptions'
 import { createAttachmentAdapter } from '@/lib/attachmentAdapter'
 import { ShareSeedConsumer } from '@/components/ShareSeedConsumer'
 import {
@@ -85,7 +89,7 @@ import {
 } from '@/lib/composer-attachment-drafts'
 import { useTranslation } from '@/lib/use-translation'
 import { queryKeys } from '@/lib/query-keys'
-import type { SendMessageAcceptance, SendMessageSettlement } from '@/hooks/mutations/useSendMessage'
+import type { SendMessageAcceptance } from '@/hooks/mutations/useSendMessage'
 import { handoffComposerDraft, transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { SessionHeader } from '@/components/SessionHeader'
 import { ForestScenery } from '@/components/skins/ForestScenery'
@@ -95,12 +99,13 @@ import { SessionStatusPanel } from '@/components/SessionStatusPanel'
 import { buildSessionStatusData } from '@/chat/sessionStatus'
 import { useCodexGoal } from '@/hooks/useCodexGoal'
 import { usePlatform } from '@/hooks/usePlatform'
+import { getToolCardDisplayPresentation, useToolCardDisplayMode } from '@/hooks/useToolCardDisplayMode'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { useClaudeCustomModels } from '@/hooks/queries/useClaudeCustomModels'
 import { useCodexModels } from '@/hooks/queries/useCodexModels'
 import { useDshModels } from '@/hooks/queries/useDshModels'
-import { useCursorModels } from '@/hooks/queries/useCursorModels'
-import { useCursorModelsForMachine } from '@/hooks/queries/useCursorModelsForMachine'
+import { useAgyModels } from '@/hooks/queries/useAgyModels'
+import { useClaudeModels } from '@/hooks/queries/useClaudeModels'
 import {
     mergeCursorCliModelSkus,
     resolveCursorBaseFromWire
@@ -119,6 +124,8 @@ import { useOpencodeModels } from '@/hooks/queries/useOpencodeModels'
 import { useGrokModels } from '@/hooks/queries/useGrokModels'
 import { useCopilotModels } from '@/hooks/queries/useCopilotModels'
 import { useKimiModelsForSession } from '@/hooks/queries/useKimiModelsForSession'
+import { useCursorModels } from '@/hooks/queries/useCursorModels'
+import { useCursorModelsForMachine } from '@/hooks/queries/useCursorModelsForMachine'
 import { buildKimiSessionModelOptions } from '@/components/NewSession/grokModels'
 import { useGrokReasoningEffortOptions } from '@/hooks/queries/useGrokReasoningEffortOptions'
 import { usePiModels } from '@/hooks/queries/usePiModels'
@@ -143,11 +150,16 @@ export function isRewindForkFallbackError(error: unknown): boolean {
     return error instanceof ApiError && error.code === 'ambiguous_native_boundary_fork_safe'
 }
 
+/**
+ * Composer options for an agy session, from the same machine catalog New Session
+ * reads. `undefined` until the machine answers, so the picker falls back to the
+ * built-in list rather than rendering empty.
+ */
 export function buildAgyComposerModelOptions(
     availableModels: AgyModelSummary[]
 ): Array<{ value: string; label: string }> | undefined {
     if (availableModels.length === 0) return undefined
-    return availableModels.map((model) => ({ value: model.modelId, label: model.name ?? model.modelId }))
+    return getAgyModelChoices(availableModels).map((model) => ({ value: model.modelId, label: model.name }))
 }
 
 export function shouldClearReasoningEffortForModelChange(args: {
@@ -183,6 +195,22 @@ export function resolvePiContextWindow(
     return model?.contextWindow
 }
 
+/**
+ * The effort to send along with a model change, or undefined to leave it.
+ * Only a Claude catalog carries per-model effort levels, so other flavors
+ * (whose catalog here is empty) never get one.
+ */
+export function resolveEffortForModelChange(args: {
+    currentEffort: string | null
+    model: SessionModelSelection
+    claudeModels: readonly ClaudeModelSummary[]
+}): { effort: string | null } | undefined {
+    if (typeof args.model === 'object' && args.model !== null) {
+        return undefined
+    }
+    const effort = resolveClaudeEffortForModel(args.currentEffort, args.model, args.claudeModels)
+    return effort === args.currentEffort ? undefined : { effort }
+}
 export async function applyModelChangeWithReasoningRollback(args: {
     model: SessionModelSelection
     previousModelReasoningEffort: string | null
@@ -537,6 +565,7 @@ function hasAbortableAgentRun(blocks: readonly ChatBlock[]): boolean {
 }
 
 type SessionChatProps = {
+    readThroughRevision?: number
     api: ApiClient
     baseUrl?: string
     titleSuggestionAvailable?: boolean
@@ -547,10 +576,10 @@ type SessionChatProps = {
     messages: DecryptedMessage[]
     messagesWarning: string | null
     hasMoreMessages: boolean
+    hasMoreNewerMessages?: boolean
     isSyncingTail: boolean
     isLoadingMoreMessages: boolean
     isSending: boolean
-    sendSettlement: SendMessageSettlement | null
     viewMode: 'tail' | 'history'
     messagesVersion: number
     historyVersion: number
@@ -558,6 +587,7 @@ type SessionChatProps = {
     onBack: () => void
     onRefresh: () => void
     onLoadMore: (onBeforeApply?: (historyVersion: number) => boolean) => Promise<OlderLoadOutcome>
+    onLoadNewer?: (resolvePreserveMessageId?: () => string | null) => Promise<boolean>
     onCancelLoadMore: () => void
     // Returns the accepted mutation's attempt id, or false when
     // pre-mutation guards (no-api / no-session / pending) rejected the call OR async
@@ -571,10 +601,15 @@ type SessionChatProps = {
     ) => Promise<SendMessageAcceptance | false>
     resolveSessionIdForUpload?: (sessionId: string) => Promise<string>
     onUploadSessionResolved?: (sessionId: string) => void
+    /** Inactive-session resume for voice dictation direct-sends; see HappyComposer. */
+    resolveSessionIdForVoice?: (sessionId: string) => Promise<{ sessionId: string; resumed: boolean }>
+    /** Navigate/seed after a voice direct-send resumed an inactive session. */
+    onVoiceSessionResolved?: (sessionId: string) => void
     onViewModeChange: (mode: 'tail' | 'history') => void
+    onJumpToTail: () => void
     onRetryMessage?: (localId: string) => void
     onRetryCodexTurn?: () => Promise<void> | void
-    autocompleteSuggestions?: (query: string) => Promise<Suggestion[]>
+    autocompleteSuggestions?: SuggestionHandler
     availableSlashCommands?: readonly SlashCommand[]
     // The latest send the hub rejected (4xx/5xx/network).  When set, the
     // composer is asked to restore the typed text and surface an inline
@@ -585,6 +620,12 @@ type SessionChatProps = {
     onSuppressSendErrorRestore?: (id: number) => void
     initialOutlineOpen?: boolean
     onInitialOutlineConsumed?: () => void
+    initialTargetMessageId?: string
+    initialTargetMessageQuery?: string
+    searchRequestId?: number
+    onLoadMessageContext?: (messageId: string) => Promise<boolean>
+    onInitialTargetConsumed?: () => void
+    onSearchTargetDismissed?: () => void
     // Called when an `abort-restore` event arrives and the composer is not empty,
     // so the caller can surface the aborted text via the existing sendError path.
     onAbortRestore?: (text: string) => void
@@ -617,6 +658,8 @@ function SessionChatInner(props: SessionChatProps) {
     const { codexExplorationCollapsed } = useCodexExplorationCollapse()
     const { executionProcessEnabled } = useExecutionProcess()
     const navigate = useNavigate()
+    const { toolCardDisplayMode } = useToolCardDisplayMode()
+    const { groupingMode: toolGroupingMode } = getToolCardDisplayPresentation(toolCardDisplayMode)
     const [historyActionPending, setHistoryActionPending] = useState(false)
 
     const onForkConversation = useCallback(async (messageLocalId?: string) => {
@@ -659,6 +702,7 @@ function SessionChatInner(props: SessionChatProps) {
     const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const visibleGroupsRef = useRef<ToolGroupBlock[]>([])
+    const visibleGroupsModeRef = useRef(toolGroupingMode)
     const [rememberedTailBoundary, setRememberedTailBoundary] = useState<{
         id: string | null
         tailRevision: number
@@ -937,7 +981,7 @@ function SessionChatInner(props: SessionChatProps) {
         // hub-wide setting and would otherwise trigger a forbidden request.
         enabled: !isSessionGuest && agentFlavor === 'claude'
     })
-    const claudeModelOptions = useMemo(() => (
+    const claudeCustomModelOptions = useMemo(() => (
         agentFlavor === 'claude'
             ? claudeCustomModelsState.models.map((model) => ({ value: model, label: model }))
             : undefined
@@ -947,6 +991,7 @@ function SessionChatInner(props: SessionChatProps) {
         sessionId: props.session.id,
         // Model discovery is owner-only for collaborative shares.
         machineId: isSessionGuest ? null : props.session.metadata?.machineId ?? null,
+        preferSession: isSessionGuest ? false : props.session.metadata?.capabilities?.concurrentClients === true,
         enabled: !isSessionGuest && agentFlavor === 'codex' && props.session.active && !controlledByUser
     })
     const dshModelsState = useDshModels({
@@ -1100,8 +1145,7 @@ function SessionChatInner(props: SessionChatProps) {
             machineModels: machineCursorModelsState.availableModels,
             cliModelSkus: sessionCliModelSkus,
             sessionModel: props.session.model,
-            sessionCurrentModelId: cursorModelsState.currentModelId,
-            autoRestartLabel: t('session.modelChange.cursorAutoRestart')
+            sessionCurrentModelId: cursorModelsState.currentModelId
         })
     }, [
         agentFlavor,
@@ -1109,9 +1153,58 @@ function SessionChatInner(props: SessionChatProps) {
         cursorModelsState.currentModelId,
         machineCursorModelsState.availableModels,
         sessionCliModelSkus,
-        props.session.model,
-        t
+        props.session.model
     ])
+    const agyModelsState = useAgyModels({
+        api: props.api,
+        machineId: sessionMachineId,
+        enabled: agentFlavor === 'agy' && props.session.active && Boolean(sessionMachineId)
+    })
+    // Options only: the composer has no surface for a catalog warning, so a
+    // machine whose sign-in has lapsed shows its last known list here and New
+    // Session is where that gets explained.
+    const agyModelOptions = useMemo(() => (
+        agentFlavor === 'agy'
+            ? buildAgyComposerModelOptions(agyModelsState.availableModels)
+            : undefined
+    ), [agentFlavor, agyModelsState.availableModels])
+    const agyChoices = useMemo(() => getAgyModelChoices(
+        agyModelsState.availableModels.length > 0
+            ? agyModelsState.availableModels
+            : AGY_MODEL_PRESETS.map((modelId) => ({ modelId, name: AGY_MODEL_LABELS[modelId] }))
+    ), [agyModelsState.availableModels])
+    const agySelection = splitAgyModelSelection(props.session.model)
+    const agySelectedChoice = agyChoices.find((choice) => choice.modelId === props.session.model)
+        ?? agyChoices.find((choice) => choice.modelId === agySelection.model)
+    const agyCurrentModel = agySelectedChoice?.modelId ?? props.session.model
+    const agyCurrentEffort = agySelectedChoice?.supportedEfforts.length
+        ? props.session.effort ?? agySelection.effort
+        : null
+    const agyEffortOptions = agySelectedChoice?.supportedEfforts.map((level) => ({
+        value: level,
+        name: level === 'xhigh' ? 'XHigh' : level.charAt(0).toUpperCase() + level.slice(1)
+    })) ?? []
+    const claudeModelsState = useClaudeModels({
+        api: props.api,
+        machineId: sessionMachineId,
+        enabled: agentFlavor === 'claude' && props.session.active && Boolean(sessionMachineId)
+    })
+    // Until the catalog arrives (or on a runner without discovery) this stays
+    // undefined and the composer keeps its built-in Claude presets.
+    const claudeModelOptions = useMemo(() => (
+        agentFlavor === 'claude' && claudeModelsState.availableModels.length > 0
+            ? getClaudeCatalogOptions(claudeModelsState.availableModels, t('misc.otherModels'))
+            : undefined
+    ), [agentFlavor, claudeModelsState.availableModels, t])
+    // Levels the current Claude model accepts; undefined when unknown (no
+    // catalog, or a model it does not list), which keeps every level.
+    const claudeEffortOptions = useMemo(() => (
+        getClaudeEffortLevelsForModel(props.session.model ?? null, claudeModelsState.availableModels)
+            ?.map((level) => ({ value: level }))
+    ), [props.session.model, claudeModelsState.availableModels])
+    // Machine catalog first; hub-configured custom Claude models fill in when
+    // the runner has no discovery catalog.
+    const claudeComposerModelOptions = claudeModelOptions ?? claudeCustomModelOptions
     const piModelsState = usePiModels({
         api: props.api,
         sessionId: props.session.id,
@@ -1248,15 +1341,38 @@ function SessionChatInner(props: SessionChatProps) {
     // Register session store for voice client tools
     useEffect(() => {
         registerSessionStore({
-            getSession: () => props.session as { agentState?: { requests?: Record<string, unknown> } } | null,
-            sendMessage: (_sessionId: string, message: string) => props.onSend(message),
-            approvePermission: async (_sessionId: string, requestId: string) => {
-                await props.api.approvePermission(props.session.id, requestId)
-                props.onRefresh()
+            getSession: async (sessionId: string) => {
+                if (sessionId === props.session.id) {
+                    return props.session as unknown as { agentState?: { requests?: Record<string, unknown> } }
+                }
+                try {
+                    const res = await props.api.getSession(sessionId)
+                    return res.session as unknown as { agentState?: { requests?: Record<string, unknown> } }
+                } catch {
+                    return null
+                }
             },
-            denyPermission: async (_sessionId: string, requestId: string) => {
-                await props.api.denyPermission(props.session.id, requestId)
-                props.onRefresh()
+            sendMessage: async (sessionId: string, message: string) => {
+                if (sessionId === props.session.id) {
+                    const accepted = await props.onSend(message)
+                    if (!accepted) {
+                        throw new Error('Message was not accepted')
+                    }
+                } else {
+                    await sendVoiceMessage(props.api, sessionId, message)
+                }
+            },
+            approvePermission: async (sessionId: string, requestId: string) => {
+                await props.api.approvePermission(sessionId, requestId)
+                if (sessionId === props.session.id) {
+                    props.onRefresh()
+                }
+            },
+            denyPermission: async (sessionId: string, requestId: string) => {
+                await props.api.denyPermission(sessionId, requestId)
+                if (sessionId === props.session.id) {
+                    props.onRefresh()
+                }
             }
         })
     }, [props.session, props.api, props.onSend, props.onRefresh])
@@ -1431,16 +1547,14 @@ function SessionChatInner(props: SessionChatProps) {
             goal: codexGoal.goal === undefined ? reduced.latestGoal : codexGoal.goal,
             tasks: props.session.todos,
             blocks: reconciled.blocks,
-            messages: normalizedMessages,
-            backgroundTaskCount: props.session.backgroundTaskCount
+            backgroundTasks: props.session.backgroundTasks
         }),
         [
             reduced.latestGoal,
             codexGoal.goal,
             props.session.todos,
-            props.session.backgroundTaskCount,
-            reconciled.blocks,
-            normalizedMessages
+            props.session.backgroundTasks,
+            reconciled.blocks
         ]
     )
     const hasRunningChildAgent = useMemo(
@@ -1456,10 +1570,12 @@ function SessionChatInner(props: SessionChatProps) {
         () => buildVisibleChatBlocks(reconciled.blocks, {
             hasMoreMessages: props.hasMoreMessages,
             previousGroups: visibleGroupsRef.current,
+            previousGroupingMode: visibleGroupsModeRef.current,
+            groupingMode: toolGroupingMode,
             codexExplorationCollapsed,
             executionProcessEnabled
         }),
-        [reconciled.blocks, props.hasMoreMessages, codexExplorationCollapsed, executionProcessEnabled]
+        [reconciled.blocks, props.hasMoreMessages, toolGroupingMode, codexExplorationCollapsed, executionProcessEnabled]
     )
 
     // Fork-current must compare against assistant-ui message ids (`kind:id`),
@@ -1500,8 +1616,9 @@ function SessionChatInner(props: SessionChatProps) {
     }, [latestCompletedBoundaryId])
 
     useEffect(() => {
+        visibleGroupsModeRef.current = toolGroupingMode
         visibleGroupsRef.current = visibleBlocks.filter(isToolGroupBlock)
-    }, [visibleBlocks])
+    }, [toolGroupingMode, visibleBlocks])
 
     // "N new messages" counts rendered blocks, not raw messages: a subagent run
     // is dozens of sidechain messages but a single Task card, and a tool_use +
@@ -1565,13 +1682,27 @@ function SessionChatInner(props: SessionChatProps) {
                     ).some((option) => option.value === previousModelReasoningEffort)
                     : false
         )
+        // Sent in the same request so the session never runs the new model
+        // with an effort it does not offer.
+        const agyNextChoice = agentFlavor === 'agy' && typeof model === 'string'
+            ? agyChoices.find((choice) => choice.modelId === model)
+            : undefined
+        const effortChange = agentFlavor === 'agy'
+            ? { effort: agyNextChoice?.supportedEfforts.some((level) => level === agyCurrentEffort)
+                ? agyCurrentEffort
+                : null }
+            : resolveEffortForModelChange({
+                currentEffort: props.session.effort ?? null,
+                model,
+                claudeModels: claudeModelsState.availableModels
+            })
 
         try {
             await applyModelChangeWithReasoningRollback({
                 model,
                 previousModelReasoningEffort,
                 shouldClearReasoningEffort,
-                setModel,
+                setModel: (nextModel) => setModel(nextModel, effortChange),
                 setModelReasoningEffort
             })
             if (agentFlavor === 'dsh') await dshModelsState.refetch()
@@ -1587,6 +1718,10 @@ function SessionChatInner(props: SessionChatProps) {
         dshModelsState.availableModels,
         dshModelsState.current,
         dshModelsState.refetch,
+        claudeModelsState.availableModels,
+        agyChoices,
+        agyCurrentEffort,
+        props.session.effort,
         props.session.modelReasoningEffort,
         setModelReasoningEffort,
         setModel,
@@ -1649,14 +1784,18 @@ function SessionChatInner(props: SessionChatProps) {
 
     const handleEffortChange = useCallback(async (effort: string | null) => {
         try {
-            await setEffort(effort)
+            if (agentFlavor === 'agy') {
+                await setModel(agyCurrentModel, { effort })
+            } else {
+                await setEffort(effort)
+            }
             haptic.notification('success')
             props.onRefresh()
         } catch (e) {
             haptic.notification('error')
             console.error('Failed to set effort:', e)
         }
-    }, [setEffort, props.onRefresh, haptic])
+    }, [agentFlavor, agyCurrentModel, setModel, setEffort, props.onRefresh, haptic])
 
     const handleServiceTierChange = useCallback(async (serviceTier: string | null) => {
         try {
@@ -1709,7 +1848,6 @@ function SessionChatInner(props: SessionChatProps) {
     // absolute epoch-ms using Date.now() at that moment (send-time base for presets).
     const [pendingSchedule, setPendingSchedule] = useState<PendingSchedule | null>(null)
     const [pendingScheduleRevision, setPendingScheduleRevision] = useState(0)
-    const [sendAcceptance, setSendAcceptance] = useState<{ attemptId: string | null } | null>(null)
     const updatePendingSchedule = useCallback((next: PendingSchedule | null) => {
         setPendingSchedule(next)
         setPendingScheduleRevision((revision) => revision + 1)
@@ -1790,7 +1928,6 @@ function SessionChatInner(props: SessionChatProps) {
         })
         const accepted = await onSendForComposer(text, attachments, scheduledAt, deliveryMode)
         if (!accepted) return
-        setSendAcceptance({ attemptId: accepted.attemptId })
         if (!routedToScratchlist) {
             // Clear pendingSchedule only after the mutation is actually
             // accepted - covers both pre-mutation guards AND async
@@ -1949,20 +2086,26 @@ function SessionChatInner(props: SessionChatProps) {
                         sessionId={props.session.id}
                         metadata={props.session.metadata}
                         disabled={sessionInactive}
+                        allowInactiveFork={sessionInactive && props.session.metadata?.flavor === 'codex'
+                            && Boolean(props.session.metadata?.codexSessionId && props.session.metadata?.machineId)}
                         onRefresh={props.onRefresh}
                         onRetryMessage={props.onRetryMessage}
                         onRetryCodexTurn={props.onRetryCodexTurn}
                         retryableCodexTurnMessageId={retryableCodexTurnMessageId}
                         historyActionPending={historyActionPending}
-                        onForkConversation={isSessionGuest || controlledByUser ? undefined : onForkConversation}
+                        onForkConversation={isSessionGuest || (controlledByUser && !sessionInactive) ? undefined : onForkConversation}
                         onRewindConversation={isSessionGuest || controlledByUser ? undefined : onRewindConversation}
                         isLatestCompletedBoundary={isLatestCompletedBoundary}
                         onViewModeChange={props.onViewModeChange}
+                        onJumpToTail={props.onJumpToTail}
+                        readThroughRevision={!terminalVisible && props.viewMode === 'tail' ? props.readThroughRevision : undefined}
                         isSyncingTail={props.isSyncingTail}
                         messagesWarning={props.messagesWarning}
                         hasMoreMessages={props.hasMoreMessages}
+                        hasMoreNewerMessages={props.hasMoreNewerMessages}
                         isLoadingMoreMessages={props.isLoadingMoreMessages}
                         onLoadMore={props.onLoadMore}
+                        onLoadNewer={props.onLoadNewer}
                         onCancelLoadMore={props.onCancelLoadMore}
                         unseenCount={unseenCount}
                         rawMessagesCount={visibleMessages.length}
@@ -1973,6 +2116,12 @@ function SessionChatInner(props: SessionChatProps) {
                         outlineOpen={outlineOpen}
                         outlineItems={outlineItems}
                         onOutlineOpenChange={setOutlineOpen}
+                        initialTargetMessageId={props.initialTargetMessageId}
+                        initialTargetMessageQuery={props.initialTargetMessageQuery}
+                        searchRequestId={props.searchRequestId}
+                        onLoadMessageContext={props.onLoadMessageContext}
+                        onInitialTargetConsumed={props.onInitialTargetConsumed}
+                        onSearchTargetDismissed={props.onSearchTargetDismissed}
                     />
                     </div>
 
@@ -2019,6 +2168,9 @@ function SessionChatInner(props: SessionChatProps) {
                             ) : null}
                             <QueuedMessagesBar
                                 sessionId={props.session.id}
+                                compactionPendingMessageIds={agentFlavor === 'codex' && props.session.active
+                                    && props.session.agentState?.steeringActive === true
+                                    ? props.session.agentState.codexCompactionPendingMessageIds ?? undefined : undefined}
                                 api={props.api}
                                 sessionMetadata={props.session.metadata}
                                 steeringActive={
@@ -2037,8 +2189,12 @@ function SessionChatInner(props: SessionChatProps) {
                                     // Restore the schedule so the clock button re-activates
                                     updatePendingSchedule(restored)
                                 }}
-                                canSteer={(agentFlavor === 'pi' || agentFlavor === 'dsh')
-                                    && props.session.thinking
+                                deliveryActive={props.session.active && props.session.thinking}
+                                canSteer={props.session.active && props.session.thinking
+                                    && isSteeringSupportedForSession(props.session.metadata)
+                                    && (agentFlavor === 'pi' || agentFlavor === 'dsh'
+                                        ? props.session.thinking
+                                        : props.session.agentState?.steeringActive === true)
                                     && !controlledByUser}
                             />
                         </div>
@@ -2047,26 +2203,25 @@ function SessionChatInner(props: SessionChatProps) {
                         key={`composer-${props.session.id}`}
                         sessionId={props.session.id}
                         canRestoreAttachments={props.session.active}
+                        attachmentsEnabled={attachmentAdapter !== undefined}
                         onUploadDraftSnapshot={(text, attachments) => {
                             uploadDraftSnapshotRef.current = { text, attachments }
                         }}
                         resolveSessionMentionTooltip={resolveSessionMentionTooltip}
                         disabled={props.isSending}
                         pendingSchedule={pendingSchedule}
-                        sendAcceptance={sendAcceptance}
-                        sendSettlement={props.sendSettlement}
                         onSchedule={updatePendingSchedule}
                         onClearSchedule={() => updatePendingSchedule(null)}
                         permissionMode={props.session.permissionMode}
                         collaborationMode={codexCollaborationModeSupported ? props.session.collaborationMode : undefined}
                         copilotAgentMode={agentFlavor === 'copilot' ? props.session.copilotAgentMode : undefined}
-                        model={props.session.model}
+                        model={agentFlavor === 'agy' ? agyCurrentModel : props.session.model}
                         modelReasoningEffort={agentFlavor === 'codex' || agentFlavor === 'dsh' || agentFlavor === 'opencode' ? props.session.modelReasoningEffort : undefined}
-                        effort={props.session.effort}
+                        effort={agentFlavor === 'agy' ? agyCurrentEffort : props.session.effort}
                         agentFlavor={agentFlavor}
                         availableModelOptions={
                             agentFlavor === 'claude'
-                                ? claudeModelOptions
+                                ? claudeComposerModelOptions
                                 : agentFlavor === 'codex'
                                 ? codexModelOptions
                                 : agentFlavor === 'dsh'
@@ -2087,13 +2242,16 @@ function SessionChatInner(props: SessionChatProps) {
                                             ? copilotModelOptions
                                             : agentFlavor === 'kimi'
                                                 ? kimiModelOptions
+                                            : agentFlavor === 'agy'
+                                                ? agyModelOptions
                                         // Pi gets its provider-qualified model list from the piModels prop;
                                         // feeding piModelOptions here would make the generic Ctrl/Cmd+M
                                         // cycler (getNextModelForFlavor) post a bare modelId string,
                                         // which loses the provider and can pick the wrong cached
                                         // match or throw in runPi. undefined makes the shortcut a no-op
-                                        // so Pi model changes go through the settings sheet only.
-                                        : undefined
+                                        // so Pi model changes go through the settings sheet only;
+                                        // claudeComposerModelOptions is undefined for every non-Claude flavor.
+                                        : claudeComposerModelOptions
                         }
                         piModels={isSessionGuest ? undefined : piModels}
                         piSelectedModel={!isSessionGuest && agentFlavor === 'pi' ? piSelectedModel : undefined}
@@ -2107,12 +2265,16 @@ function SessionChatInner(props: SessionChatProps) {
                                     : undefined
                         }
                         availableEffortOptions={
-                            agentFlavor === 'grok' && grokEffortState.options.length > 0
+                            agentFlavor === 'agy'
+                                ? agyEffortOptions
+                                : agentFlavor === 'grok' && grokEffortState.options.length > 0
                                 ? grokEffortState.options
-                                : undefined
+                                : claudeEffortOptions
                         }
                         active={props.session.active}
                         allowSendWhenInactive={!isSessionGuest}
+                        resolveSessionIdForVoice={props.resolveSessionIdForVoice}
+                        onVoiceSessionResolved={props.onVoiceSessionResolved}
                         onResumeStoredDraft={isSessionGuest ? undefined : () => handleSend('', undefined, null)}
                         thinking={props.session.thinking}
                         agentState={props.session.agentState}
@@ -2212,7 +2374,11 @@ function SessionChatInner(props: SessionChatProps) {
                         onEffortChange={
                             isSessionGuest
                                 ? undefined
-                                : agentFlavor === 'grok'
+                                : agentFlavor === 'agy'
+                                    ? (props.session.active && !controlledByUser && agyEffortOptions.length > 0
+                                        ? handleEffortChange
+                                        : undefined)
+                                    : agentFlavor === 'grok'
                                 ? (props.session.active && !controlledByUser && grokEffortState.options.length > 0
                                     ? handleEffortChange
                                     : undefined)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { Navigate, useParams } from '@tanstack/react-router'
+import { Navigate, useNavigate, useParams } from '@tanstack/react-router'
 import type { Terminal } from '@xterm/xterm'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
@@ -14,6 +14,11 @@ import { TerminalView } from '@/components/Terminal/TerminalView'
 import { LoadingState } from '@/components/LoadingState'
 import { Button } from '@/components/ui/button'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
+import {
+    appendTerminalExcerptToComposerDraft,
+    extractTerminalExcerpt,
+} from '@/lib/terminal-composer'
+import { PRESERVE_SESSION_SIDEBAR_SCROLL } from '@/lib/sessionNavigation'
 import {
     Dialog,
     DialogContent,
@@ -266,6 +271,7 @@ function TerminalPageContent(props: { sessionId: string }) {
     const { t } = useTranslation()
     const compactControls = useCompactTerminalControls()
     const sessionId = props.sessionId
+    const navigate = useNavigate()
     const { api, token, baseUrl } = useAppContext()
     const goBack = useAppGoBack()
     const { session } = useSession(api, sessionId)
@@ -287,6 +293,7 @@ function TerminalPageContent(props: { sessionId: string }) {
     const terminalRef = useRef<Terminal | null>(null)
     const commandInputRef = useRef<HTMLTextAreaElement | null>(null)
     const inputDisposableRef = useRef<{ dispose: () => void } | null>(null)
+    const selectionDisposableRef = useRef<{ dispose: () => void } | null>(null)
     const connectOnceRef = useRef(false)
     const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null)
     const exitNavTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -299,6 +306,7 @@ function TerminalPageContent(props: { sessionId: string }) {
     const [commandDraft, setCommandDraft] = useState('')
     const [pasteDialogOpen, setPasteDialogOpen] = useState(false)
     const [manualPasteText, setManualPasteText] = useState('')
+    const [hasSelection, setHasSelection] = useState(false)
 
     const {
         state: terminalState,
@@ -340,6 +348,10 @@ function TerminalPageContent(props: { sessionId: string }) {
     // code. onData is intentionally ungated; the buttons gate via `disabled`.
     const { ctrlActive, altActive, dispatch, toggleModifier, resetModifiers } = useQuickKeyInput({ onSend: write })
 
+    const syncSelectionState = useCallback((terminal: Terminal) => {
+        setHasSelection(terminal.hasSelection() && terminal.getSelection().trim().length > 0)
+    }, [])
+
     const handleTerminalMount = useCallback(
         (terminal: Terminal) => {
             terminalRef.current = terminal
@@ -347,11 +359,16 @@ function TerminalPageContent(props: { sessionId: string }) {
             inputDisposableRef.current = terminal.onData((data) => {
                 dispatch(data)
             })
+            selectionDisposableRef.current?.dispose()
+            selectionDisposableRef.current = terminal.onSelectionChange(() => {
+                syncSelectionState(terminal)
+            })
+            syncSelectionState(terminal)
             if (!compactControls || inputMode === 'direct') {
                 terminal.focus()
             }
         },
-        [compactControls, inputMode, dispatch]
+        [compactControls, inputMode, dispatch, syncSelectionState]
     )
 
     const handleResize = useCallback(
@@ -391,6 +408,7 @@ function TerminalPageContent(props: { sessionId: string }) {
         setCommandDraft('')
         setInputMode('command')
         setDirectKeyPage('control')
+        setHasSelection(false)
         if (exitNavTimerRef.current) {
             clearTimeout(exitNavTimerRef.current)
             exitNavTimerRef.current = null
@@ -401,6 +419,7 @@ function TerminalPageContent(props: { sessionId: string }) {
     useEffect(() => {
         return () => {
             inputDisposableRef.current?.dispose()
+            selectionDisposableRef.current?.dispose()
             connectOnceRef.current = false
             if (exitNavTimerRef.current) {
                 clearTimeout(exitNavTimerRef.current)
@@ -409,6 +428,23 @@ function TerminalPageContent(props: { sessionId: string }) {
             disconnect()
         }
     }, [disconnect])
+
+    const handleSendToAgent = useCallback(() => {
+        const terminal = terminalRef.current
+        if (!terminal) {
+            return
+        }
+        const excerpt = extractTerminalExcerpt(terminal)
+        if (!excerpt) {
+            return
+        }
+        appendTerminalExcerptToComposerDraft(sessionId, excerpt)
+        void navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
+    }, [navigate, sessionId])
 
     useEffect(() => {
         if (session?.active === false || !terminalSupported) {
@@ -646,6 +682,22 @@ function TerminalPageContent(props: { sessionId: string }) {
                 <div className="mx-auto w-full max-w-content px-3">
                     {compactControls ? (
                         <div className="flex flex-col gap-2 py-2">
+                            <button
+                                type="button"
+                                onClick={handleSendToAgent}
+                                disabled={!terminalSupported}
+                                data-testid="terminal-to-agent"
+                                aria-label={
+                                    hasSelection
+                                        ? t('terminal.toAgent.selection')
+                                        : t('terminal.toAgent.buffer')
+                                }
+                                className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-3 py-2 text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-button)] disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {hasSelection
+                                    ? t('terminal.toAgent.selection')
+                                    : t('terminal.toAgent.buffer')}
+                            </button>
                             <div
                                 className="grid grid-cols-2 rounded-md bg-[var(--app-secondary-bg)] p-0.5"
                                 role="group"
@@ -803,16 +855,34 @@ function TerminalPageContent(props: { sessionId: string }) {
                         </div>
                     ) : (
                         <div className="flex flex-col gap-2 py-2">
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    void handlePasteAction()
-                                }}
-                                disabled={quickInputDisabled}
-                                className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-3 py-2 text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-button)] disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                                {t('button.paste')}
-                            </button>
+                            <div className="grid grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        void handlePasteAction()
+                                    }}
+                                    disabled={quickInputDisabled}
+                                    className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-3 py-2 text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-button)] disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    {t('button.paste')}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleSendToAgent}
+                                    disabled={!terminalSupported}
+                                    data-testid="terminal-to-agent"
+                                    aria-label={
+                                        hasSelection
+                                            ? t('terminal.toAgent.selection')
+                                            : t('terminal.toAgent.buffer')
+                                    }
+                                    className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-3 py-2 text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-button)] disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    {hasSelection
+                                        ? t('terminal.toAgent.selection')
+                                        : t('terminal.toAgent.buffer')}
+                                </button>
+                            </div>
                             <QuickKeyRows
                                 ctrlActive={ctrlActive}
                                 altActive={altActive}

@@ -9,6 +9,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useAuthSource } from '@/hooks/useAuthSource'
 import { useServerUrl } from '@/hooks/useServerUrl'
 import { useSSE } from '@/hooks/useSSE'
+import { useDelayedFlag } from '@/hooks/useDelayedFlag'
 import { useReconnectingState } from '@/hooks/useReconnectingState'
 import { useSyncingState } from '@/hooks/useSyncingState'
 import { usePushNotifications } from '@/hooks/usePushNotifications'
@@ -42,6 +43,8 @@ import type { SyncEvent } from '@/types/api'
 type ToastEvent = Extract<SyncEvent, { type: 'toast' }>
 
 const REQUIRE_SERVER_URL = requireHubUrlForLogin()
+/** Matches the native apps: transient connection states show after 2s. */
+const CONNECTION_STATUS_DELAY_MS = 2_000
 
 function withPwaBanner(content: ReactNode) {
     return (
@@ -377,6 +380,9 @@ function AppInner() {
     )
     const sseEnabled = Boolean(effectiveApi && effectiveToken)
     const showReconnectingBanner = sseDisconnected && !isSyncing
+    // Transient states wait before showing; quick reconnects never flash.
+    const revealReconnecting = useDelayedFlag(showReconnectingBanner, CONNECTION_STATUS_DELAY_MS)
+    const revealSyncing = useDelayedFlag(isSyncing, CONNECTION_STATUS_DELAY_MS)
 
     const { subscriptionId: globalSubscriptionId } = useSSE({
         enabled: sseEnabled && !isSessionGuest,
@@ -514,12 +520,12 @@ function AppInner() {
             <FilePreviewHost>
             <VoiceProvider>
                 <PwaUpdateBannerWithStatusOffset
-                    isSyncing={isSyncing}
-                    isReconnecting={showReconnectingBanner}
+                    isSyncing={revealSyncing}
+                    isReconnecting={revealReconnecting}
                 />
-                <SyncingBanner isSyncing={isSyncing} />
+                <SyncingBanner isSyncing={revealSyncing} />
                 <ReconnectingBanner
-                    isReconnecting={showReconnectingBanner}
+                    isReconnecting={revealReconnecting}
                     reason={sseDisconnectReason}
                 />
                 <VoiceErrorBanner />

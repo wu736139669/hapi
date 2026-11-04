@@ -23,12 +23,14 @@ import { createPermissionsRoutes } from './routes/permissions'
 import { createMachinesRoutes } from './routes/machines'
 import { createStorageRoutes } from './routes/storage'
 import { createUsageRoutes } from './routes/usage'
+import { createActivityRoutes } from './routes/activity'
 import { createGitRoutes } from './routes/git'
 import { createCliRoutes } from './routes/cli'
 import { createCodexDesktopRoutes } from './routes/codexDesktop'
 import { createClaudeSessionRoutes } from './routes/claudeSessions'
 import { createPiSessionRoutes } from './routes/piSessions'
 import { createDshSessionRoutes } from './routes/dshSessions'
+import { createOpencodeSessionRoutes } from './routes/opencodeSessions'
 import { createPushRoutes } from './routes/push'
 import { createDevicesRoutes } from './routes/devices'
 import { createVoiceRoutes } from './routes/voice'
@@ -318,7 +320,7 @@ function createWebApp(options: {
     app.route('/api', createSessionsRoutes(options.getSyncEngine))
     app.route('/api', createMessagesRoutes(options.getSyncEngine))
     app.route('/api', createPermissionsRoutes(options.getSyncEngine))
-    app.route('/api', createMachinesRoutes(options.getSyncEngine, options.getTeamService))
+    app.route('/api', createMachinesRoutes(options.getSyncEngine, options.getTeamService, { dataDir: configuration.dataDir }))
     app.route('/api', createStorageRoutes(configuration.dbPath))
     app.route('/api', createHubSettingsRoutes(configuration.dataDir, () => configuration.teamsEnabled))
     const teamService = options.getTeamService?.() ?? null
@@ -326,6 +328,7 @@ function createWebApp(options: {
         app.route('/api', createTeamsRoutes(teamService))
     }
     app.route('/api', createUsageRoutes(options.store, options.refreshUsage))
+    app.route('/api', createActivityRoutes(options.store))
     app.route('/api', createStudioRoutes({
         store: options.store,
         getSyncEngine: options.getSyncEngine
@@ -345,6 +348,10 @@ function createWebApp(options: {
         getSyncEngine: options.getSyncEngine
     }))
     app.route('/api', createDshSessionRoutes({
+        store: options.store,
+        getSyncEngine: options.getSyncEngine
+    }))
+    app.route('/api', createOpencodeSessionRoutes({
         store: options.store,
         getSyncEngine: options.getSyncEngine
     }))

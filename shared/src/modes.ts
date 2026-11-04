@@ -25,7 +25,7 @@ export type AgyPermissionMode = typeof AGY_PERMISSION_MODES[number]
 export const CLAUDE_PERMISSION_MODES = ['default', 'acceptEdits', 'auto', 'bypassPermissions', 'plan'] as const
 export type ClaudePermissionMode = typeof CLAUDE_PERMISSION_MODES[number]
 
-export const CODEX_PERMISSION_MODES = ['default', 'read-only', 'safe-yolo', 'yolo'] as const
+export const CODEX_PERMISSION_MODES = ['default', 'read-only', 'autoReview', 'yolo'] as const
 export type CodexPermissionMode = typeof CODEX_PERMISSION_MODES[number]
 
 export const CODEX_COLLABORATION_MODES = ['default', 'plan'] as const
@@ -79,7 +79,7 @@ export const PERMISSION_MODE_LABELS: Record<PermissionMode, string> = {
     plan: 'Plan Mode',
     ask: 'Ask Mode',
     debug: 'Debug Mode',
-    autoReview: 'Auto-review',
+    autoReview: 'Auto',
     bypassPermissions: 'Yolo',
     'read-only': 'Read Only',
     'workspace-write': 'Workspace Write',
@@ -205,14 +205,18 @@ export function getCodexCollaborationModeOptions(): CodexCollaborationModeOption
  * Steer = soft mid-turn delivery (same idea as Cursor GUI default "Send"):
  * - Pi: native queued-message steer
  * - Codex: app-server `turn/steer` (true mid-turn inject)
+ * - OpenCode v1: concurrent ACP `session/prompt`; v2: durable REST inbox
+ *   steering at a native step boundary. Both require live steeringActive.
  * - Cursor ACP: concurrent `session/prompt` soft-send (no cancel). Legacy
  *   stream-json Cursor sessions are NOT steerable — gate with
  *   {@link isSteeringSupportedForSession}.
+ * - Claude: stream-json stdin write during the turn (TUI Ctrl+X Ctrl+S);
+ *   Claude folds it in at the next tool boundary. Remote mode only.
  * - DeepSeek Harness: native queued-message steer
  *
- * Claude / others: not supported (no reachable soft-steer path) — UI hides Steer.
+ * Others: not supported — UI hides Steer.
  */
-export const STEERING_SUPPORTED_FLAVORS = ['pi', 'codex', 'cursor', 'dsh'] as const
+export const STEERING_SUPPORTED_FLAVORS = ['claude', 'codex', 'cursor', 'opencode', 'pi', 'dsh'] as const
 
 export function isSteeringSupportedForFlavor(flavor?: string | null): boolean {
     return (STEERING_SUPPORTED_FLAVORS as readonly string[]).includes(flavor ?? '')
@@ -231,7 +235,11 @@ export function isSteeringSupportedForSession(metadata?: {
     cursorSessionId?: string | null
     cursorSessionProtocol?: 'acp' | 'stream-json' | null
 } | null): boolean {
-    if (metadata?.flavor === 'pi' || metadata?.flavor === 'codex' || metadata?.flavor === 'dsh') {
+    if (metadata?.flavor === 'claude'
+        || metadata?.flavor === 'codex'
+        || metadata?.flavor === 'opencode'
+        || metadata?.flavor === 'pi'
+        || metadata?.flavor === 'dsh') {
         return true
     }
     if (metadata?.flavor !== 'cursor') {

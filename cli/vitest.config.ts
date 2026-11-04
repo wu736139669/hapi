@@ -16,6 +16,7 @@ export default defineConfig({
             // Bun-only (`bun:test` + `bun:sqlite`); run with
             // `bun test src/commands/usageScan.test.ts`.
             'src/commands/usageScan.test.ts',
+            '**/lateRunnerWebhook.integration.test.ts',
         ],
         globalSetup: './src/test/globalSetup.ts',
         setupFiles: './src/test/setup.ts',
