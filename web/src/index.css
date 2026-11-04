@@ -926,3 +926,15 @@ html[data-theme="oled"] .shiki span:not([data-line-number]) {
     transition: none;
   }
 }
+
+/* Archived sessions read as clearly inactive at a glance. */
+.session-row-archived {
+    opacity: 0.55;
+    filter: grayscale(1);
+    transition: opacity 150ms ease;
+}
+
+.session-row-archived:hover,
+.session-list-item:focus-visible .session-row-archived {
+    opacity: 0.8;
+}

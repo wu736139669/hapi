@@ -1,6 +1,7 @@
 import { useMemo, useSyncExternalStore } from 'react'
 import type { SessionSummary } from '@/types/api'
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
+import { Spinner } from '@/components/Spinner'
 import { InfoIcon, ScheduleIcon } from '@/components/icons'
 import { HoverTooltip, SESSION_ROW_TOOLTIP_FOCUS_CLASS, useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { getAttentionLabel, SessionAttentionIndicator, SessionRequestIcon } from '@/components/SessionAttentionIndicator'
@@ -167,6 +168,7 @@ export function SessionRowSummary(props: {
     // work runs) instead of dimming disconnected rows or adding spinners.
     const isRunning = s.active && s.thinking
     const isBackgroundOnly = s.active && !s.thinking && (s.backgroundTaskCount ?? 0) > 0
+    const isArchived = s.metadata?.lifecycleState === 'archived'
     // Unread is a semibold title plus accent time — no dot, so the presence
     // badge stays the row's only dot. The label stays for screen readers.
     const isUnread = attention?.kind === 'unread'
@@ -193,19 +195,31 @@ export function SessionRowSummary(props: {
     )
 
     return (
-        <div className={`hapi-session-summary flex w-full min-w-0 flex-col ${compact ? 'gap-0' : 'gap-1'} ${className ?? ''}`}>
+        <div className={`hapi-session-summary flex w-full min-w-0 flex-col ${compact ? 'gap-0' : 'gap-1'} ${isArchived ? 'session-row-archived' : ''} ${className ?? ''}`}>
             <div className={`hapi-session-summary__main grid min-w-0 items-center ${compact ? 'grid-cols-[minmax(0,1fr)] gap-1' : 'grid-cols-[minmax(9rem,1fr)_minmax(0,max-content)] gap-2'}`}>
                 <div className={`hapi-session-summary__title-row flex min-w-0 items-center ${compact ? 'gap-1' : 'gap-2'}`}>
                     <SessionForestCompanion session={s} compact={compact} />
-                    {attention?.kind === 'background' && nestedTooltips && attentionId ? (
+                    {compact ? (
+                        <>
+                            {attention?.kind === 'background' && nestedTooltips && attentionId ? (
+                                <SessionAttentionIndicator
+                                    attention={attention}
+                                    summary={s}
+                                    label={attentionLabel ?? ''}
+                                    tooltipId={attentionId}
+                                    target={compactAgentIcon}
+                                />
+                            ) : compactAgentIcon}
+                        </>
+                    ) : attention?.kind === 'background' && nestedTooltips && attentionId ? (
                         <SessionAttentionIndicator
                             attention={attention}
                             summary={s}
                             label={attentionLabel ?? ''}
                             tooltipId={attentionId}
-                            target={compact ? compactAgentIcon : agentIcon}
+                            target={agentIcon}
                         />
-                    ) : compact ? compactAgentIcon : agentIcon}
+                    ) : agentIcon}
                     <div
                         className={`hapi-session-summary__title min-w-0 flex-1 truncate ${compact ? 'text-xs' : 'text-sm'} text-[var(--app-fg)] ${isUnread ? 'font-semibold' : 'font-normal'}`}
                         title={sessionName}
@@ -265,6 +279,11 @@ export function SessionRowSummary(props: {
                             <ScheduleIcon className="h-3.5 w-3.5 text-[var(--app-hint)]" />
                         </span>
                     ) : null}
+                    {compact && (isRunning || isBackgroundOnly) ? (
+                        <span data-testid="session-row-running" className="ml-auto shrink-0">
+                            <Spinner size="sm" label={null} className="h-3.5 w-3.5" />
+                        </span>
+                    ) : null}
                 </div>
                 {!compact ? (
                     <div className={`hapi-session-summary__meta flex min-w-0 items-center justify-end gap-2 overflow-hidden text-xs ${trailingClassName ?? ''}`}>
@@ -277,6 +296,11 @@ export function SessionRowSummary(props: {
                         {!attention && s.active && s.pendingRequestsCount > 0 ? (
                             <span className="shrink-0 text-[var(--app-badge-warning-text)]">
                                 {t('session.item.pending')} {s.pendingRequestsCount}
+                            </span>
+                        ) : null}
+                        {isRunning || isBackgroundOnly ? (
+                            <span data-testid="session-row-running" className="shrink-0">
+                                <Spinner size="sm" label={null} className="h-3.5 w-3.5" />
                             </span>
                         ) : null}
                         {timeLabel ? (

@@ -49,11 +49,11 @@ describe('SessionRowSummary background status', () => {
         localStorage.clear()
     })
 
-    it('marks running and background work on the presence badge, without spinners', () => {
+    it('marks running and background work on the presence badge and trailing spinner', () => {
         const background = renderSummary(false).container
         const backgroundBadge = background.querySelector('[data-testid="session-presence"]')
         expect(backgroundBadge).toHaveClass('bg-blue-400', 'animate-pulse')
-        expect(background.querySelector('svg.animate-spin-slow')).toBeNull()
+        expect(background.querySelector('[data-testid="session-row-running"]')).toBeInTheDocument()
         cleanup()
 
         const thinking = render(
@@ -63,6 +63,7 @@ describe('SessionRowSummary background status', () => {
         ).container
         expect(thinking.querySelector('[data-testid="session-presence"]'))
             .toHaveClass('bg-[var(--app-badge-success-text)]', 'animate-pulse')
+        expect(thinking.querySelector('[data-testid="session-row-running"]')).toBeInTheDocument()
         expect(screen.queryByText('Running', { exact: true })).not.toBeInTheDocument()
         cleanup()
 
@@ -72,6 +73,20 @@ describe('SessionRowSummary background status', () => {
             </I18nProvider>
         ).container
         expect(idle.querySelector('[data-testid="session-presence"]')).not.toHaveClass('animate-pulse')
+        expect(idle.querySelector('[data-testid="session-row-running"]')).toBeNull()
+    })
+
+    it('grays archived rows so they read as inactive at a glance', () => {
+        const { container } = render(
+            <I18nProvider>
+                <SessionRowSummary session={makeSummary({
+                    active: false,
+                    backgroundTaskCount: 0,
+                    metadata: { path: '/demo/old', name: 'Old work', flavor: 'claude', lifecycleState: 'archived' }
+                })} />
+            </I18nProvider>
+        )
+        expect(container.querySelector('.session-row-archived')).toBeInTheDocument()
     })
 
     it('does not dim disconnected rows or show them a presence badge', () => {
