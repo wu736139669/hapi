@@ -66,7 +66,9 @@ echo "installed: $stable"
 
 launchctl kickstart -k "gui/$(id -u)/com.hapi.hub"
 health_ok=0
-for _ in $(seq 1 20); do
+# Schema migrations can take longer than the old 20s window on large message
+# DBs (the v27→v31 search rebuild alone measured ~38s on a 1.3GB hub DB).
+for _ in $(seq 1 180); do
     if curl -fsS --max-time 3 http://127.0.0.1:3006/health >/dev/null 2>&1; then
         health_ok=1
         break
@@ -74,7 +76,7 @@ for _ in $(seq 1 20); do
     sleep 1
 done
 if [ "$health_ok" != 1 ]; then
-    echo "health check failed after 20s" >&2
+    echo "health check failed after 180s" >&2
     restore_backup || true
     launchctl kickstart -k "gui/$(id -u)/com.hapi.hub"
     exit 1
