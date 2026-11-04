@@ -766,8 +766,11 @@ describe('SessionList collapse behavior', () => {
         expect(screen.getByText(/Active \(1\)/)).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Running task/ })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Quiet task/ })).toBeInTheDocument()
+        // The collapsed project group must not leak its read inactive rows.
+        expect(screen.queryByRole('button', { name: /Inactive task/ })).toBeNull()
+        fireEvent.click(screen.getByTitle('/work/hapi'))
         expect(screen.getByRole('button', { name: /Inactive task/ })).toBeInTheDocument()
-        expect(getProjectPanel().getAttribute('data-open')).toBeNull()
+        expect(getProjectPanel().getAttribute('data-open')).toBe('true')
     })
 
     it('auto-expands the path again when the selected session changes', async () => {

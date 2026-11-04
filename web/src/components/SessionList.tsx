@@ -2370,11 +2370,11 @@ export function SessionList(props: {
     const renderDirectoryGroup = (group: SessionGroup) => {
         const isCollapsed = isGroupCollapsed(group)
         // A collapsed group still shows its unread rows, so new output in a
-        // quiet project is never folded out of sight. With pin-active on, any
-        // remaining project rows stay visible too: the group only collapsed
-        // because its active sessions floated to the pinned section.
+        // quiet project is never folded out of sight. Collapse wins even when
+        // pin-active is on: otherwise every remaining project row stayed
+        // visible under a collapsed header.
         const collapsedUnreadSessions = isCollapsed
-            ? (pinActiveSessions ? group.sessions : group.sessions.filter(isSessionUnread))
+            ? group.sessions.filter(isSessionUnread)
             : []
         const visibleGroupSessions = compact ? group.sessions : getVisibleGroupSessions(group)
         const hiddenSessionCount = group.sessions.length - visibleGroupSessions.length
