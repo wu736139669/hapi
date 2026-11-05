@@ -167,6 +167,47 @@ describe('reduceChatBlocks', () => {
         })
     })
 
+    it('ignores all-zero usage snapshots instead of resetting context to 100% left', () => {
+        const messages: NormalizedMessage[] = [
+            {
+                id: 'real-usage',
+                localId: null,
+                createdAt: 1_700_000_000_000,
+                role: 'agent',
+                content: [],
+                isSidechain: false,
+                usage: {
+                    input_tokens: 445,
+                    output_tokens: 0,
+                    cache_read_input_tokens: 580_000,
+                    context_window: 1_000_000
+                }
+            },
+            {
+                id: 'zero-usage',
+                localId: null,
+                createdAt: 1_700_000_001_000,
+                role: 'agent',
+                content: [],
+                isSidechain: false,
+                usage: {
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cache_read_input_tokens: 0,
+                    context_window: 1_000_000
+                }
+            }
+        ] as NormalizedMessage[]
+
+        const reduced = reduceChatBlocks(messages, null)
+
+        expect(reduced.latestUsage).toMatchObject({
+            inputTokens: 445,
+            contextSize: 580_445,
+            contextWindow: 1_000_000
+        })
+    })
+
     it('ignores Claude subagent usage when calculating parent latest usage', () => {
         // Claude never stamps scope_role, so a Task subagent's assistant
         // messages look like ordinary parent usage apart from isSidechain.

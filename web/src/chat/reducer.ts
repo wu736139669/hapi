@@ -16,6 +16,20 @@ function calculateContextSize(usage: UsageData): number {
 }
 
 /**
+ * Some Claude-compatible providers emit assistant snapshots with an
+ * all-zero usage object (notably after long tool runs). Picking one as the
+ * latest usage reset the status bar to "ctx 1.0M (100% left)" even though the
+ * last real turn reported a large context. Treat an all-zero sample as "no
+ * new context information" and keep scanning backwards.
+ */
+function hasContextUsageSignal(usage: UsageData): boolean {
+    return (usage.context_tokens ?? 0) > 0
+        || usage.input_tokens > 0
+        || (usage.cache_creation_input_tokens ?? 0) > 0
+        || (usage.cache_read_input_tokens ?? 0) > 0
+}
+
+/**
  * Whether a message's usage describes the *parent* thread's context.
  *
  * A Task subagent runs with its own, much smaller context, so letting its usage
@@ -194,7 +208,7 @@ export function reduceChatBlocks(
     let latestUsage: LatestUsage | null = null
     for (let i = normalized.length - 1; i >= 0; i--) {
         const msg = normalized[i]
-        if (msg.usage && isUsageVisibleInParentContext(msg)) {
+        if (msg.usage && isUsageVisibleInParentContext(msg) && hasContextUsageSignal(msg.usage)) {
             latestUsage = {
                 inputTokens: msg.usage.input_tokens,
                 outputTokens: msg.usage.output_tokens,
