@@ -74,20 +74,18 @@ describe('SessionList unread visibility', () => {
         localStorage.clear()
     })
 
-    it('keeps unread rows of a collapsed project visible and folds the read ones', () => {
+    it('hides every row of a collapsed project, including unread ones', () => {
         seedReads({ read: 1000, unread: 1000 })
         renderSessionList([
             makeSession({ id: 'read', updatedAt: 1000, metadata: { path: '/work/quiet', name: 'Read row' } }),
             makeSession({ id: 'unread', updatedAt: 2000, metadata: { path: '/work/quiet', name: 'Unread row' } })
         ])
 
-        // Inactive projects start collapsed; only the unread row peeks out.
-        expect(screen.getByTestId('session-group-unread-peek')).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: /Unread row/ })).toBeInTheDocument()
+        // Inactive projects start collapsed; collapse wins over unread.
+        expect(screen.queryByRole('button', { name: /Unread row/ })).toBeNull()
         expect(screen.queryByRole('button', { name: /Read row/ })).toBeNull()
 
         fireEvent.click(screen.getByTitle('/work/quiet'))
-        expect(screen.queryByTestId('session-group-unread-peek')).toBeNull()
         expect(screen.getByRole('button', { name: /Unread row/ })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /Read row/ })).toBeInTheDocument()
     })
@@ -98,7 +96,6 @@ describe('SessionList unread visibility', () => {
             makeSession({ id: 'read', updatedAt: 1000, metadata: { path: '/work/quiet', name: 'Read row' } })
         ])
 
-        expect(screen.queryByTestId('session-group-unread-peek')).toBeNull()
         expect(screen.queryByRole('button', { name: /Read row/ })).toBeNull()
     })
 })

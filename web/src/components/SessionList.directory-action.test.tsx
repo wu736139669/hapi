@@ -445,6 +445,44 @@ describe('SessionList selection', () => {
 })
 
 describe('SessionList collapse behavior', () => {
+    it('collapses an active-session group from its header', () => {
+        const session = makeSession({
+            id: 'session-active-collapse',
+            active: true,
+            updatedAt: 100,
+            metadata: { path: '/work/active-collapse', name: 'Active task', flavor: 'codex' },
+        })
+        render(renderSessionList([session], null))
+        const header = screen.getByTitle('/work/active-collapse')
+        expect(header.nextElementSibling?.getAttribute('data-open')).toBe('true')
+        fireEvent.click(header)
+        expect(header.nextElementSibling?.getAttribute('data-open')).toBeNull()
+    })
+
+    it('collapses a group even when it contains the selected session', () => {
+        const session = makeSession({
+            id: 'session-selected',
+            updatedAt: 100,
+            metadata: { path: '/work/selected', name: 'Selected task', flavor: 'codex' },
+        })
+        const other = makeSession({
+            id: 'session-other',
+            updatedAt: 90,
+            metadata: { path: '/work/selected', name: 'Other task', flavor: 'codex' },
+        })
+        const view = render(renderSessionList([session, other], session.id))
+
+        const header = screen.getByTitle('/work/selected')
+        expect(header.nextElementSibling?.getAttribute('data-open')).toBe('true')
+        fireEvent.click(header)
+        expect(header.nextElementSibling?.getAttribute('data-open')).toBeNull()
+
+        // Live session updates and selecting another row in the same group must
+        // not auto-expand the group the user just collapsed.
+        view.rerender(renderSessionList([{ ...session, updatedAt: 200 }, other], other.id))
+        expect(screen.getByTitle('/work/selected').nextElementSibling?.getAttribute('data-open')).toBeNull()
+    })
+
     function renderSessionList(sessions: SessionSummary[], selectedSessionId: string | null = 'session-running') {
         return (
             <QueryClientProvider client={new QueryClient({

@@ -1735,8 +1735,7 @@ export function SessionList(props: {
     const lastSeenVersion = useSessionLastSeenVersion()
     // Transient unread lens — not a Settings preference. Cleared on reload; rows drop as they're seen.
     const [showUnreadOnly, setShowUnreadOnly] = useState(false)
-    // Unread rows stay visible without a filter: collapsed project groups still
-    // show them, and the preview limit never hides them.
+    // Unread rows stay prioritized in the preview and in the unread lens.
     const isSessionUnread = useCallback(
         (session: SessionSummary) => sessionIsUnread(session, {
             lastSeenAt: getSessionLastSeenAt(session.id),
@@ -2369,13 +2368,6 @@ export function SessionList(props: {
 
     const renderDirectoryGroup = (group: SessionGroup) => {
         const isCollapsed = isGroupCollapsed(group)
-        // A collapsed group still shows its unread rows, so new output in a
-        // quiet project is never folded out of sight. Collapse wins even when
-        // pin-active is on: otherwise every remaining project row stayed
-        // visible under a collapsed header.
-        const collapsedUnreadSessions = isCollapsed
-            ? group.sessions.filter(isSessionUnread)
-            : []
         const visibleGroupSessions = compact ? group.sessions : getVisibleGroupSessions(group)
         const hiddenSessionCount = group.sessions.length - visibleGroupSessions.length
         const currentLimit = Math.min(
@@ -2435,16 +2427,6 @@ export function SessionList(props: {
                         ({group.sessions.length})
                     </span>
                 </div>
-
-                {collapsedUnreadSessions.length > 0 ? (
-                    <div data-testid="session-group-unread-peek" className="flex flex-col gap-0.5 ml-3 pl-1 py-1">
-                        {collapsedUnreadSessions.map((s) => (
-                            <div key={s.id} className="contents">
-                                {renderGroupSessionItem(s)}
-                            </div>
-                        ))}
-                    </div>
-                ) : null}
 
                 {/* Sessions */}
                 <CollapsiblePanel open={!isCollapsed}>
@@ -2524,7 +2506,9 @@ export function SessionList(props: {
         autoExpandedSelectedSessionKeyRef.current = autoExpandKey
 
         const setOverrides = isFiltering ? setFilterCollapseOverrides : setCollapseOverrides
-        setOverrides(prev => expandSelectedSessionCollapseOverrides(prev, group))
+        setOverrides(prev => prev.get(group.key) === true
+            ? prev
+            : expandSelectedSessionCollapseOverrides(prev, group))
     }, [selectedSessionId, groups, isFiltering])
 
     // Clean up stale collapse overrides
