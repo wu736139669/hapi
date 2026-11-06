@@ -52,9 +52,10 @@ describe('updateReleaseVersions', () => {
         expect(JSON.parse(read(paths.cli))).toEqual({ ...pkg, version: '1.2.3' });
         expect(read(paths.shared)).toBe(shared.replace(/APP_VERSION = ['"][^'"]+['"]/, "APP_VERSION = '1.2.3'"));
         expect(read(paths.ios)).toBe(ios.replace(/MARKETING_VERSION = [^;]+;/g, 'MARKETING_VERSION = 1.2.3;'));
-        // Both app and extension, Debug and Release, must stay in sync.
-        expect([...read(paths.ios).matchAll(/MARKETING_VERSION = ([^;]+);/g)].map(match => match[1]))
-            .toEqual(['1.2.3', '1.2.3', '1.2.3', '1.2.3']);
+        // Both app and extension (plus Mac Catalyst configs) must stay in sync.
+        const iosVersions = [...read(paths.ios).matchAll(/MARKETING_VERSION = ([^;]+);/g)].map(match => match[1]);
+        expect(iosVersions.length).toBeGreaterThanOrEqual(4);
+        expect(iosVersions.every(version => version === '1.2.3')).toBe(true);
         expect(read(paths.android)).toBe(android.replace(
             /versionName = .*/,
             'versionName = providers.gradleProperty("hapiVersionName").orElse("1.2.3").get()'
