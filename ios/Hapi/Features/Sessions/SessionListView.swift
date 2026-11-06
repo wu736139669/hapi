@@ -160,7 +160,8 @@ struct SessionListView: View {
             selectable: selection != nil,
             theme: theme,
             filters: model.filters,
-            metrics: metrics
+            metrics: metrics,
+            collapseOverrides: collapseOverrides
         )) {
             list(snapshot)
         }
@@ -204,12 +205,20 @@ struct SessionListView: View {
         Section {
             if !collapsed {
                 if section.kind == .inProgress || section.kind == .active {
-                    ForEach(section.buckets) { bucket in
-                        BucketHeader(
-                            bucket: bucket.bucket,
-                            count: bucket.rows.count,
-                            metrics: metrics
-                        )
+                    if section.buckets.count > 1 {
+                        ForEach(section.buckets) { bucket in
+                            BucketHeader(
+                                bucket: bucket.bucket,
+                                count: bucket.rows.count,
+                                metrics: metrics
+                            )
+                            ForEach(bucket.rows) { row in
+                                equatableRow(row, detail: .projectMachine)
+                            }
+                        }
+                    } else if let bucket = section.buckets.first {
+                        // One bucket only: the section header already names
+                        // the state, so the extra status dot/label is noise.
                         ForEach(bucket.rows) { row in
                             equatableRow(row, detail: .projectMachine)
                         }
@@ -281,12 +290,12 @@ struct SessionListView: View {
         }
     }
 
-    /// Filters force groups open, matching the web sidebar. Users can still
-    /// collapse them after the filter is cleared; while filtering, the
-    /// headers are disabled so a tap cannot appear to do nothing.
+    /// Filters open groups by default, but an explicit header tap still wins.
+    /// The previous "force open + disabled header" combination made taps look
+    /// broken whenever a machine/unread filter was active.
     private func isCollapsed(_ section: SessionListSectionUI) -> Bool {
-        if model.hasActiveFilters { return false }
-        return collapseOverrides[section.id] ?? section.defaultCollapsed
+        if let override = collapseOverrides[section.id] { return override }
+        return model.hasActiveFilters ? false : section.defaultCollapsed
     }
 
     private func toggle(_ section: SessionListSectionUI) {
@@ -322,10 +331,10 @@ struct SessionListView: View {
             }
             .foregroundStyle(theme.textSecondary)
             .textCase(nil)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(model.hasActiveFilters)
         .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         .accessibilityLabel(Text(sectionAccessibilityLabel(section)))
     }
@@ -601,6 +610,9 @@ private struct ListRenderKey: Equatable {
     let theme: HapiTheme
     let filters: SessionListFilters
     let metrics: SessionListMetrics
+    /// Without this, the equatable list wrapper reuses the old content and a
+    /// header tap appears to do nothing until the next data update.
+    let collapseOverrides: [String: Bool]
 }
 
 private struct BucketHeader: View {
