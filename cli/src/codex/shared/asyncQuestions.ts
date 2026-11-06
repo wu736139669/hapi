@@ -3,20 +3,34 @@ import { isIndeterminateError } from '../codexAppServerClient';
 import type { PermissionReply } from './permissions';
 import { record, string } from './gateway';
 
-type AsyncQuestion = {
-    id: string;
-    threadId: string;
+type AsyncSubQuestion = {
     questionItemId: string;
     title: string;
     options: string[];
+};
+
+type AsyncQuestion = {
+    id: string;
+    threadId: string;
+    itemId: string;
+    questions: AsyncSubQuestion[];
     input: {
         isBlocking: false;
         questions: Array<{ id: string; question: string; isOther: true; options: Array<{ label: string; description: string }> }>;
     };
 };
 
-function requestId(threadId: string, questionItemId: string): string {
-    return `codex-async-question:${JSON.stringify([threadId, questionItemId])}`;
+function requestId(threadId: string, itemId: string): string {
+    return `codex-async-question:${JSON.stringify([threadId, itemId])}`;
+}
+
+function itemIdFromQuestionItemId(questionItemId: string): string | undefined {
+    try {
+        const parsed: unknown = JSON.parse(questionItemId);
+        return Array.isArray(parsed) && typeof parsed[1] === 'string' ? parsed[1] : undefined;
+    } catch {
+        return undefined;
+    }
 }
 
 export function asyncQuestionReplies(text: string): Array<{ questionItemId: string; question?: string; answer: string }> {
@@ -39,23 +53,37 @@ export function asyncQuestionsForItem(threadId: string, value: unknown): AsyncQu
     const item = record(value);
     const itemId = string(item.id);
     if (item.type !== 'agentMessage' || item.delivery !== 'async' || !itemId || !Array.isArray(item.questions)) return [];
-    return item.questions.flatMap((value, index) => {
+    const questions = item.questions.flatMap((value, index) => {
         const question = record(value);
         const title = string(question.title);
         if (!title) return [];
         const options = Array.isArray(question.options) ? question.options.filter((option): option is string => typeof option === 'string') : [];
         // This is the native TUI's identity, including the index within a batch.
         const questionItemId = JSON.stringify(['request_user_input_async', itemId, index]);
-        return [{ id: requestId(threadId, questionItemId), threadId, questionItemId, title, options, input: {
-            isBlocking: false as const,
-            questions: [{ id: questionItemId, question: title, isOther: true as const,
-                options: options.map(label => ({ label, description: '' })) }]
-        } }];
+        return [{ questionItemId, title, options }];
     });
+    if (questions.length === 0) return [];
+    return [{
+        id: requestId(threadId, itemId),
+        threadId,
+        itemId,
+        questions,
+        input: {
+            isBlocking: false as const,
+            questions: questions.map(question => ({
+                id: question.questionItemId,
+                question: question.title,
+                isOther: true as const,
+                options: question.options.map(label => ({ label, description: '' }))
+            }))
+        }
+    }];
 }
 
 type Pending = { question: AsyncQuestion; submitted: boolean };
-type Resolution = { status: 'resolved'; answer: string } | { status: 'canceled' };
+type Resolution =
+    | { status: 'resolved'; answers: Map<string, string> }
+    | { status: 'canceled' };
 
 /** Reuses the existing question UI; replies are native user input, never RPC responses. */
 export class SharedCodexAsyncQuestions {
@@ -71,16 +99,26 @@ export class SharedCodexAsyncQuestions {
         if (this.closed) return;
         const item = record(value);
         if (item.type === 'userMessage' && Array.isArray(item.content)) {
+            const byGroup = new Map<string, Map<string, string>>();
             for (const part of item.content) {
                 if (record(part).type !== 'text') continue;
                 for (const reply of asyncQuestionReplies(string(record(part).text) ?? '')) {
-                    const id = requestId(threadId, reply.questionItemId);
-                    if (this.completed.get(id)?.status === 'resolved') continue;
-                    const resolution = { status: 'resolved' as const, answer: reply.answer };
-                    this.completed.set(id, resolution);
-                    const question = this.questions.get(id);
-                    if (question) this.resolve(question, resolution);
+                    const nativeItemId = itemIdFromQuestionItemId(reply.questionItemId);
+                    if (!nativeItemId) continue;
+                    const id = requestId(threadId, nativeItemId);
+                    const answers = byGroup.get(id) ?? new Map<string, string>();
+                    answers.set(reply.questionItemId, reply.answer);
+                    byGroup.set(id, answers);
                 }
+            }
+            for (const [id, answers] of byGroup) {
+                const previous = this.completed.get(id);
+                const merged = new Map(previous?.status === 'resolved' ? previous.answers : []);
+                for (const [questionItemId, answer] of answers) merged.set(questionItemId, answer);
+                const resolution: Resolution = { status: 'resolved', answers: merged };
+                this.completed.set(id, resolution);
+                const question = this.questions.get(id);
+                if (question) this.resolve(question, resolution);
             }
         }
         for (const question of asyncQuestionsForItem(threadId, item)) {
@@ -122,16 +160,17 @@ export class SharedCodexAsyncQuestions {
             this.resolve(question, { status: 'canceled' });
             return true;
         }
-        const raw = reply.answers?.[question.questionItemId];
-        const values = Array.isArray(raw) ? raw : raw?.answers;
-        if (!values?.length) throw new Error('An answer is required');
-        const answer = values.filter(value => value !== 'None of the above' || question.options.includes(value))
-            .map(value => !question.options.includes(value) && value.startsWith('user_note: ') ? value.slice('user_note: '.length) : value)
-            .join('\n');
-        if (!answer.trim()) throw new Error('An answer is required');
-        const text = `<send_user_message_question_reply>\n${JSON.stringify([{
-            answer, question: question.title, questionItemId: question.questionItemId
-        }])}\n</send_user_message_question_reply>`;
+        const answers = question.questions.map(sub => {
+            const raw = reply.answers?.[sub.questionItemId];
+            const values = Array.isArray(raw) ? raw : raw?.answers;
+            if (!values?.length) throw new Error('An answer is required');
+            const answer = values.filter(value => value !== 'None of the above' || sub.options.includes(value))
+                .map(value => !sub.options.includes(value) && value.startsWith('user_note: ') ? value.slice('user_note: '.length) : value)
+                .join('\n');
+            if (!answer.trim()) throw new Error('An answer is required');
+            return { answer, question: sub.title, questionItemId: sub.questionItemId };
+        });
+        const text = `<send_user_message_question_reply>\n${JSON.stringify(answers)}\n</send_user_message_question_reply>`;
         pending.submitted = true;
         try {
             await this.submit(question.threadId, text, `${question.id}:answer`);
@@ -147,9 +186,14 @@ export class SharedCodexAsyncQuestions {
 
     private resolve(question: AsyncQuestion, resolution: Resolution, emitResult = true): void {
         this.pending.delete(question.id);
-        const answers = resolution.status === 'resolved' ? {
-            [question.questionItemId]: { answers: [question.options.includes(resolution.answer) ? resolution.answer : `user_note: ${resolution.answer}`] }
-        } : undefined;
+        const answers = resolution.status === 'resolved' ? Object.fromEntries(
+            question.questions.flatMap(sub => {
+                const answer = resolution.answers.get(sub.questionItemId);
+                return answer === undefined ? [] : [[sub.questionItemId, {
+                    answers: [sub.options.includes(answer) ? answer : `user_note: ${answer}`]
+                }]];
+            })
+        ) : undefined;
         const id = `codex:${question.threadId}:${question.id}:${resolution.status}`;
         const message = { type: 'tool-call-result', callId: question.id, output: { status: resolution.status, ...(answers ? { answers } : {}) }, id };
         const rootThreadId = this.session.getMetadata()?.codexSessionId;

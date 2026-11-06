@@ -7,9 +7,17 @@ import { asyncQuestionsForItem, SharedCodexAsyncQuestions } from './asyncQuestio
 const item = { type: 'agentMessage', id: 'call_async', delivery: 'async', text: 'Which client?\n- Web\n- Terminal',
     questions: [{ title: 'Which client?', options: ['Web', 'Terminal'] }, { title: 'Any details?', options: null }] };
 const questions = asyncQuestionsForItem('thread', item);
-function nativeReply(questionItemId: string, answer: string) {
+const question = questions[0];
+const [clientQuestion, detailsQuestion] = question.questions;
+function replyTag(replies: Array<{ questionItemId: string; answer: string; question?: string }>) {
     return { type: 'userMessage', content: [{ type: 'text', text:
-        `<send_user_message_question_reply>\n${JSON.stringify([{ questionItemId, answer, question: 'Which client?' }])}\n</send_user_message_question_reply>` }] };
+        `<send_user_message_question_reply>\n${JSON.stringify(replies)}\n</send_user_message_question_reply>` }] };
+}
+function nativeReply(client: string, details = 'Details') {
+    return replyTag([
+        { questionItemId: clientQuestion.questionItemId, answer: client, question: clientQuestion.title },
+        { questionItemId: detailsQuestion.questionItemId, answer: details, question: detailsQuestion.title }
+    ]);
 }
 function fixture() {
     let state: AgentState = {};
@@ -23,106 +31,155 @@ function fixture() {
 }
 
 describe('Codex queued follow-up questions', () => {
-    it('preserves per-question native IDs and options in the existing question contract', () => {
+    it('groups one async item into one multi-question card with native IDs', () => {
         const f = fixture(); f.manager.observeItem('thread', item); f.manager.observeItem('thread', item);
-        expect(Object.values(f.state().requests!)).toHaveLength(2);
-        expect(questions[0].questionItemId).toBe('["request_user_input_async","call_async",0]');
-        expect(f.state().requests![questions[0].id]).toMatchObject({ tool: 'request_user_input', arguments: {
-            isBlocking: false, questions: [{ id: questions[0].questionItemId, question: 'Which client?', isOther: true,
-                options: [{ label: 'Web', description: '' }, { label: 'Terminal', description: '' }] }]
+        expect(questions).toHaveLength(1);
+        expect(Object.values(f.state().requests!)).toHaveLength(1);
+        expect(question.questions.map(q => q.questionItemId)).toEqual([
+            '["request_user_input_async","call_async",0]',
+            '["request_user_input_async","call_async",1]'
+        ]);
+        expect(f.state().requests![question.id]).toMatchObject({ tool: 'request_user_input', arguments: {
+            isBlocking: false,
+            questions: [
+                { id: clientQuestion.questionItemId, question: 'Which client?', isOther: true,
+                    options: [{ label: 'Web', description: '' }, { label: 'Terminal', description: '' }] },
+                { id: detailsQuestion.questionItemId, question: 'Any details?', isOther: true, options: [] }
+            ]
         } });
-        expect(f.state().requests![questions[1].id].arguments).toMatchObject({ questions: [{ options: [] }] });
     });
 
-    it.each([['Web'], ['None of the above', 'user_note: Mobile']])('submits %j as native user input and waits for consumption', async (...values) => {
+    it.each([['Web'], ['None of the above', 'user_note: Mobile']])('submits all answers in one native user message (%j)', async (...values) => {
         const f = fixture(); f.manager.observeItem('thread', item);
-        const q = questions[0];
-        const reply = { id: q.id, approved: true, answers: { [q.questionItemId]: { answers: values } } };
-        await f.manager.answer(reply);
         const answer = values.at(-1)!.replace(/^user_note: /, '');
+        await f.manager.answer({
+            id: question.id,
+            approved: true,
+            answers: {
+                [clientQuestion.questionItemId]: { answers: values },
+                [detailsQuestion.questionItemId]: { answers: ['Details'] }
+            }
+        });
         expect(f.submit).toHaveBeenCalledWith('thread',
-            `<send_user_message_question_reply>\n${JSON.stringify([{ answer, question: q.title, questionItemId: q.questionItemId }])}\n</send_user_message_question_reply>`, `${q.id}:answer`);
-        expect(f.state().requests![q.id]).toBeDefined();
-        expect(f.state().completedRequests?.[q.id]).toBeUndefined();
-        await expect(f.manager.answer(reply)).rejects.toThrow('already submitted');
-        f.manager.observeItem('thread', nativeReply(q.questionItemId, answer));
-        expect(f.state().requests![q.id]).toBeUndefined();
-        expect(f.state().completedRequests![q.id]).toMatchObject({ status: 'resolved', answers: {
-            [q.questionItemId]: { answers: [values.at(-1)] }
+            `<send_user_message_question_reply>\n${JSON.stringify([
+                { answer, question: clientQuestion.title, questionItemId: clientQuestion.questionItemId },
+                { answer: 'Details', question: detailsQuestion.title, questionItemId: detailsQuestion.questionItemId }
+            ])}\n</send_user_message_question_reply>`, `${question.id}:answer`);
+        expect(f.state().requests![question.id]).toBeDefined();
+        expect(f.state().completedRequests?.[question.id]).toBeUndefined();
+        await expect(f.manager.answer({
+            id: question.id,
+            approved: true,
+            answers: {
+                [clientQuestion.questionItemId]: ['Web'],
+                [detailsQuestion.questionItemId]: ['Details']
+            }
+        })).rejects.toThrow('already submitted');
+
+        f.manager.observeItem('thread', nativeReply(answer));
+        expect(f.state().requests![question.id]).toBeUndefined();
+        expect(f.state().completedRequests![question.id]).toMatchObject({ status: 'resolved', answers: {
+            [clientQuestion.questionItemId]: { answers: [values.at(-1)] },
+            [detailsQuestion.questionItemId]: { answers: ['user_note: Details'] }
         } });
-        expect(f.state().requests![questions[1].id]).toBeDefined();
     });
 
     it('rejects missing/empty answers without submitting and allows a corrected answer', async () => {
-        const f = fixture(); f.manager.observeItem('thread', item); const q = questions[1];
-        for (const answers of [undefined, {}, { [q.questionItemId]: ['user_note:  '] }]) {
-            await expect(f.manager.answer({ id: q.id, approved: true, answers })).rejects.toThrow('answer is required');
+        const f = fixture(); f.manager.observeItem('thread', item);
+        for (const answers of [
+            undefined,
+            {},
+            { [clientQuestion.questionItemId]: ['Web'] },
+            { [clientQuestion.questionItemId]: ['Web'], [detailsQuestion.questionItemId]: ['user_note:  '] }
+        ]) {
+            await expect(f.manager.answer({ id: question.id, approved: true, answers })).rejects.toThrow('answer is required');
         }
         expect(f.submit).not.toHaveBeenCalled();
-        await f.manager.answer({ id: q.id, approved: true, answers: { [q.questionItemId]: ['user_note: Details'] } });
+        await f.manager.answer({ id: question.id, approved: true, answers: {
+            [clientQuestion.questionItemId]: ['Web'],
+            [detailsQuestion.questionItemId]: ['Details']
+        } });
         expect(f.submit).toHaveBeenCalledOnce();
     });
 
     it('consumes terminal replies before replay and does not reopen answered questions', async () => {
-        const f = fixture(); const q = questions[0];
-        const reply = nativeReply(q.questionItemId, 'Terminal');
+        const f = fixture();
+        const reply = nativeReply('Terminal');
         f.manager.history('thread', { turns: [{ items: [item, reply] }] });
         f.manager.observeItem('thread', item);
-        expect(f.state().requests![q.id]).toBeUndefined();
-        expect(f.state().completedRequests![q.id].status).toBe('resolved');
-        expect(await f.manager.answer({ id: q.id, approved: true, answers: { [q.questionItemId]: ['Web'] } })).toBe(false);
+        expect(f.state().requests![question.id]).toBeUndefined();
+        expect(f.state().completedRequests![question.id].status).toBe('resolved');
+        expect(await f.manager.answer({ id: question.id, approved: true, answers: {
+            [clientQuestion.questionItemId]: ['Web'],
+            [detailsQuestion.questionItemId]: ['Details']
+        } })).toBe(false);
         expect(f.submit).not.toHaveBeenCalled();
         f.manager.observeItem('thread', item);
-        expect(Object.keys(f.state().requests!)).toEqual([questions[1].id]);
-        expect(f.send.mock.lastCall![0]).toMatchObject({ type: 'tool-call-result', callId: q.id, output: {
-            answers: { [q.questionItemId]: { answers: ['Terminal'] } }
+        expect(f.state().requests![question.id]).toBeUndefined();
+        expect(f.send.mock.lastCall![0]).toMatchObject({ type: 'tool-call-result', callId: question.id, output: {
+            answers: {
+                [clientQuestion.questionItemId]: { answers: ['Terminal'] },
+                [detailsQuestion.questionItemId]: { answers: ['user_note: Details'] }
+            }
         } });
     });
 
     it('scopes child replies and cards to their own thread', async () => {
         const f = fixture(); f.manager.observeItem('child', item);
-        const q = asyncQuestionsForItem('child', item)[0];
-        f.manager.observeItem('thread', nativeReply(q.questionItemId, 'Web'));
-        expect(f.state().requests![q.id]).toBeDefined();
-        await f.manager.answer({ id: q.id, approved: true, answers: { [q.questionItemId]: ['Terminal'] } });
+        const childQuestion = asyncQuestionsForItem('child', item)[0];
+        f.manager.observeItem('thread', nativeReply('Web'));
+        expect(f.state().requests![childQuestion.id]).toBeDefined();
+        await f.manager.answer({ id: childQuestion.id, approved: true, answers: {
+            [clientQuestion.questionItemId]: ['Terminal'],
+            [detailsQuestion.questionItemId]: ['Details']
+        } });
         expect(f.submit.mock.lastCall![0]).toBe('child');
-        f.manager.observeItem('child', nativeReply(q.questionItemId, 'Terminal'));
+        f.manager.observeItem('child', nativeReply('Terminal'));
         expect(f.send.mock.lastCall![0]).toMatchObject({ type: 'agent-run-trace', agentId: 'child',
-            message: { type: 'tool-call-result', callId: q.id }, scope: { parentThreadId: 'thread' } });
+            message: { type: 'tool-call-result', callId: childQuestion.id }, scope: { parentThreadId: 'thread' } });
     });
 
     it.each([false, true])('retries only definitively rejected submissions (indeterminate: %s)', async indeterminate => {
-        const f = fixture(); f.manager.observeItem('thread', item); const q = questions[0];
+        const f = fixture(); f.manager.observeItem('thread', item);
         f.submit.mockRejectedValueOnce(Object.assign(new Error('Disconnected'), { [INDETERMINATE_SYMBOL]: indeterminate }));
-        const reply = { id: q.id, approved: true, answers: { [q.questionItemId]: ['Web'] } };
+        const reply = { id: question.id, approved: true, answers: {
+            [clientQuestion.questionItemId]: ['Web'],
+            [detailsQuestion.questionItemId]: ['Details']
+        } };
         await expect(f.manager.answer(reply)).rejects.toThrow('Disconnected');
         if (indeterminate) await expect(f.manager.answer(reply)).rejects.toThrow('already submitted');
         else await f.manager.answer(reply);
         expect(f.submit).toHaveBeenCalledTimes(indeterminate ? 1 : 2);
-        expect(f.state().completedRequests?.[q.id]).toBeUndefined();
+        expect(f.state().completedRequests?.[question.id]).toBeUndefined();
     });
 
     it('dismisses an optional question without sending input or interrupting the turn', async () => {
-        const f = fixture(); f.manager.observeItem('thread', item); const q = questions[0];
-        await f.manager.answer({ id: q.id, approved: false });
+        const f = fixture(); f.manager.observeItem('thread', item);
+        await f.manager.answer({ id: question.id, approved: false });
         expect(f.submit).not.toHaveBeenCalled();
-        expect(f.state().completedRequests![q.id].status).toBe('canceled');
+        expect(f.state().completedRequests![question.id].status).toBe('canceled');
         f.manager.observeItem('thread', item);
-        expect(f.state().requests![q.id]).toBeUndefined();
-        f.manager.observeItem('thread', nativeReply(q.questionItemId, 'Terminal'));
-        expect(f.state().completedRequests![q.id].status).toBe('resolved');
+        expect(f.state().requests![question.id]).toBeUndefined();
+        f.manager.observeItem('thread', nativeReply('Terminal'));
+        expect(f.state().completedRequests![question.id].status).toBe('resolved');
     });
 
     it('parses literal reply tags inside an answer and ignores quoted or malformed replies', () => {
-        const f = fixture(); f.manager.observeItem('thread', item); const q = questions[1];
+        const f = fixture(); f.manager.observeItem('thread', item);
         for (const text of ['<send_user_message_question_reply>bad json</send_user_message_question_reply>',
-            `Example: ${nativeReply(q.questionItemId, 'example').content[0].text}`]) {
+            `Example: ${nativeReply('Web').content[0].text}`]) {
             f.manager.observeItem('thread', { type: 'userMessage', content: [{ type: 'text', text }] });
         }
-        expect(f.state().requests![q.id]).toBeDefined();
+        expect(f.state().requests![question.id]).toBeDefined();
         const answer = 'Check </send_user_message_question_reply> escaping';
-        f.manager.observeItem('thread', nativeReply(q.questionItemId, answer));
-        expect(f.state().completedRequests![q.id].answers).toEqual({ [q.questionItemId]: { answers: [`user_note: ${answer}`] } });
+        f.manager.observeItem('thread', replyTag([
+            { questionItemId: clientQuestion.questionItemId, answer, question: clientQuestion.title },
+            { questionItemId: detailsQuestion.questionItemId, answer: 'Details', question: detailsQuestion.title }
+        ]));
+        expect(f.state().completedRequests![question.id].answers).toEqual({
+            [clientQuestion.questionItemId]: { answers: [`user_note: ${answer}`] },
+            [detailsQuestion.questionItemId]: { answers: ['user_note: Details'] }
+        });
     });
 
     it('withdraws controls on exit without persisting a false native result', () => {

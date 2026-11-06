@@ -189,10 +189,10 @@ describe('async question delivery', () => {
             return {};
         });
         try {
-            await f.rpc.get(RPC_METHODS.Permission)!({ id: q.id, approved: true, answers: { [q.questionItemId]: ['Web'] } });
+            await f.rpc.get(RPC_METHODS.Permission)!({ id: q.id, approved: true, answers: { [q.questions[0].questionItemId]: ['Web'] } });
             await f.drain();
             expect(request).toHaveBeenCalledWith(method, expect.objectContaining({ threadId: 'thread',
-                ...(active ? { expectedTurnId: 'turn' } : {}), input: [expect.objectContaining({ text: expect.stringContaining(q.questionItemId.replaceAll('"', '\\"')) })] }));
+                ...(active ? { expectedTurnId: 'turn' } : {}), input: [expect.objectContaining({ text: expect.stringContaining(q.questions[0].questionItemId.replaceAll('"', '\\"')) })] }));
             expect(f.native.responses).toEqual([]);
             expect(f.state().requests![q.id]).toBeUndefined();
             expect(f.state().completedRequests![q.id]).toMatchObject({ status: 'resolved' });
