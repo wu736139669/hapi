@@ -85,7 +85,7 @@ final class NotificationService: UNNotificationServiceExtension {
         let contractVersion = fields["contractVersion"]
         let knownVersion = contractVersion == nil || isBlank(contractVersion!) || contractVersion == "1"
 
-        content.title = firstNonBlank(fields["title"], fields["sessionName"]) ?? "HAPI"
+        content.title = firstNonBlank(fields["title"], fields["sessionName"]) ?? "HappyCoding"
         content.body = displayBody(fields, type: type)
         content.sound = .default
 
