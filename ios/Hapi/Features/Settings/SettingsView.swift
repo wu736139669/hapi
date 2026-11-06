@@ -249,13 +249,23 @@ struct SettingsView: View {
                     PushCoordinator.shared.reregisterAll()
                 }
             }
+            Toggle(
+                "Live Activities",
+                isOn: Binding(
+                    get: { appModel.liveActivityPrefs.enabled },
+                    set: { appModel.setLiveActivitiesEnabled($0) }
+                )
+            )
         } header: {
             Text("Notifications")
         } footer: {
-            if let problem = push.lastRegistrationProblem {
-                Text(problem)
-            } else {
-                Text("Pushes are end-to-end encrypted; only this device can read them.")
+            VStack(alignment: .leading, spacing: 4) {
+                if let problem = push.lastRegistrationProblem {
+                    Text(problem)
+                } else {
+                    Text("Pushes are end-to-end encrypted; only this device can read them.")
+                }
+                Text("Live Activities show running sessions on the Lock Screen; their content is end-to-end encrypted too.")
             }
         }
     }

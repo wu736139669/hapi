@@ -224,6 +224,63 @@ describe('ApnsClient against a local node:http2 server', () => {
         const [first, second] = seen.slice(-2)
         expect(first.headers['authorization']).toBe(second.headers['authorization'])
     })
+
+    it('sends a Live Activity update with the liveactivity topic/type and raw aps body', async () => {
+        const client = makeClient()
+        const payload = {
+            aps: {
+                timestamp: 1_700_000_000,
+                event: 'update',
+                'content-state': { v: 1, e: 'ZW52' },
+                'stale-date': 1_700_000_120
+            }
+        }
+        const outcome = await client.sendLiveActivity({
+            token: 'la-update-1',
+            payload,
+            priority: 5,
+            expiration: 1_700_000_300
+        })
+        expect(outcome).toBe('sent')
+
+        const request = seen[seen.length - 1]
+        expect(request.headers[':path']).toBe('/3/device/la-update-1')
+        expect(request.headers['apns-topic']).toBe('run.hapi.ios.push-type.liveactivity')
+        expect(request.headers['apns-push-type']).toBe('liveactivity')
+        expect(request.headers['apns-priority']).toBe('5')
+        expect(request.headers['apns-expiration']).toBe('1700000300')
+        expect(request.headers['apns-collapse-id']).toBeUndefined()
+        expect(JSON.parse(request.body)).toEqual(payload)
+    })
+
+    it('classifies Live Activity 410 and BadDeviceToken as invalid', async () => {
+        responses.set('la-gone', { status: 410, body: '{"reason":"Unregistered"}' })
+        responses.set('la-bad-token', { status: 400, body: '{"reason":"BadDeviceToken"}' })
+        const client = makeClient()
+        expect(await client.sendLiveActivity({
+            token: 'la-gone',
+            payload: { aps: { event: 'end' } },
+            priority: 10,
+            expiration: 1_700_000_300
+        })).toBe('invalid')
+        expect(await client.sendLiveActivity({
+            token: 'la-bad-token',
+            payload: { aps: { event: 'end' } },
+            priority: 10,
+            expiration: 1_700_000_300
+        })).toBe('invalid')
+    })
+
+    it('logs Live Activity topic errors as failed without pruning the token', async () => {
+        responses.set('la-bad-topic', { status: 400, body: '{"reason":"TopicDisallowed"}' })
+        const outcome = await makeClient().sendLiveActivity({
+            token: 'la-bad-topic',
+            payload: { aps: { event: 'update' } },
+            priority: 5,
+            expiration: 1_700_000_300
+        })
+        expect(outcome).toBe('failed')
+    })
 })
 
 describe('ApnsClient connection failure', () => {

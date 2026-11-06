@@ -37,6 +37,21 @@ struct SessionListStoreTests {
         #expect(store.sessions.map(\.id) == ["pinned", "active", "old-inactive"])
     }
 
+    @Test func onSessionsChangedFiresForRealChangesOnly() async throws {
+        let (performer, store) = try makeStore()
+        var changes: [[String]] = []
+        store.onSessionsChanged = { sessions in changes.append(sessions.map(\.id)) }
+
+        await performer.enqueue(json: try sessionsResponseJSON(storeSummary("s1")))
+        try await store.refresh()
+        #expect(changes == [["s1"]])
+
+        // Keep-alive `activeAt` churn is filtered before `setSessions`, so
+        // the Live Activity seam must not see it.
+        store.applySessionEvent(try sessionUpdatedEvent("s1", dataJSON: "{\"activeAt\":123}"))
+        #expect(changes.count == 1)
+    }
+
     @Test func staleRefreshCannotUndoNewerUserInput() async throws {
         let (performer, store) = try makeStore()
         let snapshot = try sessionsResponseJSON(

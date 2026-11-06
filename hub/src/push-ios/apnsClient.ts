@@ -2,6 +2,11 @@ import http2 from 'node:http2'
 import * as jose from 'jose'
 
 import type { EncryptedPushRequest, NativePushSendOutcome, EncryptedPushTransport } from '../push-native/transport'
+import type {
+    LiveActivityPushOutcome,
+    LiveActivityPushRequest,
+    LiveActivityPushTransport
+} from '../live-activity/liveActivityPushTransport'
 
 export const APNS_PRODUCTION_HOST = 'https://api.push.apple.com'
 export const APNS_SANDBOX_HOST = 'https://api.sandbox.push.apple.com'
@@ -97,7 +102,7 @@ export type ApnsClientOptions = {
  * per minute at most, so connection reuse buys nothing and a persistent
  * APNs session would need ping/goaway lifecycle management.
  */
-export class ApnsClient implements EncryptedPushTransport {
+export class ApnsClient implements EncryptedPushTransport, LiveActivityPushTransport {
     private readonly jwtProvider: ApnsJwtProvider
     private readonly bundleId: string
     private readonly host: string
@@ -111,35 +116,87 @@ export class ApnsClient implements EncryptedPushTransport {
     }
 
     async send(request: EncryptedPushRequest): Promise<NativePushSendOutcome> {
+        const result = await this.perform(
+            (jwt) => {
+                const headers: Record<string, string> = {
+                    ':method': 'POST',
+                    ':path': `/3/device/${request.token}`,
+                    authorization: `bearer ${jwt}`,
+                    'apns-topic': this.bundleId,
+                    'apns-push-type': 'alert',
+                    'apns-priority': String(request.priority ?? 10),
+                    'apns-expiration': '0',
+                    'content-type': 'application/json'
+                }
+                if (request.collapseId) {
+                    headers['apns-collapse-id'] = request.collapseId
+                }
+                return headers
+            },
+            JSON.stringify(buildApnsRequestBody(request.envelope))
+        )
+        return result ? this.classifyResponse(result.status, result.body) : 'failed'
+    }
+
+    /**
+     * Direct-APNs Live Activity push. Uses the app's liveactivity topic
+     * (`<bundle>.push-type.liveactivity`) and sends the raw `aps` body built
+     * by the notifier (already encrypted in `content-state`).
+     */
+    async sendLiveActivity(request: LiveActivityPushRequest): Promise<LiveActivityPushOutcome> {
+        const result = await this.perform(
+            (jwt) => ({
+                ':method': 'POST',
+                ':path': `/3/device/${request.token}`,
+                authorization: `bearer ${jwt}`,
+                'apns-topic': `${this.bundleId}.push-type.liveactivity`,
+                'apns-push-type': 'liveactivity',
+                'apns-priority': String(request.priority),
+                'apns-expiration': String(request.expiration),
+                'content-type': 'application/json'
+            }),
+            JSON.stringify(request.payload)
+        )
+        return result ? this.classifyLiveActivityResponse(result.status, result.body) : 'failed'
+    }
+
+    /**
+     * One HTTP/2 POST. Returns null on JWT/connection/timeout/stream failure
+     * (always transient); callers classify the HTTP status themselves.
+     */
+    private async perform(
+        buildHeaders: (jwt: string) => Record<string, string>,
+        body: string
+    ): Promise<{ status: number; body: string } | null> {
         let jwt: string
         try {
             jwt = await this.jwtProvider.getToken()
         } catch (e) {
             // Broken .p8 key material is our problem, never the device's.
             console.error('[ApnsClient] JWT generation failed:', e instanceof Error ? e.message : e)
-            return 'failed'
+            return null
         }
 
-        return await new Promise<NativePushSendOutcome>((resolve) => {
+        return await new Promise<{ status: number; body: string } | null>((resolve) => {
             let settled = false
-            let client: http2.ClientHttp2Session
-            const finish = (outcome: NativePushSendOutcome) => {
+            let client: http2.ClientHttp2Session | null = null
+            const finish = (result: { status: number; body: string } | null) => {
                 if (settled) return
                 settled = true
                 clearTimeout(timer)
                 try {
-                    client.close()
+                    client?.close()
                 } catch {
                 }
-                resolve(outcome)
+                resolve(result)
             }
             const timer = setTimeout(() => {
                 console.error('[ApnsClient] Request timed out after', this.requestTimeoutMs, 'ms')
                 try {
-                    client.destroy()
+                    client?.destroy()
                 } catch {
                 }
-                finish('failed')
+                finish(null)
             }, this.requestTimeoutMs)
 
             try {
@@ -147,40 +204,26 @@ export class ApnsClient implements EncryptedPushTransport {
             } catch (e) {
                 console.error('[ApnsClient] Connect threw:', e instanceof Error ? e.message : e)
                 clearTimeout(timer)
-                resolve('failed')
+                resolve(null)
                 return
             }
             client.on('error', (e) => {
                 // Network error (DNS, TCP, TLS) - transient, never token death.
                 console.error('[ApnsClient] Connection error:', e instanceof Error ? e.message : e)
-                finish('failed')
+                finish(null)
             })
-
-            const headers: Record<string, string> = {
-                ':method': 'POST',
-                ':path': `/3/device/${request.token}`,
-                authorization: `bearer ${jwt}`,
-                'apns-topic': this.bundleId,
-                'apns-push-type': 'alert',
-                'apns-priority': String(request.priority ?? 10),
-                'apns-expiration': '0',
-                'content-type': 'application/json'
-            }
-            if (request.collapseId) {
-                headers['apns-collapse-id'] = request.collapseId
-            }
 
             let req: http2.ClientHttp2Stream
             try {
-                req = client.request(headers)
+                req = client.request(buildHeaders(jwt))
             } catch (e) {
                 console.error('[ApnsClient] Request threw:', e instanceof Error ? e.message : e)
-                finish('failed')
+                finish(null)
                 return
             }
             req.on('error', (e) => {
                 console.error('[ApnsClient] Stream error:', e instanceof Error ? e.message : e)
-                finish('failed')
+                finish(null)
             })
 
             let status = 0
@@ -192,9 +235,9 @@ export class ApnsClient implements EncryptedPushTransport {
                 chunks.push(chunk)
             })
             req.on('end', () => {
-                finish(this.classifyResponse(status, Buffer.concat(chunks).toString('utf8')))
+                finish({ status, body: Buffer.concat(chunks).toString('utf8') })
             })
-            req.end(JSON.stringify(buildApnsRequestBody(request.envelope)))
+            req.end(body)
         })
     }
 
@@ -209,13 +252,7 @@ export class ApnsClient implements EncryptedPushTransport {
         if (status >= 200 && status < 300) {
             return 'sent'
         }
-        const reason = ((): string => {
-            try {
-                return (JSON.parse(body) as { reason?: string }).reason ?? ''
-            } catch {
-                return ''
-            }
-        })()
+        const reason = this.reason(body)
         if (status === 410) {
             return 'invalid'
         }
@@ -224,5 +261,39 @@ export class ApnsClient implements EncryptedPushTransport {
         }
         console.error('[ApnsClient] Send failed (transient):', status, reason || body.slice(0, 200))
         return 'failed'
+    }
+
+    /**
+     * Live Activity topic/entitlement failures (BadTopic, TopicDisallowed,
+     * DeviceTokenNotForTopic) are configuration errors, not token death.
+     * They must not prune the row, and retrying every event is pointless;
+     * log them distinctly so the operator sees the mismatch.
+     */
+    private classifyLiveActivityResponse(status: number, body: string): LiveActivityPushOutcome {
+        if (status >= 200 && status < 300) {
+            return 'sent'
+        }
+        const reason = this.reason(body)
+        if (status === 410 || (status === 400 && reason === 'BadDeviceToken')) {
+            return 'invalid'
+        }
+        if (status === 400 && (
+            reason === 'BadTopic'
+            || reason === 'TopicDisallowed'
+            || reason === 'DeviceTokenNotForTopic'
+        )) {
+            console.error('[ApnsClient] Live Activity configuration error:', status, reason)
+            return 'failed'
+        }
+        console.error('[ApnsClient] Live Activity send failed (transient):', status, reason || body.slice(0, 200))
+        return 'failed'
+    }
+
+    private reason(body: string): string {
+        try {
+            return (JSON.parse(body) as { reason?: string }).reason ?? ''
+        } catch {
+            return ''
+        }
     }
 }

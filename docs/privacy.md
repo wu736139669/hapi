@@ -44,6 +44,8 @@ Your hub, coding agents, plugins, and command-line tools may send prompts, sourc
 
 **iOS:** notifications are end-to-end encrypted. Your hub encrypts the content with a key that exists only on your device and your hub; Apple's push service and the HAPI push relay carry ciphertext and routing metadata only, and cannot read the notification content. Self-hosters using a separately signed app build with matching APNs credentials can bypass the relay; a different developer account's credentials alone cannot send notifications to an app signed by the official publisher.
 
+iOS Live Activities use the same per-install key and an independently domain-separated AES-256-GCM envelope (`hapi-live-activity-v1`). Apple and any relay receive ciphertext plus routing metadata only; the widget extension decrypts on device with the shared Keychain key. Live Activity remote updates currently require a hub in direct-APNs mode; relay-mode hubs report `remote:false` and the app ends the activity on background rather than showing a frozen card.
+
 ### HAPI native push relay
 
 The default hub configuration uses the official relay at `https://push.hapi.run` for iOS push and for Android push when no private Firebase credentials are configured. This service is separate from the optional network tunnel enabled by `hapi hub --relay`. Encryption protects notification content, **not all metadata**:

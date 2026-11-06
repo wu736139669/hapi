@@ -10,6 +10,7 @@ import { backfillLastUserMessageAt } from './sessionUserActivity'
 import type { StoredMessage } from './types'
 import { PushStore } from './pushStore'
 import { FcmStore } from './fcmStore'
+import { LiveActivityStore } from './liveActivityStore'
 import { ScratchlistStore } from './scratchlistStore'
 import { ChatAttachmentsStore } from './chatAttachments'
 import { SessionStore } from './sessionStore'
@@ -34,6 +35,7 @@ export type {
     MessageDeliveryState,
     StoredPushSubscription,
     StoredFcmDevice,
+    StoredLiveActivityToken,
     StoredScratchlistEntry,
     StoredSession,
     StoredUser,
@@ -49,6 +51,7 @@ export { MachineStore } from './machineStore'
 export { MessageStore } from './messageStore'
 export { PushStore } from './pushStore'
 export { FcmStore } from './fcmStore'
+export { LiveActivityStore } from './liveActivityStore'
 export { ScratchlistStore } from './scratchlistStore'
 export { ChatAttachmentsStore } from './chatAttachments'
 export { SessionStore } from './sessionStore'
@@ -102,6 +105,7 @@ export class Store {
     readonly users: UserStore
     readonly push: PushStore
     readonly fcm: FcmStore
+    readonly liveActivities: LiveActivityStore
     readonly scratchlist: ScratchlistStore
     readonly chatAttachments: ChatAttachmentsStore
     readonly usage: UsageStore
@@ -147,6 +151,7 @@ export class Store {
         this.initSchema()
         this.ensureSessionShareSchema()
         this.ensureUsageReconciliationSchema()
+        this.ensureLiveActivitySchema()
 
         if (dbPath !== ':memory:' && !dbPath.startsWith('file::memory:')) {
             for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
@@ -164,6 +169,7 @@ export class Store {
         this.users = new UserStore(this.db)
         this.push = new PushStore(this.db)
         this.fcm = new FcmStore(this.db)
+        this.liveActivities = new LiveActivityStore(this.db)
         this.scratchlist = new ScratchlistStore(this.db)
         this.chatAttachments = new ChatAttachmentsStore(this.db)
         this.usage = new UsageStore(this.db)
@@ -1368,6 +1374,31 @@ export class Store {
                 ON session_shares(session_id, namespace, updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_session_shares_namespace
                 ON session_shares(namespace, updated_at DESC);
+        `)
+    }
+
+    /**
+     * Additive table for iOS Live Activity push tokens. Created outside the
+     * migration ladder on purpose: older hub builds must keep opening this
+     * database untouched, so `SCHEMA_VERSION` is not bumped. The table is
+     * not in `REQUIRED_TABLES`; a missing table simply means the feature was
+     * never used (and is recreated here on the next start).
+     */
+    private ensureLiveActivitySchema(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS live_activity_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                namespace TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                token TEXT NOT NULL,
+                push_key TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(namespace, device_id, session_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_live_activity_session
+                ON live_activity_tokens(namespace, session_id);
         `)
     }
 

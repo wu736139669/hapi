@@ -307,6 +307,110 @@ Like the FCM channel, iOS push fires unconditionally for registered devices
 and suppresses the Web Push fallback for the namespace when a send succeeds
 (one OS notification, not two).
 
+### Live Activities (iOS)
+
+The iOS app can surface each running session as a Live Activity on the Lock
+Screen / Dynamic Island. Live Activities are **app-started**: the app creates
+the activity (while it runs), registers the activity's APNs push token, and
+the hub sends update/end pushes after the app is suspended or killed. The hub
+does not start activities in contract version 1; a remotely-started activity
+cannot be updated until the app runs and exposes its per-activity token.
+
+`POST /api/live-activities/register`
+
+```json
+{
+  "token": "<hex per-activity APNs push token>",
+  "deviceId": "<stable install id>",
+  "sessionId": "<session id>",
+  "pushKey": "<base64 of 32 device-generated random bytes>"
+}
+```
+
+- `pushKey` is the same per-install E2E key used by alert pushes. The hub
+  stores it with the token and uses it to encrypt `content-state`.
+- Upsert on `(namespace, deviceId, sessionId)`. One activity per session per
+  device; the app re-registers whenever `Activity.pushTokenUpdates` yields a
+  rotated token.
+- Response: `{ "ok": true, "remote": true|false }`. `remote` is true only
+  when the hub is in direct-APNs mode (`HAPI_IOS_PUSH=apns`). Relay-mode hubs
+  return false and send no Live Activity pushes; the app ends activities on
+  background so a frozen Lock Screen card is not left behind.
+- `DELETE /api/live-activities/register` accepts `{ "token": "..." }` or
+  `{ "deviceId": "...", "sessionId": "..." }`.
+
+The app deletes its rows when an activity ends, the user disables Live
+Activities, or the hub changes. The hub prunes dead activity tokens on APNs
+`410 Unregistered` / `400 BadDeviceToken` and rows older than 24 hours. It
+never prunes the normal alert device row from a Live Activity token failure.
+
+#### APNs request
+
+Direct APNs only (the relay contract does not carry liveactivity pushes in
+version 1):
+
+```
+apns-topic: <APNS_BUNDLE_ID>.push-type.liveactivity
+apns-push-type: liveactivity
+apns-priority: 5 (counter-only) | 10 (status change / end)
+apns-expiration: <now + 300>   (seconds; do not use 0)
+```
+
+```json
+{
+  "aps": {
+    "timestamp": 1700000060,
+    "event": "update",
+    "content-state": { "v": 1, "e": "<base64 envelope>" },
+    "stale-date": 1700000180
+  }
+}
+```
+
+End pushes use `"event": "end"` and `"dismissal-date": <now + 60>` instead of
+`stale-date`. `timestamp`, `stale-date` and `dismissal-date` are epoch
+seconds.
+
+#### Encrypted content-state
+
+`content-state` is an AES-256-GCM envelope over canonical JSON of:
+
+```json
+{
+  "status": "needsApproval",
+  "title": "Claude - hapi",
+  "project": "hapi",
+  "startedAt": 1700000000000,
+  "updatedAt": 1700000060000,
+  "pendingCount": 1,
+  "todoCompleted": 2,
+  "todoTotal": 5,
+  "backgroundTaskCount": 0
+}
+```
+
+- Envelope: `base64(nonce[12] || ciphertext || tag[16])`, key = the device's
+  32-byte `pushKey`, AAD = ASCII `hapi-live-activity-v1` (domain-separated
+  from the alert channel's `hapi-push-v1`).
+- The widget extension decrypts with the shared Keychain access group
+  `$(AppIdentifierPrefix)run.hapi.companion.push`; Apple and any proxy see
+  ciphertext plus routing metadata only.
+- `startedAt`/`updatedAt` are epoch ms. `title` follows the web/iOS title
+  order (name → summary → promptTitle → path basename → id prefix). The hub
+  caps title/project to 120 code points and strips newlines.
+- Golden vector:
+  [`shared/fixtures/live-activity/content-state-v1.json`](https://github.com/tiann/hapi/blob/main/shared/fixtures/live-activity/content-state-v1.json).
+
+Status precedence mirrors the app's session row: pending requests win over
+working; input-only → `needsInput`, permission-only → `needsApproval`, mixed →
+`needsAttention`; otherwise `working`. A session is tracked while
+`active && (thinking || pendingRequestsCount > 0)`. End pushes carry `done`
+(or `error` for an `error` end reason).
+
+The app starts at most five activities (attention states first) and only for
+the **active** hub; switching hubs ends the previous hub's activities. Local
+activities require iOS 17.0; iPadOS Live Activities require 17.2+.
+
 ---
 
 ## Environment (hub operator)

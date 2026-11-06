@@ -79,6 +79,19 @@ export type StoredPushSubscription = {
 
 export type NativeDevicePlatform = 'phone' | 'wear' | 'ios'
 
+export type StoredLiveActivityToken = {
+    id: number
+    namespace: string
+    deviceId: string
+    sessionId: string
+    /** APNs per-activity push token (hex). */
+    token: string
+    /** base64 of the device's 32-byte E2E push key, stored with the token. */
+    pushKey: string
+    createdAt: number
+    updatedAt: number
+}
+
 export type StoredFcmDevice = {
     id: number
     namespace: string

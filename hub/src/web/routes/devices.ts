@@ -11,7 +11,7 @@ const PUSH_KEY_BYTES = 32
  * otherwise garbage like `"!!!!" + 43 chars` could sneak past the length
  * gate and register an undecryptable key.
  */
-function decodePushKey(pushKey: string): Buffer | null {
+export function decodePushKey(pushKey: string): Buffer | null {
     if (!/^[A-Za-z0-9+/]+={0,2}$/.test(pushKey)) {
         return null
     }

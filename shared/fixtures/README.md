@@ -29,8 +29,15 @@ shared/fixtures/
 ├── sse/<name>.json
 ├── pagination/<name>.json
 ├── catalogs/modes.json      # reference tables (see Catalogs below)
+├── push/envelope-v1.json    # hand-authored push-cipher vector
+├── live-activity/content-state-v1.json  # hand-authored Live Activity cipher vector
 └── README.md
 ```
+
+`push/` and `live-activity/` are hand-authored cryptographic contract vectors,
+not pipeline fixtures: they pin the AES-GCM wire format across the hub and
+native clients. The "regenerate, never hand-edit" rule applies to the
+`chat/`, `sse/`, and `pagination/` suites above.
 
 ## How to consume (all suites)
 

@@ -32,14 +32,21 @@ struct HapiApp: App {
     /// through `AppModel`: unpaired → pairing confirm; already paired to that
     /// hub → switch with a notice; a different hub → add-hub confirm.
     ///
-    /// Never log the URL itself: the query carries the access token.
+    /// Live Activities open `hapicompanion://sessions/<id>[?hub=<url>]`;
+    /// that form is routed through the same notification-target path.
+    ///
+    /// Never log the URL itself: the bind query carries the access token.
     private func handleIncomingURL(_ url: URL) {
-        guard let link = BindLink.parse(url.absoluteString) else {
-            log.warning("Ignoring malformed URL (scheme: \(url.scheme ?? "none", privacy: .public))")
+        if let link = BindLink.parse(url.absoluteString) {
+            if !model.handleBindLink(link) {
+                log.warning("Bind link carried an unusable hub URL")
+            }
             return
         }
-        if !model.handleBindLink(link) {
-            log.warning("Bind link carried an unusable hub URL")
+        if let link = SessionLink.parse(url.absoluteString) {
+            model.handleSessionLink(link)
+            return
         }
+        log.warning("Ignoring malformed URL (scheme: \(url.scheme ?? "none", privacy: .public))")
     }
 }

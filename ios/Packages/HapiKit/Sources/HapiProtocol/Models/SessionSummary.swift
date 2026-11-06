@@ -1,7 +1,7 @@
 import Foundation
 
 /// Classification of a pending request for list badges.
-public enum PendingRequestKind: String, Codable, Sendable {
+public enum PendingRequestKind: String, Codable, Hashable, Sendable {
     case permission
     case input
 }

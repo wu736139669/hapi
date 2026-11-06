@@ -48,11 +48,30 @@ function sortKeysDeep(value: unknown): unknown {
 }
 
 /**
- * Encrypt `plaintext` under `key` and return the base64 envelope.
+ * Encrypt `plaintext` under `key` and return the base64 envelope with the
+ * push-notification AAD. Kept as the default entry point for the alert
+ * channel; Live Activities use {@link encryptEnvelopeWithAad} with their own
+ * domain-separated AAD.
+ *
  * `nonce` is only injectable for tests / vector generation - production
  * callers must let it default to 12 fresh random bytes per message.
  */
 export function encryptEnvelope(key: Uint8Array, plaintext: string, nonce?: Uint8Array): string {
+    return encryptEnvelopeWithAad(key, plaintext, PUSH_ENVELOPE_AAD, nonce)
+}
+
+/**
+ * Same wire format as {@link encryptEnvelope} but with a caller-supplied
+ * AAD. Used by Live Activity `content-state`, whose AAD is
+ * `hapi-live-activity-v1`, so ciphertexts cannot be replayed between the
+ * notification and Live Activity channels.
+ */
+export function encryptEnvelopeWithAad(
+    key: Uint8Array,
+    plaintext: string,
+    aad: string,
+    nonce?: Uint8Array
+): string {
     if (key.length !== PUSH_KEY_LENGTH) {
         throw new Error(`push envelope key must be ${PUSH_KEY_LENGTH} bytes, got ${key.length}`)
     }
@@ -61,17 +80,29 @@ export function encryptEnvelope(key: Uint8Array, plaintext: string, nonce?: Uint
         throw new Error(`push envelope nonce must be ${PUSH_NONCE_LENGTH} bytes, got ${iv.length}`)
     }
     const cipher = createCipheriv('aes-256-gcm', key, iv)
-    cipher.setAAD(Buffer.from(PUSH_ENVELOPE_AAD, 'ascii'))
+    cipher.setAAD(Buffer.from(aad, 'ascii'))
     const ciphertext = Buffer.concat([cipher.update(Buffer.from(plaintext, 'utf8')), cipher.final()])
     const tag = cipher.getAuthTag()
     return Buffer.concat([iv, ciphertext, tag]).toString('base64')
 }
 
 /**
- * Decrypt a base64 envelope. Throws on truncated envelopes and on any
- * authentication failure (wrong key, flipped bit, altered AAD).
+ * Decrypt a base64 envelope with the push-notification AAD.
  */
 export function decryptEnvelope(key: Uint8Array, envelopeB64: string): string {
+    return decryptEnvelopeWithAad(key, envelopeB64, PUSH_ENVELOPE_AAD)
+}
+
+/**
+ * Decrypt a base64 envelope with a caller-supplied AAD. Throws on truncated
+ * envelopes and on any authentication failure (wrong key, flipped bit,
+ * altered AAD).
+ */
+export function decryptEnvelopeWithAad(
+    key: Uint8Array,
+    envelopeB64: string,
+    aad: string
+): string {
     if (key.length !== PUSH_KEY_LENGTH) {
         throw new Error(`push envelope key must be ${PUSH_KEY_LENGTH} bytes, got ${key.length}`)
     }
@@ -83,7 +114,7 @@ export function decryptEnvelope(key: Uint8Array, envelopeB64: string): string {
     const ciphertext = raw.subarray(PUSH_NONCE_LENGTH, raw.length - PUSH_TAG_LENGTH)
     const tag = raw.subarray(raw.length - PUSH_TAG_LENGTH)
     const decipher = createDecipheriv('aes-256-gcm', key, iv)
-    decipher.setAAD(Buffer.from(PUSH_ENVELOPE_AAD, 'ascii'))
+    decipher.setAAD(Buffer.from(aad, 'ascii'))
     decipher.setAuthTag(tag)
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8')
 }

@@ -14,6 +14,8 @@
 		A300000000000000000000C4 /* HapiProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = A100000000000000000000C2 /* HapiProtocol */; };
 		A300000000000000000000C5 /* HapiClient in Frameworks */ = {isa = PBXBuildFile; productRef = A100000000000000000000C3 /* HapiClient */; };
 		A300000000000000000000C8 /* HapiUI in Frameworks */ = {isa = PBXBuildFile; productRef = A100000000000000000000C7 /* HapiUI */; };
+		A400000000000000000000C4 /* HapiProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = A400000000000000000000C2 /* HapiProtocol */; };
+		A400000000000000000000D4 /* HapiWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A400000000000000000000A4 /* HapiWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); platformFilters = (ios, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -31,6 +33,13 @@
 			remoteGlobalIDString = A100000000000000000000A5;
 			remoteInfo = Hapi;
 		};
+		A400000000000000000000D2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A100000000000000000000A6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A400000000000000000000A5;
+			remoteInfo = HapiWidgets;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -41,6 +50,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				A200000000000000000000D4 /* HapiNotificationService.appex in Embed Foundation Extensions */,
+				A400000000000000000000D4 /* HapiWidgets.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -51,6 +61,7 @@
 		A100000000000000000000A4 /* Hapi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hapi.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A200000000000000000000A4 /* HapiNotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HapiNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A300000000000000000000A4 /* HapiTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = HapiTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A400000000000000000000A4 /* HapiWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HapiWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -67,6 +78,13 @@
 				Info.plist,
 			);
 			target = A200000000000000000000A5 /* HapiNotificationService */;
+		};
+		A400000000000000000000C6 /* Exceptions for "HapiWidgets" folder in "HapiWidgets" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A400000000000000000000A5 /* HapiWidgets */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -90,6 +108,14 @@
 		A300000000000000000000A2 /* HapiTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = HapiTests;
+			sourceTree = "<group>";
+		};
+		A400000000000000000000A2 /* HapiWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A400000000000000000000C6 /* Exceptions for "HapiWidgets" folder in "HapiWidgets" target */,
+			);
+			path = HapiWidgets;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -122,6 +148,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A400000000000000000000A8 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A400000000000000000000C4 /* HapiProtocol in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -131,6 +165,7 @@
 				A100000000000000000000A2 /* Hapi */,
 				A200000000000000000000A2 /* HapiNotificationService */,
 				A300000000000000000000A2 /* HapiTests */,
+				A400000000000000000000A2 /* HapiWidgets */,
 				A100000000000000000000A3 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -141,6 +176,7 @@
 				A100000000000000000000A4 /* Hapi.app */,
 				A200000000000000000000A4 /* HapiNotificationService.appex */,
 				A300000000000000000000A4 /* HapiTests.xctest */,
+				A400000000000000000000A4 /* HapiWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -161,6 +197,7 @@
 			);
 			dependencies = (
 				A200000000000000000000D1 /* PBXTargetDependency */,
+				A400000000000000000000D1 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A100000000000000000000A2 /* Hapi */,
@@ -223,6 +260,29 @@
 			productReference = A300000000000000000000A4 /* HapiTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		A400000000000000000000A5 /* HapiWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A400000000000000000000B4 /* Build configuration list for PBXNativeTarget "HapiWidgets" */;
+			buildPhases = (
+				A400000000000000000000A7 /* Sources */,
+				A400000000000000000000A8 /* Frameworks */,
+				A400000000000000000000A9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A400000000000000000000A2 /* HapiWidgets */,
+			);
+			name = HapiWidgets;
+			packageProductDependencies = (
+				A400000000000000000000C2 /* HapiProtocol */,
+			);
+			productName = HapiWidgets;
+			productReference = A400000000000000000000A4 /* HapiWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -237,6 +297,9 @@
 						CreatedOnToolsVersion = 16.0;
 					};
 					A200000000000000000000A5 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					A400000000000000000000A5 = {
 						CreatedOnToolsVersion = 16.0;
 					};
 				};
@@ -263,6 +326,7 @@
 				A100000000000000000000A5 /* Hapi */,
 				A200000000000000000000A5 /* HapiNotificationService */,
 				A300000000000000000000A5 /* HapiTests */,
+				A400000000000000000000A5 /* HapiWidgets */,
 			);
 		};
 /* End PBXProject section */
@@ -283,6 +347,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		A300000000000000000000A9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A400000000000000000000A9 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -313,6 +384,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A400000000000000000000A7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -325,6 +403,12 @@
 			isa = PBXTargetDependency;
 			target = A100000000000000000000A5 /* Hapi */;
 			targetProxy = A300000000000000000000D2 /* PBXContainerItemProxy */;
+		};
+		A400000000000000000000D1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			platformFilter = ios;
+			target = A400000000000000000000A5 /* HapiWidgets */;
+			targetProxy = A400000000000000000000D2 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -514,6 +598,66 @@
 			};
 			name = Release;
 		};
+		A400000000000000000000B5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = HapiWidgets/HapiWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = XJB862F92W;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = HapiWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = HAPI;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.34.1;
+				PRODUCT_BUNDLE_IDENTIFIER = run.hapi.app.HapiWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A400000000000000000000B6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = HapiWidgets/HapiWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = XJB862F92W;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = HapiWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = HAPI;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.34.1;
+				PRODUCT_BUNDLE_IDENTIFIER = run.hapi.app.HapiWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		A300000000000000000000B5 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -589,6 +733,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		A400000000000000000000B4 /* Build configuration list for PBXNativeTarget "HapiWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A400000000000000000000B5 /* Debug */,
+				A400000000000000000000B6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -610,6 +763,10 @@
 		A100000000000000000000C7 /* HapiUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = HapiUI;
+		};
+		A400000000000000000000C2 /* HapiProtocol */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HapiProtocol;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

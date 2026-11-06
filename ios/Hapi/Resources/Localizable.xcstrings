@@ -5707,6 +5707,40 @@
         }
       }
     },
+    "Live Activities" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live-активности"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时活动"
+          }
+        }
+      }
+    },
+    "Live Activities show running sessions on the Lock Screen; their content is end-to-end encrypted too." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live-активности показывают запущенные сеансы на экране блокировки; их содержимое также защищено сквозным шифрованием."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时活动会在锁定屏幕上显示正在运行的会话；其内容同样采用端到端加密。"
+          }
+        }
+      }
+    },
     "Live updates interrupted — reconnecting…" : {
       "extractionState" : "manual",
       "localizations" : {

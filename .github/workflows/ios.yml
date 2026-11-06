@@ -42,6 +42,7 @@ jobs:
                   PYTHONDONTWRITEBYTECODE: '1'
               run: |
                   python3 ios/scripts/localizations.py --check
+                  python3 ios/scripts/localizations.py --check ios/HapiWidgets/Localizable.xcstrings
                   python3 -m unittest discover -s ios/scripts/tests -p 'test_localizations.py'
             - name: Build Hapi app for iOS Simulator
               run: xcodebuild build -project ios/Hapi.xcodeproj -scheme Hapi -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
@@ -69,4 +70,4 @@ jobs:
                   -only-testing:HapiTests/SessionSplitPresentationTests
                   -only-testing:HapiTests/TranscriptGeometryTests
             - name: Verify localization catalog was not rewritten
-              run: git diff --exit-code -- ios/Hapi/Resources/Localizable.xcstrings
+              run: git diff --exit-code -- ios/Hapi/Resources/Localizable.xcstrings ios/HapiWidgets/Localizable.xcstrings

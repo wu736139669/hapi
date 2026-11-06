@@ -74,6 +74,13 @@ Official native apps register their encryption keys automatically; no push
 provider setup is needed on a fresh hub. See the [native companion push
 contract](../docs/api/native-companion-contract.md).
 
+With `HAPI_IOS_PUSH=apns`, the hub also sends iOS Live Activity update/end
+pushes (`<APNS_BUNDLE_ID>.push-type.liveactivity`) to activity tokens the app
+registered. Relay mode advertises `remote:false` on Live Activity
+registration and sends none; the app ends activities on background. Live
+Activity `content-state` is encrypted with the same per-install key and a
+separate AAD (`hapi-live-activity-v1`).
+
 ## Running
 
 Binary (single executable):
@@ -211,6 +218,13 @@ copy or snapshot files during archive.
 Native Android/iOS registration uses `POST`/`DELETE /api/devices/register`
 (`src/web/routes/devices.ts`); see the [native push contract](../docs/api/native-companion-contract.md).
 
+### Live Activities (`src/web/routes/liveActivities.ts`)
+
+- `POST /api/live-activities/register` - Upsert an iOS Live Activity's APNs token (with the device push key).
+- `DELETE /api/live-activities/register` - Remove by activity token or device/session.
+
+Direct-APNs hubs also push encrypted `liveactivity` update/end payloads; relay-mode hubs return `remote:false`. See the [Live Activities contract](../docs/api/native-companion-contract.md#live-activities-ios).
+
 ### CLI (`src/web/routes/cli.ts`)
 
 - `POST /cli/sessions` - Create/load session.
@@ -331,6 +345,7 @@ Maintenance scripts (run with the hub stopped before swapping files):
 - `src/sse/` - Server-Sent Events.
 - `src/config/` - Configuration loading and generation.
 - `src/notifications/` - Push and Telegram notifications.
+- `src/live-activity/` - iOS Live Activity registration/state contract and encrypted update/end pushes.
 - `src/visibility/` - Client visibility tracking.
 
 ## Security model

@@ -1,0 +1,7 @@
+{
+  "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "nonce_hex": "000102030405060708090a0b",
+  "aad": "hapi-live-activity-v1",
+  "plaintext": "{\"backgroundTaskCount\":0,\"pendingCount\":1,\"project\":\"hapi\",\"startedAt\":1700000000000,\"status\":\"needsApproval\",\"title\":\"Claude - hapi\",\"todoCompleted\":2,\"todoTotal\":5,\"updatedAt\":1700000060000}",
+  "envelope_b64": "AAECAwQFBgcICQoLPCC0eqaOpWniNPnv5YgLBsC58lqEWWVMFEWV4HMNadxmU8GJwbUwokWIXZ366EJdjS1Ct3i+wqpWtQY7a5eUnIRZojun8xxQK2SaXt+/PtgIuvlSWkEgHJyJ679aypvjrp09leUxuGjxal/ealkDC9MTDs7B/wfZIZ4iqefGQy7TM3CvlvvpJ2eFJ+JStzyuU4CGURcroWauK4cTlYaGmvL7vC/c0+4L1we8jrrkx8+/9PsVu5tDjFXv9vdB9YeOXzHn0JFTjDlT/C9vXsPDyQ=="
+}

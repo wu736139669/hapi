@@ -33,6 +33,8 @@ import { createDshSessionRoutes } from './routes/dshSessions'
 import { createOpencodeSessionRoutes } from './routes/opencodeSessions'
 import { createPushRoutes } from './routes/push'
 import { createDevicesRoutes } from './routes/devices'
+import { createLiveActivityRoutes } from './routes/liveActivities'
+import type { LiveActivityControl } from '../live-activity/liveActivityControl'
 import { createVoiceRoutes } from './routes/voice'
 import { createHubSettingsRoutes } from './routes/hubSettings'
 import { createWorkGraphRoutes } from './routes/workGraph'
@@ -243,6 +245,7 @@ function createWebApp(options: {
     officialWebUrl?: string
     dataDir: string
     refreshUsage?: () => Promise<void>
+    getLiveActivityControl?: () => LiveActivityControl | null
 }): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
@@ -400,6 +403,11 @@ function createWebApp(options: {
     app.route('/api', createPushRoutes(options.store, options.vapidPublicKey))
     app.route('/api', createClaudeModelsRoutes(options.dataDir))
     app.route('/api', createDevicesRoutes(options.store))
+    app.route('/api', createLiveActivityRoutes({
+        store: options.store,
+        getSyncEngine: options.getSyncEngine,
+        getControl: options.getLiveActivityControl
+    }))
     app.route('/api', createVoiceRoutes({ dataDir: configuration.dataDir }))
     // Path is intentionally NOT `/api/events` — that route is the SSE stream.
     app.route('/api', createWorkGraphRoutes(options.store))
@@ -534,6 +542,7 @@ export async function startWebServer(options: {
     officialWebUrl?: string
     dataDir: string
     refreshUsage?: () => Promise<void>
+    getLiveActivityControl?: () => LiveActivityControl | null
 }): Promise<BunServer<WebSocketData>> {
     const isCompiled = isBunCompiled()
     const embeddedAssetMap = isCompiled ? await loadEmbeddedAssetMap() : null
@@ -550,7 +559,8 @@ export async function startWebServer(options: {
         dataDir: options.dataDir,
         relayMode: options.relayMode,
         officialWebUrl: options.officialWebUrl,
-        refreshUsage: options.refreshUsage
+        refreshUsage: options.refreshUsage,
+        getLiveActivityControl: options.getLiveActivityControl
     })
 
     const configuration = getConfiguration()

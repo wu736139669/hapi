@@ -95,6 +95,13 @@ public final class SessionListStore: SessionListStoring {
     /// for the Android `SessionStore.scratchlistInvalidations` flow).
     @ObservationIgnored public var onScratchlistInvalidation: (@MainActor (String) -> Void)?
 
+    /// Fired after every real list mutation (SSE, REST refresh, optimistic
+    /// pin/archive/reopen). The app's Live Activity coordinator uses this
+    /// single seam to reconcile activities; keep-alive-only patches never
+    /// reach it. Cold-start snapshot hydration is reconciled by the
+    /// coordinator when it attaches to the hub.
+    @ObservationIgnored public var onSessionsChanged: (@MainActor ([SessionSummary]) -> Void)?
+
     /// Authoritative removal only: SSE from either pipe, or a successful
     /// archive/delete. Optimistic list removal/rollback, filters and failed refreshes
     /// must not dismiss a client's currently selected session.
@@ -428,5 +435,6 @@ public final class SessionListStore: SessionListStoring {
         sessions = next
         listRevision += 1
         snapshot?.scheduleWrite(next)
+        onSessionsChanged?(next)
     }
 }

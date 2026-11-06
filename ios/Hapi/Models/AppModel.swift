@@ -52,6 +52,8 @@ final class AppModel {
 
     // `let` storage is inert under @Observable (no annotation needed).
     let registry: HubRegistry
+    let liveActivityPrefs: LiveActivityPrefs
+    let liveActivity: any LiveActivityControlling
     private let credentialStore: any CredentialStoring
     private let performer: any HTTPPerforming
     private let pairingService: HubPairingService
@@ -72,6 +74,9 @@ final class AppModel {
             credentialStore: credentialStore,
             performer: performer
         )
+        let liveActivityPrefs = LiveActivityPrefs()
+        self.liveActivityPrefs = liveActivityPrefs
+        self.liveActivity = LiveActivityControllerFactory.make(prefs: liveActivityPrefs)
         restore()
         // Push wiring (P3): the coordinator is a process singleton (UIKit
         // delegates outlive any model); it pulls navigation + suppression
@@ -142,6 +147,8 @@ final class AppModel {
     func signOut(hub: String) {
         let wasActive = state == .paired(activeHub: hub)
         if wasActive {
+            // End + unregister while the old hub's API still works.
+            liveActivity.detach()
             session?.shutdown()
             session = nil
         }
@@ -199,6 +206,16 @@ final class AppModel {
         return true
     }
 
+    /// Live Activity tap-through (`hapicompanion://sessions/<id>[?hub=]`).
+    /// Reuses the notification-tap route: switch to the owning hub only when
+    /// it is paired, then let the home screen consume `pendingOpenSessionId`.
+    @discardableResult
+    func handleSessionLink(_ link: SessionLink) -> Bool {
+        let hub = link.hubUrl.flatMap { HubURLNormalization.normalize($0) }
+        openNotificationTarget(sessionId: link.sessionId, hubUrl: hub)
+        return true
+    }
+
     // MARK: - App lifecycle
 
     /// Forwarded from the scene: foreground starts/resumes the active
@@ -208,11 +225,13 @@ final class AppModel {
         case .active:
             isForeground = true
             session?.enterForeground()
+            liveActivity.appDidBecomeActive()
             // Re-registers every hub when the APNs token arrives — the
             // cheap-upsert healing pass (Android registrar `start()`).
             PushCoordinator.shared.appDidBecomeActive(isPaired: state != .unpaired)
         case .background:
             isForeground = false
+            liveActivity.appDidBackground()
             session?.enterBackground()
         case .inactive:
             break // transitional; no connection changes
@@ -221,11 +240,22 @@ final class AppModel {
         }
     }
 
+    /// Settings toggle. The coordinator owns ending/starting activities so
+    /// the pref and the live activities never disagree.
+    func setLiveActivitiesEnabled(_ enabled: Bool) {
+        liveActivity.setEnabled(enabled)
+    }
+
     // MARK: - Internals
 
     /// Builds (and starts, when foregrounded) the session for `hub`,
     /// replacing any previous one.
     private func activate(hub: String) {
+        if let current = session, current.hubUrl != hub {
+            // End the old hub's activities and unregister their tokens while
+            // its API is still live; the new hub gets a fresh registration.
+            liveActivity.detach()
+        }
         let previousStore = session?.lastSeenStore
         session?.shutdown()
         session = nil
@@ -259,9 +289,16 @@ final class AppModel {
         newSession.onTerminalAuthFailure = { [weak self] in
             self?.handleTerminalAuthFailure(for: hub)
         }
+        newSession.sessionStore.onSessionsChanged = { [weak self, weak newSession] sessions in
+            // A refresh that lands after a hub switch must not repopulate the
+            // new hub's coordinator with the old hub's sessions.
+            guard let self, let newSession, self.session === newSession else { return }
+            self.liveActivity.sessionsChanged(sessions)
+        }
         session = newSession
         state = .paired(activeHub: hub)
         hubs = registry.hubs
+        liveActivity.attach(to: newSession)
         if isForeground {
             newSession.enterForeground()
         }
@@ -272,6 +309,7 @@ final class AppModel {
     /// revoked, so the dead credentials are removed and the UI drops to
     /// pairing (or the next hub) with a banner.
     private func handleTerminalAuthFailure(for hub: String) {
+        liveActivity.detach()
         session = nil // the session shut itself down before calling back
         authFailureNotice = hub
         // No JWT left to authenticate a push unregister; just drop the hub

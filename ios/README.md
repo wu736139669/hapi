@@ -267,17 +267,58 @@ notification injection, with `hapi.e` encrypted using that install's push key.
 This checks local handling, not provider delivery. Verify registration,
 background/lock-screen delivery and actions on a signed physical device.
 
+### Live Activities
+
+Each running session can appear on the Lock Screen and Dynamic Island
+(`HapiWidgets` extension). The app starts the activity locally (while it
+runs), registers the activity's APNs push token, then the hub updates/ends it
+after the app is suspended or killed.
+
+- **Transport:** direct APNs only in v1 (`HAPI_IOS_PUSH=apns`). A relay-mode
+  hub answers `remote:false`; the app ends activities on background instead
+  of showing a frozen card. Push-to-start is deferred: a remotely-started
+  activity's per-activity token is only obtainable once the app runs.
+- **Encryption:** `content-state` is an AES-256-GCM envelope over canonical
+  JSON, keyed by the same per-install `pushKey` with AAD
+  `hapi-live-activity-v1`. The widget extension decrypts it; Apple sees
+  ciphertext plus routing metadata. The widget reads the key from the shared
+  `run.hapi.companion.push` Keychain group.
+- **Registration:** `POST /api/live-activities/register`
+  `{token, deviceId, sessionId, pushKey}`; the app re-registers rotated tokens
+  from `pushTokenUpdates` and deletes rows when an activity ends.
+- **Scope:** active hub only; at most five activities, attention states
+  first. Settings → Notifications has a *Live Activities* toggle (default
+  on). Local activities require iOS 17.0; iPadOS requires 17.2+.
+- **Signing:** the `HapiWidgets` App ID needs **Keychain Sharing** for
+  `$(AppIdentifierPrefix)run.hapi.companion.push` and must match the app's
+  marketing/build versions. The widget target is iOS-only (excluded from Mac
+  Catalyst); `NSSupportsLiveActivities` lives only in the app `Info.plist`.
+- **Verification:** physical device + a direct-APNs hub. Start a session from
+  the phone, lock it, confirm updates on approval/ready and the end on
+  completion; kill the app and confirm remote updates continue; switch hubs
+  and confirm old activities end. The widget catalog is checked by
+  `python3 ios/scripts/localizations.py --check ios/HapiWidgets/Localizable.xcstrings`.
+
+**Live Activity layer map**: `HapiProtocol/LiveActivity/` (content state,
+cipher, attributes), `Hapi/Features/LiveActivity/` (coordinator + protocol
+seam), `HapiClient/Endpoints/LiveActivityEndpoints.swift`,
+`HapiClient/Settings/LiveActivityPrefs.swift`, `HapiWidgets/` (widget bundle,
+lock-screen/Dynamic Island UI, Keychain read), and the hub's
+`src/live-activity/` notifier. The cross-language cipher vector is
+`shared/fixtures/live-activity/content-state-v1.json`.
+
 ## Layout
 
 | Path | Responsibility |
 |---|---|
-| `Hapi.xcodeproj/` | App, notification extension and app-hosted tests. App sources use Xcode synchronized folders. |
+| `Hapi.xcodeproj/` | App, notification extension, widget extension and app-hosted tests. App sources use Xcode synchronized folders. |
 | `Hapi/Models/` | `AppModel` pairing/navigation, active `HubSession`, per-chat `ChatSession`, and `PushCoordinator`. |
-| `Hapi/Features/` | SwiftUI screens and app models for pairing, sessions, chat, new sessions, files, Scratchlist and settings; UIKit transcript hosting. |
-| `Packages/HapiKit/Sources/HapiProtocol/` | Foundation wire models, catalogs, pairing parser, versioned patches, chat reduction, message-window logic and Git parsers. |
-| `Packages/HapiKit/Sources/HapiClient/` | Auth/REST/SSE, stores and disk snapshots, message windows, chat interaction, attachments, dictation, push and testable feature logic. |
+| `Hapi/Features/` | SwiftUI screens and app models for pairing, sessions, chat, new sessions, files, Scratchlist and settings; UIKit transcript hosting; Live Activity coordinator. |
+| `Packages/HapiKit/Sources/HapiProtocol/` | Foundation wire models, catalogs, pairing/deep-link parsers, versioned patches, chat reduction, message-window logic, Git parsers, and the Live Activity content-state/cipher contract. |
+| `Packages/HapiKit/Sources/HapiClient/` | Auth/REST/SSE, stores and disk snapshots, message windows, chat interaction, attachments, dictation, push, Live Activity endpoints/prefs, and testable feature logic. |
 | `Packages/HapiKit/Sources/HapiUI/` | Reusable Markdown, syntax highlighting, diff rendering, theme and typography. |
 | `HapiNotificationService/` | SDK-only extension that decrypts APNs content using the shared Keychain key. |
+| `HapiWidgets/` | WidgetKit extension: Live Activity lock-screen/Dynamic Island UI plus the shared-key decrypt. iOS-only (no Catalyst). |
 | `Packages/HapiKit/Tests/`, `HapiTests/` | Package and app-hosted verification. |
 
 The app owns navigation, lifecycle and screen presentation; HapiKit supplies
