@@ -56,6 +56,7 @@ private struct HapiWidgetView: View {
 
     var body: some View {
         content
+            .widgetURL(topSessionURL)
             .containerBackground(for: .widget) {
                 if isAccessory {
                     AccessoryWidgetBackground()
@@ -63,6 +64,17 @@ private struct HapiWidgetView: View {
                     HapiWidgetBackground()
                 }
             }
+    }
+
+    /// Accessories have no room for row-level links; open the most relevant
+    /// session when the whole widget is tapped. Medium/large rows override
+    /// this with their own `Link`.
+    private var topSessionURL: URL? {
+        guard let top = entry.snapshot.sessions.first else { return nil }
+        return SessionLink.url(
+            sessionId: top.id,
+            hubUrl: entry.snapshot.hubUrl.isEmpty ? nil : entry.snapshot.hubUrl
+        )
     }
 
     @ViewBuilder
@@ -145,12 +157,6 @@ private struct SmallWidget: View {
             }
             Spacer(minLength: 0)
         }
-        .widgetURL(topURL)
-    }
-
-    private var topURL: URL? {
-        guard let top = snapshot.sessions.first else { return nil }
-        return SessionLink.url(sessionId: top.id, hubUrl: snapshot.hubUrl.isEmpty ? nil : snapshot.hubUrl)
     }
 }
 
