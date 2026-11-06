@@ -12,6 +12,7 @@ public struct DiffTextView: View {
     @State private var expanded = false
     @Environment(\.hapiTheme) private var theme
     @Environment(\.hapiTypography) private var typography
+    @Environment(\.hapiCodeFontSize) private var codeFontSize
 
     public init(files: [DiffFile], compact: Bool = false, compactLineLimit: Int = 12) {
         self.files = files
@@ -139,7 +140,7 @@ public struct DiffTextView: View {
             .background(theme.codeHeaderBackground)
         case .hunkHeader(let header):
             Text(header)
-                .font(typography.codeFont)
+                .font(typography.codeFont(size: codeFontSize))
                 .foregroundStyle(theme.textSecondary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 3)
@@ -182,7 +183,7 @@ public struct DiffTextView: View {
         text.append(content)
 
         return Text(text)
-            .font(typography.codeFont)
+            .font(typography.codeFont(size: codeFontSize))
             .padding(.horizontal, 12)
             .padding(.vertical, typography.codeLineSpacing / 2)
             .background(background ?? Color.clear)

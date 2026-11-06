@@ -14,12 +14,55 @@ struct SessionRowUI: Identifiable, Equatable {
     /// Short project name only. Paths, machine/worktree details and the
     /// conversation summary stay out of the compact home row.
     let project: String?
+    /// Human machine label, resolved from `machineFilters`.
+    let machine: String?
+    /// Worktree name for directory-group rows.
+    let worktree: String?
     /// Raw flavor id (`claude`, `codex`, …); labels resolve via the catalog.
     let flavor: String?
     let unread: Bool
 
     var id: String { summary.id }
     var status: SessionRowStatus? { SessionRowStatus(summary: summary) }
+}
+
+struct SessionListBucketUI: Identifiable, Equatable {
+    let bucket: SessionListBucket
+    let rows: [SessionRowUI]
+
+    var id: String { bucket.rawValue }
+}
+
+/// One section of the H5-style list. Pins/directories carry `rows`;
+/// In-progress/Active sections carry `buckets`.
+struct SessionListSectionUI: Identifiable, Equatable {
+    let id: String
+    let kind: SessionListGroupKind
+    let directoryName: String?
+    let machineLabel: String?
+    let rows: [SessionRowUI]
+    let buckets: [SessionListBucketUI]
+    let hasActive: Bool
+    let hasProjectPinned: Bool
+
+    var totalCount: Int {
+        rows.count + buckets.reduce(0) { $0 + $1.rows.count }
+    }
+
+    var defaultCollapsed: Bool {
+        kind == .directory && !hasActive && !hasProjectPinned
+    }
+
+    func contains(_ sessionId: String) -> Bool {
+        rows.contains { $0.id == sessionId }
+            || buckets.contains { $0.rows.contains { $0.id == sessionId } }
+    }
+}
+
+struct SessionListSnapshot: Equatable {
+    let rows: [SessionRowUI]
+    let sections: [SessionListSectionUI]
+    let searching: Bool
 }
 
 /// Presentation only: request totals/kinds come from the hub, independently
@@ -104,6 +147,7 @@ final class SessionListModel {
     private let sessionStore: any SessionListStoring
     private let machineStore: any MachineListStoring
     private let lastSeenStore: LastSeenStore
+    private let personalPins: PersonalPinStore
     private let hubUrl: String
     /// Reopen follows a superseding id with the composer draft (web
     /// `transferComposerDraftThenNavigate`).
@@ -137,12 +181,14 @@ final class SessionListModel {
         sessionStore: any SessionListStoring,
         machineStore: any MachineListStoring,
         lastSeenStore: LastSeenStore,
+        personalPins: PersonalPinStore = .shared,
         hubUrl: String,
         drafts: (any ChatDrafts)? = nil
     ) {
         self.sessionStore = sessionStore
         self.machineStore = machineStore
         self.lastSeenStore = lastSeenStore
+        self.personalPins = personalPins
         self.hubUrl = hubUrl
         self.drafts = drafts
     }
@@ -314,15 +360,69 @@ final class SessionListModel {
                 visible = SessionListSearch.rank(visible, by: index)
             }
         }
+        let machineLabels = Dictionary(uniqueKeysWithValues: machineFilters.map { ($0.id, $0.label) })
         return visible.map { summary in
-            SessionRowUI(
+            let worktree = summary.metadata?.worktree?.name
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return SessionRowUI(
                 summary: summary,
                 title: Self.sessionTitle(summary),
                 project: Self.projectLabel(summary),
+                machine: summary.metadata?.machineId.flatMap { machineLabels[$0] }
+                    ?? machineLabels[unknownMachineFilterId],
+                worktree: worktree?.isEmpty == false ? worktree : nil,
                 flavor: summary.metadata?.flavor,
                 unread: LastSeenStore.isUnread(summary, state: readState, followedTails: followedTails)
             )
         }
+    }
+
+    /// H5-style grouped sections. Search stays flat (the view uses `rows`).
+    var sections: [SessionListSectionUI] {
+        isSearching ? [] : groupedSections(from: rows)
+    }
+
+    var snapshot: SessionListSnapshot {
+        let visibleRows = rows
+        return SessionListSnapshot(
+            rows: visibleRows,
+            sections: isSearching ? [] : groupedSections(from: visibleRows),
+            searching: isSearching
+        )
+    }
+
+    private func groupedSections(from visibleRows: [SessionRowUI]) -> [SessionListSectionUI] {
+        let rowById = Dictionary(uniqueKeysWithValues: visibleRows.map { ($0.id, $0) })
+        let machineLabels = Dictionary(uniqueKeysWithValues: machineFilters.map { ($0.id, $0.label) })
+        return SessionListGrouping.groups(
+            sessions: visibleRows.map(\.summary),
+            personalPinned: personalPins.sessionIds
+        ).map { group in
+            let machineLabel = machineLabels[group.machineId ?? unknownMachineFilterId]
+            return SessionListSectionUI(
+                id: group.id,
+                kind: group.kind,
+                directoryName: group.displayName,
+                machineLabel: machineLabel,
+                rows: group.sessions.compactMap { rowById[$0.id] },
+                buckets: group.buckets.map { bucket in
+                    SessionListBucketUI(
+                        bucket: bucket.bucket,
+                        rows: bucket.sessions.compactMap { rowById[$0.id] }
+                    )
+                },
+                hasActive: group.hasActive,
+                hasProjectPinned: group.hasProjectPinned
+            )
+        }
+    }
+
+    func isPersonallyPinned(_ sessionId: String) -> Bool {
+        personalPins.contains(sessionId)
+    }
+
+    func togglePersonalPin(sessionId: String) {
+        personalPins.toggle(sessionId)
     }
 
     /// The sort contract puts globalPinned/pinned rows first; this boundary

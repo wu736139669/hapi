@@ -21,6 +21,16 @@ archive (active) or reopen/delete (inactive), from the row's context menu or the
 chat's … menu; sending to an inactive session or reopening it can resume it and
 migrate the draft/navigation when the returned session ID changes.
 
+The list mirrors the web sidebar's core structure: **My sessions** (client-only
+personal pins) and global **Pins** first, then collapsible **In progress**
+(running/pending) and **Active sessions** (active/idle) sections, then collapsible
+project/folder groups. Rows show `project · machine` in pinned/bucket sections and
+the worktree name inside a folder; group headers carry counts, and selecting a
+session expands its folder. Collapsed states are in-memory and reset on launch.
+Settings → Appearance controls **List text size** (80–130%, list only) and
+**Code & terminal text size** (9–17 pt, CLI output/code blocks/diffs) independently
+of Dynamic Type.
+
 Agent-displayed media (`display_image`, `display_video`, `display_media`) uses
 MIME-based cards: images load automatically, while video, audio and other files
 load only on request. Video/audio use native playback controls without autoplay;

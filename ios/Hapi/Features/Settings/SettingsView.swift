@@ -71,6 +71,7 @@ struct SettingsView: View {
     @State private var confirmSignOut = false
     @Environment(AppModel.self) private var appModel
     @Environment(ThemePrefs.self) private var themePrefs
+    @Environment(DisplayPrefs.self) private var displayPrefs
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
@@ -163,13 +164,41 @@ struct SettingsView: View {
     }
 
     private var appearanceSection: some View {
-        Section("Appearance") {
+        Section {
             Picker("Theme", selection: themeBinding) {
                 ForEach(ThemeMode.allCases, id: \.self) { mode in
                     Text(mode.label).tag(mode)
                 }
             }
+            Picker("List text size", selection: listFontScaleBinding) {
+                ForEach(DisplayPrefs.listFontScales, id: \.self) { scale in
+                    Text(verbatim: "\(Int((scale * 100).rounded()))%").tag(scale)
+                }
+            }
+            Picker("Code & terminal text size", selection: codeFontSizeBinding) {
+                ForEach(DisplayPrefs.codeFontSizes, id: \.self) { size in
+                    Text(verbatim: "\(Int(size)) pt").tag(size)
+                }
+            }
+        } header: {
+            Text("Appearance")
+        } footer: {
+            Text("List size affects the session list only; code size affects CLI output, code blocks and diffs.")
         }
+    }
+
+    private var listFontScaleBinding: Binding<Double> {
+        Binding(
+            get: { displayPrefs.listFontScale },
+            set: { displayPrefs.setListFontScale($0) }
+        )
+    }
+
+    private var codeFontSizeBinding: Binding<Double> {
+        Binding(
+            get: { displayPrefs.codeFontSize },
+            set: { displayPrefs.setCodeFontSize($0) }
+        )
     }
 
     private var themeBinding: Binding<ThemeMode> {

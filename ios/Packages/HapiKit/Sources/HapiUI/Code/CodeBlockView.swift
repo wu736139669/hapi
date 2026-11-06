@@ -14,6 +14,7 @@ public struct CodeBlockView: View {
 
     @Environment(\.hapiTheme) private var theme
     @Environment(\.hapiTypography) private var typography
+    @Environment(\.hapiCodeFontSize) private var codeFontSize
     @Environment(\.hapiSyntaxHighlighter) private var highlighter
     @Environment(\.hapiPasteboard) private var pasteboard
 
@@ -40,7 +41,7 @@ public struct CodeBlockView: View {
             header
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(highlighted ?? AttributedString(code))
-                    .font(typography.codeFont)
+                    .font(typography.codeFont(size: codeFontSize))
                     .lineSpacing(typography.codeLineSpacing)
                     .foregroundStyle(theme.textPrimary)
                     .textSelection(.enabled)

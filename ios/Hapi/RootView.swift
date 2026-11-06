@@ -12,6 +12,7 @@ struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.colorScheme) private var colorScheme
     @State private var themePrefs = ThemePrefs()
+    @State private var displayPrefs = DisplayPrefs()
 
     var body: some View {
         @Bindable var model = model
@@ -64,6 +65,7 @@ struct RootView: View {
         }
         .background(MacWindowConfigurator())
         .hapiTypography()
+        .environment(\.hapiCodeFontSize, CGFloat(displayPrefs.codeFontSize))
         .hapiTheme(themePrefs.mode.hapiTheme(systemColorScheme: colorScheme))
         // Explicit modes force the presentation's chrome to match their
         // palette; `.system` passes nil so the OS scheme flows through.
@@ -71,6 +73,7 @@ struct RootView: View {
         // the palette resolution only consults it in `.system` mode.)
         .preferredColorScheme(themePrefs.mode.preferredColorScheme)
         .environment(themePrefs)
+        .environment(displayPrefs)
         .handlesHapiLinks()
     }
 }

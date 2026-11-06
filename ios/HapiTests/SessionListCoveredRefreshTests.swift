@@ -43,11 +43,17 @@ final class SessionListCoveredRefreshTests: XCTestCase {
                     .navigationDestination(for: String.self) { Text($0) }
             }
             .hapiTheme(.light)
+            .environment(DisplayPrefs())
         }
     }
 
     func testCoveredListKeepsItsRowsAndRefreshesOnReturn() async throws {
-        let sessions = Sessions((0..<3).map { HomeFilterTestData.summary("s\($0)", machine: "mac") })
+        let sessions = Sessions((0..<3).map { index -> SessionSummary in
+            var summary = HomeFilterTestData.summary("s\(index)", machine: "mac")
+            summary.active = false
+            summary.pinned = index == 0
+            return summary
+        })
         let model = SessionListModel(sessionStore: sessions, machineStore: HomeFilterTestMachines(),
                                      lastSeenStore: LastSeenStore(), hubUrl: "test")
         let navigation = Navigation()
@@ -63,7 +69,11 @@ final class SessionListCoveredRefreshTests: XCTestCase {
 
         navigation.path = ["s0"]
         try await settle()
-        sessions.sessions += (3..<5).map { HomeFilterTestData.summary("s\($0)", machine: "mac") }
+        sessions.sessions += (3..<5).map { index -> SessionSummary in
+            var summary = HomeFilterTestData.summary("s\(index)", machine: "mac")
+            summary.active = false
+            return summary
+        }
         try await settle()
         XCTAssertEqual(itemCount(list), 3, "A covered list must not rebuild for session changes")
 

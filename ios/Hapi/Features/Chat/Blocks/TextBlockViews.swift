@@ -230,11 +230,12 @@ struct TerminalTextView: View {
 
     @Environment(\.hapiTheme) private var theme
     @Environment(\.hapiTypography) private var typography
+    @Environment(\.hapiCodeFontSize) private var codeFontSize
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             Text(text)
-                .font(typography.codeFont)
+                .font(typography.codeFont(size: codeFontSize))
                 .lineSpacing(typography.codeLineSpacing)
                 .foregroundStyle(isError ? AnyShapeStyle(theme.danger) : AnyShapeStyle(theme.textPrimary))
                 .textSelection(.enabled)

@@ -78,6 +78,7 @@ final class SessionSplitPresentationTests: XCTestCase {
             }
             .hapiTypography()
             .hapiTheme(.light)
+            .environment(DisplayPrefs())
         }
     }
 
@@ -184,6 +185,7 @@ final class SessionSplitPresentationTests: XCTestCase {
             }
             .hapiTypography()
             .hapiTheme(.light)
+            .environment(DisplayPrefs())
         }
     }
 

@@ -22,6 +22,7 @@ final class HomeFilterPresentationTests: XCTestCase {
         var theme: HapiTheme = .light
         var size: DynamicTypeSize = .large
         var locale = Locale(identifier: "en")
+        var displayPrefs = DisplayPrefs()
 
         var body: some View {
             @Bindable var navigation = navigation
@@ -48,6 +49,7 @@ final class HomeFilterPresentationTests: XCTestCase {
             }
             .hapiTypography()
             .hapiTheme(theme)
+            .environment(displayPrefs)
             .environment(\.dynamicTypeSize, size)
             .environment(\.locale, locale)
             .environment(\.colorScheme, theme.isDark ? .dark : .light)
@@ -117,9 +119,11 @@ final class HomeFilterPresentationTests: XCTestCase {
         XCTAssertTrue(model.showsMachineFilter)
     }
 
-    func testNativeListRowsKeepOnlyTitleAndProjectStatus() async throws {
+    func testNativeListRowsKeepTheTwoLineContract() async throws {
         let sessions = HomeFilterTestSessions((0..<3).map { index in
             var summary = HomeFilterTestData.summary("row-\(index)", machine: nil)
+            summary.active = false
+            summary.pinned = index == 0
             summary.metadata?.summary = .init(text: "A short preview")
             summary.pendingRequestsCount = index == 2 ? 0 : 1
             summary.pendingRequestKinds = [.input]
@@ -139,6 +143,34 @@ final class HomeFilterPresentationTests: XCTestCase {
         XCTAssertLessThanOrEqual(heights[0], 70, "Two readable lines, with breathing room")
         XCTAssertEqual(heights[0], heights[1], accuracy: 1, "Source progress must not add visible content")
         XCTAssertEqual(heights[0], heights[2], accuracy: 1, "Activity shares the same quiet secondary line")
+    }
+
+    func testListFontScaleGrowsRowsWithoutAddingLines() async throws {
+        let suite = "HomeFilterFontScale-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let prefs = DisplayPrefs(defaults: defaults)
+        prefs.setListFontScale(1.3)
+
+        let sessions = HomeFilterTestSessions((0..<2).map { index in
+            var summary = HomeFilterTestData.summary("scaled-\(index)", machine: nil)
+            summary.active = false
+            summary.pinned = index == 0
+            return summary
+        })
+        let model = HomeFilterTestData.model(sessions: sessions)
+        let window = try makeWindow(
+            Harness(model: model, navigation: Navigation(), displayPrefs: prefs),
+            width: 390
+        )
+        defer { window.isHidden = true }
+        try await settle()
+        let list = try XCTUnwrap(findCollection(window))
+        let heights = try (0..<2).map { index in
+            try XCTUnwrap(list.layoutAttributesForItem(at: IndexPath(item: index, section: 0))).size.height
+        }
+        XCTAssertGreaterThan(heights[0], 70, "130% must grow the default 60-70pt row")
+        XCTAssertEqual(heights[0], heights[1], accuracy: 1)
     }
 
     func testHomeLayoutSpecimens() async throws {

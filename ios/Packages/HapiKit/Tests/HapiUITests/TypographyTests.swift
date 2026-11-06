@@ -31,6 +31,17 @@ struct TypographyTests {
         #expect(MarkdownBlockListView.spacing(before: paragraph, after: paragraph) == 12)
     }
 
+    @Test func codeFontOverrideUsesTheProvidedSize() {
+        var values = EnvironmentValues()
+        #expect(values.hapiCodeFontSize == nil)
+        values.hapiCodeFontSize = 17
+        #expect(values.hapiCodeFontSize == 17)
+
+        let typography = HapiTypography()
+        #expect(typography.codeFont(size: nil) == typography.codeFont)
+        #expect(typography.codeFont(size: 17) != typography.codeFont(size: 13))
+    }
+
     @Test func conversationRhythmDoesNotMistakeHistoryForANewTurn() {
         #expect(TranscriptRowRole.user.spacing(after: nil) == 12)
         #expect(TranscriptRowRole.user.spacing(after: .history) == 12)

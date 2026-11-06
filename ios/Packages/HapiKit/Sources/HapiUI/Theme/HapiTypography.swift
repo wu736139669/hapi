@@ -24,6 +24,13 @@ public struct HapiTypography: Equatable, Sendable {
     public var codeLineSpacing: CGFloat { 2 * codeScale }
     public var bodyFont: Font { .system(size: bodySize, weight: regularWeight) }
     public var codeFont: Font { .system(size: codeSize, weight: regularWeight, design: .monospaced) }
+
+    /// Code/terminal text uses the user override when present; everything
+    /// else keeps the Dynamic-Type-derived code size.
+    public func codeFont(size: CGFloat?) -> Font {
+        guard let size else { return codeFont }
+        return .system(size: size, weight: regularWeight, design: .monospaced)
+    }
     public var captionFont: Font { .system(size: captionSize, weight: regularWeight) }
     public var inlineCodeFont: Font { .system(size: inlineCodeSize, weight: regularWeight, design: .monospaced) }
     public var captionMonoFont: Font { .system(size: captionSize, weight: regularWeight, design: .monospaced) }
@@ -49,10 +56,22 @@ private struct HapiTypographyKey: EnvironmentKey {
     static let defaultValue = HapiTypography()
 }
 
+/// Optional override for terminal-styled/code text only. Kept separate from
+/// `HapiTypography` so the app's existing local typography installs do not
+/// reset it and chat body text is unaffected.
+private struct HapiCodeFontSizeKey: EnvironmentKey {
+    static let defaultValue: CGFloat? = nil
+}
+
 public extension EnvironmentValues {
     var hapiTypography: HapiTypography {
         get { self[HapiTypographyKey.self] }
         set { self[HapiTypographyKey.self] = newValue }
+    }
+
+    var hapiCodeFontSize: CGFloat? {
+        get { self[HapiCodeFontSizeKey.self] }
+        set { self[HapiCodeFontSizeKey.self] = newValue }
     }
 }
 
