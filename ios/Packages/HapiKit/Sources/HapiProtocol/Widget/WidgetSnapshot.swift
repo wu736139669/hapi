@@ -11,6 +11,10 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         public var id: String
         public var title: String
         public var project: String
+        /// Raw `metadata.flavor` of the agent that owns the session (`claude`,
+        /// `codex`, `opencode`, ...). Drives the brand icon in the widget row;
+        /// `nil` for rows synthesized from a push before the app wrote them.
+        public var flavor: String?
         /// Reuses the Live Activity status vocabulary: `working` renders as
         /// “running”, `needsInput` as “needs reply”.
         public var status: LiveActivityContentState.Status
@@ -29,6 +33,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
             id: String,
             title: String,
             project: String,
+            flavor: String? = nil,
             status: LiveActivityContentState.Status,
             startedAt: Int?,
             updatedAt: Int,
@@ -41,6 +46,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
             self.id = id
             self.title = title
             self.project = project
+            self.flavor = flavor
             self.status = status
             self.startedAt = startedAt
             self.updatedAt = updatedAt
@@ -136,6 +142,7 @@ public enum WidgetSnapshotBuilder {
                 id: summary.id,
                 title: title(for: summary),
                 project: projectName(for: summary),
+                flavor: summary.metadata?.flavor,
                 status: status,
                 startedAt: summary.lastUserMessageAt,
                 updatedAt: summary.updatedAt,

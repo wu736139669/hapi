@@ -43,11 +43,12 @@ struct HapiWidgetProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<HapiWidgetEntry>) -> Void) {
         let now = Date()
-        let entry = HapiWidgetEntry(date: now, snapshot: WidgetSnapshotStore.load() ?? .empty)
+        let snapshot = WidgetSnapshotStore.load() ?? .empty
         // WidgetKit widgets are snapshots, not live streams. The app and the
         // NSE reload immediately on changes; this five-minute fallback
         // catches reloads the system throttled. Running elapsed text ticks
-        // live via Text(timerInterval:); status only changes on a reload.
+        // live via the dynamic timer; status only changes on a reload.
+        let entry = HapiWidgetEntry(date: now, snapshot: snapshot)
         completion(Timeline(entries: [entry], policy: .after(now.addingTimeInterval(5 * 60))))
     }
 }
@@ -87,9 +88,9 @@ private struct HapiWidgetView: View {
         case .systemSmall:
             SmallWidget(snapshot: entry.snapshot)
         case .systemMedium:
-            MediumWidget(snapshot: entry.snapshot)
+            MediumWidget(snapshot: entry.snapshot, now: entry.date)
         case .systemLarge:
-            LargeWidget(snapshot: entry.snapshot)
+            LargeWidget(snapshot: entry.snapshot, now: entry.date)
         case .accessoryCircular:
             CircularAccessory(snapshot: entry.snapshot)
         case .accessoryRectangular:
@@ -97,7 +98,7 @@ private struct HapiWidgetView: View {
         case .accessoryInline:
             InlineAccessory(snapshot: entry.snapshot)
         default:
-            MediumWidget(snapshot: entry.snapshot)
+            MediumWidget(snapshot: entry.snapshot, now: entry.date)
         }
     }
 
@@ -169,6 +170,7 @@ private struct SmallWidget: View {
 
 private struct MediumWidget: View {
     let snapshot: WidgetSnapshot
+    let now: Date
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -178,7 +180,7 @@ private struct MediumWidget: View {
                 EmptyWidgetState()
             } else {
                 ForEach(snapshot.sessions.prefix(3)) { session in
-                    SessionRow(session: session, hubUrl: snapshot.hubUrl, style: .compact)
+                    SessionRow(session: session, hubUrl: snapshot.hubUrl, style: .compact, now: now)
                 }
             }
             Spacer(minLength: 0)
@@ -189,6 +191,7 @@ private struct MediumWidget: View {
 
 private struct LargeWidget: View {
     let snapshot: WidgetSnapshot
+    let now: Date
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -242,14 +245,14 @@ private struct LargeWidget: View {
             if !runningRows.isEmpty {
                 SectionHeader(title: "Working", count: snapshot.runningCount, color: .blue)
                 ForEach(runningRows) { session in
-                    SessionRow(session: session, hubUrl: snapshot.hubUrl, style: .dense)
+                    SessionRow(session: session, hubUrl: snapshot.hubUrl, style: .dense, now: now)
                 }
             }
             if !activeRows.isEmpty {
                 SectionHeader(title: "Active", count: activeCount, color: .teal)
                     .padding(.top, runningRows.isEmpty ? 0 : 2)
                 ForEach(activeRows) { session in
-                    SessionRow(session: session, hubUrl: snapshot.hubUrl, style: .dense)
+                    SessionRow(session: session, hubUrl: snapshot.hubUrl, style: .dense, now: now)
                 }
             }
         }
@@ -392,6 +395,7 @@ private struct SessionRow: View {
     let session: WidgetSnapshot.Session
     let hubUrl: String
     let style: Style
+    let now: Date
 
     var body: some View {
         if let url = SessionLink.url(sessionId: session.id, hubUrl: hubUrl.isEmpty ? nil : hubUrl) {
@@ -412,9 +416,11 @@ private struct SessionRow: View {
 
     private var row: some View {
         HStack(alignment: .center, spacing: 6) {
-            Circle()
-                .fill(session.status.color)
-                .frame(width: 6, height: 6)
+            SessionRowLeading(
+                status: session.status,
+                flavor: session.flavor,
+                size: style == .dense ? 15 : 14
+            )
             VStack(alignment: .leading, spacing: 1) {
                 Text(session.title)
                     .font(.system(size: style == .dense ? 12 : 11.5, weight: .semibold))
@@ -450,21 +456,31 @@ private struct SessionRow: View {
     }
 
     /// Status and time are both pinned to the trailing edge so every row
-    /// scans the same way. The icon keeps the status visible without
-    /// repeating the section header; actionable states also show the label.
+    /// scans the same way. The leading brand icon carries the status color;
+    /// actionable states also show a text label.
     private var trailing: some View {
         HStack(spacing: 4) {
-            StatusBadge(status: session.status, showsText: showsStatusText)
+            // The section already says Working/Active, so the old status
+            // icon repeated it; only actionable states keep a text label.
+            if showsStatusText {
+                Text(session.status.shortLabel)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(session.status.color)
+                    .lineLimit(1)
+            }
             if session.status == .working, let startedAt = session.startedAt {
-                ElapsedText(startedAt: startedAt)
-                    .font(.system(size: style == .dense ? 10 : 9.5, weight: .medium).monospacedDigit())
+                // Slot width and glyph alignment live inside ElapsedText:
+                // WidgetKit draws dynamic text at the slot's leading edge
+                // unless the text itself is trailing-aligned.
+                ElapsedText(startedAt: startedAt, size: style == .dense ? 10 : 9.5)
                     .foregroundStyle(.secondary)
             } else {
-                RelativeTimeText(updatedAt: session.updatedAt)
+                RelativeTimeText(updatedAt: session.updatedAt, now: now)
                     .font(.system(size: style == .dense ? 9.5 : 9, weight: .medium))
                     .foregroundStyle(.secondary)
             }
         }
+        .layoutPriority(1)
     }
 
     private var showsStatusText: Bool {
@@ -477,22 +493,33 @@ private struct SessionRow: View {
     }
 }
 
-private struct StatusBadge: View {
+/// Agent brand icon with the session status as a corner dot. Flavors without a
+/// bundled logo keep the plain status dot so the row still scans by color.
+private struct SessionRowLeading: View {
     let status: LiveActivityContentState.Status
-    var showsText = true
+    let flavor: String?
+    let size: CGFloat
 
     var body: some View {
-        if showsText {
-            Label(status.shortLabel, systemImage: status.symbol)
-                .font(.system(size: 9, weight: .semibold))
-                .labelStyle(.titleAndIcon)
-                .foregroundStyle(status.color)
-                .lineLimit(1)
-        } else {
-            Image(systemName: status.symbol)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(status.color)
+        Group {
+            if AgentFlavorIconView.assetName(forFlavor: flavor) != nil {
+                ZStack(alignment: .bottomTrailing) {
+                    AgentFlavorIconView(flavor: flavor, size: size)
+                    Circle()
+                        .fill(status.color)
+                        .frame(width: 7, height: 7)
+                        .overlay {
+                            Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 1.2)
+                        }
+                        .offset(x: 1.5, y: 1.5)
+                }
+            } else {
+                Circle()
+                    .fill(status.color)
+                    .frame(width: 6, height: 6)
+            }
         }
+        .frame(width: size, height: size)
     }
 }
 
@@ -513,9 +540,10 @@ enum WidgetRelativeTime {
 
 private struct RelativeTimeText: View {
     let updatedAt: Int
+    let now: Date
 
     var body: some View {
-        Text(WidgetRelativeTime.text(updatedAt: updatedAt))
+        Text(WidgetRelativeTime.text(updatedAt: updatedAt, now: now))
     }
 }
 
@@ -583,12 +611,22 @@ private struct EmptyWidgetState: View {
     }
 }
 
+/// Live second-level elapsed label.
+///
+/// WidgetKit expands dynamic text to the proposed width but draws its line at
+/// the text view's leading edge; `multilineTextAlignment` is what actually
+/// pins the glyphs inside the slot. The fixed frame also keeps the dynamic
+/// text renderable (without one the widget came back blank).
 private struct ElapsedText: View {
     let startedAt: Int
+    let size: CGFloat
 
     var body: some View {
         let start = Date(timeIntervalSince1970: Double(startedAt) / 1000)
-        Text(timerInterval: min(start, Date())...Date.distantFuture, countsDown: false)
+        Text(min(start, Date()), style: .timer)
+            .font(.system(size: size, weight: .medium).monospacedDigit())
+            .multilineTextAlignment(.trailing)
+            .frame(width: 52, alignment: .trailing)
     }
 }
 

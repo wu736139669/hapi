@@ -14,6 +14,7 @@ struct WidgetSnapshotTests {
         lastUserMessageAt: Int? = nil,
         lastUserMessagePreview: String? = nil,
         name: String? = nil,
+        flavor: String? = nil,
         path: String = "/Users/me/projects/hapi",
         todo: TodoProgress? = nil,
         backgroundTasks: Int = 0
@@ -26,7 +27,7 @@ struct WidgetSnapshotTests {
             updatedAt: updatedAt,
             lastUserMessageAt: lastUserMessageAt,
             lastUserMessagePreview: lastUserMessagePreview,
-            metadata: SessionSummaryMetadata(name: name, path: path),
+            metadata: SessionSummaryMetadata(name: name, path: path, flavor: flavor),
             metadataVersion: 1,
             agentStateVersion: 1,
             todosUpdatedAt: 0,
@@ -152,6 +153,21 @@ struct WidgetSnapshotTests {
 
         #expect(snapshot.sessions.first(where: { $0.id == "s1" })?.lastMessage == "line one line two")
         #expect(snapshot.sessions.first(where: { $0.id == "s2" })?.lastMessage == nil)
+    }
+
+    @Test func carriesAgentFlavorForTheRowIcon() {
+        let now = 1_700_000_000_000
+        let snapshot = WidgetSnapshotBuilder.build(
+            sessions: [
+                summary(id: "codex", thinking: true, updatedAt: now - 1_000, name: "Codex", flavor: "codex"),
+                summary(id: "unknown", thinking: true, updatedAt: now - 2_000, name: "Other")
+            ],
+            hubUrl: "https://hub.example.com",
+            now: now
+        )
+
+        #expect(snapshot.sessions.first { $0.id == "codex" }?.flavor == "codex")
+        #expect(snapshot.sessions.first { $0.id == "unknown" }?.flavor == nil)
     }
 
     @Test func snapshotRoundTripsThroughTheAppGroupFile() throws {
