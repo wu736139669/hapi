@@ -324,17 +324,23 @@ The same `HapiWidgets` extension also hosts static WidgetKit widgets for the
 Home Screen, Lock Screen accessories and StandBy. They are snapshot-driven,
 not real-time, and never hold hub credentials.
 
-- **Data:** the app writes a small `widget-snapshot.json` to the App Group
-  container `group.run.hapi.app` (`HapiProtocol/Widget/WidgetSnapshot.swift`).
-  It contains only display fields: session id/title/project, status, elapsed
-  start, pending/todo/background counts, hub origin, and exact status totals.
+- **Data:** the app writes a small `widget-snapshot.json` to the app's App Group
+  container (`HapiProtocol/Widget/WidgetSnapshot.swift`).
+  It contains display fields: session id/title/project, status, elapsed
+  start, pending/todo/background counts, hub origin, exact status totals, and
+  a short preview of the last human prompt. No full transcript or credentials.
 - **Refresh:** `SessionListStore` changes debounce into a snapshot write;
   the Notification Service Extension also applies each decrypted push to the
   snapshot and calls `WidgetCenter.reloadTimelines` — so `ready` /
   `permission-request` / `input-request` update the widget while the app is
-  suspended. The TimelineProvider falls back to a 15-minute policy.
+  suspended. With direct APNs the hub additionally sends a silent
+  `content-available` background push when a widget-visible session state
+  changes; `WidgetRefreshScheduler` wakes the app, refreshes the list and
+  rewrites the snapshot, with a `BGAppRefreshTask` (~15 min) fallback. Both
+  are best-effort and stop after a force-quit; the TimelineProvider also
+  falls back to a 5-minute policy.
 - **Surfaces:** systemSmall (totals + top attention), systemMedium (3 rows),
-  systemLarge (up to 7 rows + progress), accessoryCircular /
+  systemLarge (up to 9 rows + progress), accessoryCircular /
   accessoryRectangular / accessoryInline, and StandBy (reuses the large
   layout). Every session row deep-links to `hapicompanion://sessions/<id>`.
 - **Scope:** active hub only; attention-first ordering; recently completed
@@ -348,8 +354,9 @@ not real-time, and never hold hub credentials.
   and `HapiWidgets` with `group.run.hapi.app`; keep the shared Keychain group
   for the push/Live Activity keys. The widget target stays iOS-only.
 - **Layer map:** `HapiProtocol/Widget/` (snapshot model/store/builder),
-  `Hapi/Features/Widgets/` (debounced writer), `HapiWidgets/HapiHomeWidget.swift`
-  (families + timeline), and the NSE's `updateWidgetSnapshot` hook.
+  `Hapi/Features/Widgets/` (debounced writer, silent-push/BG refresh
+  scheduler), `HapiWidgets/HapiHomeWidget.swift` (families + timeline), and
+  the NSE's `updateWidgetSnapshot` hook.
 
 ## Layout
 

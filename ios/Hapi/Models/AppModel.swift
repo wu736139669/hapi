@@ -79,6 +79,10 @@ final class AppModel {
         self.liveActivityPrefs = liveActivityPrefs
         self.liveActivity = LiveActivityControllerFactory.make(prefs: liveActivityPrefs)
         self.widgetSnapshots = WidgetSnapshotControllerFactory.make()
+        WidgetRefreshBridge.shared.install { [weak self] in
+            guard let self else { return false }
+            return await self.refreshForWidget()
+        }
         restore()
         // Push wiring (P3): the coordinator is a process singleton (UIKit
         // delegates outlive any model); it pulls navigation + suppression
@@ -254,6 +258,29 @@ final class AppModel {
     /// the pref and the live activities never disagree.
     func setLiveActivitiesEnabled(_ enabled: Bool) {
         liveActivity.setEnabled(enabled)
+    }
+
+    /// Background/silent-push refresh for the Home Screen widget. Fetches the
+    /// active hub's list, rewrites the App Group snapshot, and waits for the
+    /// write before the background task completes.
+    @MainActor
+    func refreshForWidget() async -> Bool {
+        guard let session else {
+            widgetSnapshots.clear()
+            return false
+        }
+        do {
+            try await session.sessionStore.refresh()
+            widgetSnapshots.update(session.sessionStore.sessions, hubUrl: session.hubUrl)
+            await widgetSnapshots.flushAndWait()
+            return true
+        } catch {
+            // The cached snapshot is still better than an empty widget; the
+            // next app/silent wake retries.
+            widgetSnapshots.update(session.sessionStore.sessions, hubUrl: session.hubUrl)
+            await widgetSnapshots.flushAndWait()
+            return false
+        }
     }
 
     // MARK: - Internals

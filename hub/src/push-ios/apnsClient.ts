@@ -7,6 +7,7 @@ import type {
     LiveActivityPushRequest,
     LiveActivityPushTransport
 } from '../live-activity/liveActivityPushTransport'
+import type { BackgroundPushRequest, BackgroundPushTransport } from './backgroundPushTransport'
 
 export const APNS_PRODUCTION_HOST = 'https://api.push.apple.com'
 export const APNS_SANDBOX_HOST = 'https://api.sandbox.push.apple.com'
@@ -102,7 +103,7 @@ export type ApnsClientOptions = {
  * per minute at most, so connection reuse buys nothing and a persistent
  * APNs session would need ping/goaway lifecycle management.
  */
-export class ApnsClient implements EncryptedPushTransport, LiveActivityPushTransport {
+export class ApnsClient implements EncryptedPushTransport, LiveActivityPushTransport, BackgroundPushTransport {
     private readonly jwtProvider: ApnsJwtProvider
     private readonly bundleId: string
     private readonly host: string
@@ -156,6 +157,28 @@ export class ApnsClient implements EncryptedPushTransport, LiveActivityPushTrans
                 'content-type': 'application/json'
             }),
             JSON.stringify(request.payload)
+        )
+        return result ? this.classifyLiveActivityResponse(result.status, result.body) : 'failed'
+    }
+
+    /**
+     * Silent background push used to wake the app for a widget snapshot
+     * refresh. No alert and no `hapi` envelope; the app fetches sessions
+     * over its authenticated REST connection.
+     */
+    async sendBackground(request: BackgroundPushRequest): Promise<LiveActivityPushOutcome> {
+        const result = await this.perform(
+            (jwt) => ({
+                ':method': 'POST',
+                ':path': `/3/device/${request.token}`,
+                authorization: `bearer ${jwt}`,
+                'apns-topic': this.bundleId,
+                'apns-push-type': 'background',
+                'apns-priority': '5',
+                'apns-expiration': String(request.expiration),
+                'content-type': 'application/json'
+            }),
+            JSON.stringify({ aps: { 'content-available': 1 } })
         )
         return result ? this.classifyLiveActivityResponse(result.status, result.body) : 'failed'
     }

@@ -281,6 +281,39 @@ describe('ApnsClient against a local node:http2 server', () => {
         })
         expect(outcome).toBe('failed')
     })
+    it('sends a silent background push with content-available and the background push type', async () => {
+        const client = makeClient()
+        const outcome = await client.sendBackground({
+            token: 'widget-bg-1',
+            expiration: 1_700_000_300
+        })
+        expect(outcome).toBe('sent')
+
+        const request = seen[seen.length - 1]
+        expect(request.headers[':path']).toBe('/3/device/widget-bg-1')
+        expect(request.headers['apns-topic']).toBe('run.hapi.ios')
+        expect(request.headers['apns-push-type']).toBe('background')
+        expect(request.headers['apns-priority']).toBe('5')
+        expect(request.headers['apns-expiration']).toBe('1700000300')
+        expect(request.headers['apns-collapse-id']).toBeUndefined()
+        expect(JSON.parse(request.body)).toEqual({
+            aps: { 'content-available': 1 }
+        })
+    })
+
+    it('classifies background 410 and BadDeviceToken as invalid', async () => {
+        responses.set('widget-gone', { status: 410, body: '{"reason":"Unregistered"}' })
+        responses.set('widget-bad-token', { status: 400, body: '{"reason":"BadDeviceToken"}' })
+        const client = makeClient()
+        expect(await client.sendBackground({
+            token: 'widget-gone',
+            expiration: 1_700_000_300
+        })).toBe('invalid')
+        expect(await client.sendBackground({
+            token: 'widget-bad-token',
+            expiration: 1_700_000_300
+        })).toBe('invalid')
+    })
 })
 
 describe('ApnsClient connection failure', () => {

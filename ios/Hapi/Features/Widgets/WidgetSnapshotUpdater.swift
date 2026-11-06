@@ -50,6 +50,23 @@ final class WidgetSnapshotUpdater: WidgetSnapshotControlling {
         }
     }
 
+    func flushAndWait() async {
+        debounceTask?.cancel()
+        debounceTask = nil
+        guard let pending else { return }
+        self.pending = nil
+        let snapshot = WidgetSnapshotBuilder.build(
+            sessions: pending.sessions,
+            hubUrl: pending.hubUrl
+        )
+        await Task.detached(priority: .utility) {
+            try? WidgetSnapshotStore.save(snapshot)
+            await MainActor.run {
+                WidgetCenter.shared.reloadTimelines(ofKind: WidgetSnapshotStore.widgetKind)
+            }
+        }.value
+    }
+
     func clear() {
         debounceTask?.cancel()
         debounceTask = nil

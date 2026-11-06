@@ -22,6 +22,8 @@ import { RelayClient } from './push-native/relayClient'
 import { IosPushService } from './push-ios/iosPushService'
 import { IosPushNotificationChannel } from './push-ios/iosPushChannel'
 import { resolveIosPushConfig } from './push-ios/iosPushConfig'
+import { IosWidgetRefreshService } from './push-ios/iosWidgetRefreshService'
+import { WidgetRefreshNotifier } from './widget-refresh/widgetRefreshNotifier'
 import { VisibilityTracker } from './visibility/visibilityTracker'
 import { startOpencodeUsageReconciliation, type UsageReconciliationJob } from './sync/usageReconciliation'
 import { TunnelManager } from './tunnel'
@@ -124,6 +126,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     let visibilityTracker: VisibilityTracker | null = null
     let notificationHub: NotificationHub | null = null
     let liveActivityNotifier: LiveActivityNotifier | null = null
+    let widgetRefreshNotifier: WidgetRefreshNotifier | null = null
     let tunnelManager: TunnelManager | null = null
     let usageReconciliation: UsageReconciliationJob | null = null
 
@@ -367,8 +370,14 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         const iosPushService = new IosPushService(apnsClient, store)
         notificationChannels.push(new IosPushNotificationChannel(iosPushService, store))
         liveActivityNotifier = new LiveActivityNotifier(syncEngine, store, apnsClient, { enabled: true })
+        widgetRefreshNotifier = new WidgetRefreshNotifier(
+            syncEngine,
+            new IosWidgetRefreshService(apnsClient, store),
+            { enabled: true }
+        )
         console.log(`[Hub] iOS push: apns (${iosPushConfig.env}, topic: ${iosPushConfig.bundleId})`)
         console.log(`[Hub] iOS Live Activity: apns (topic: ${iosPushConfig.bundleId}.push-type.liveactivity)`)
+        console.log('[Hub] iOS widget refresh: silent background pushes')
     } else {
         console.log(`[Hub] iOS push: off (${iosPushConfig.reason})`)
     }
@@ -407,6 +416,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
 
     notificationHub = new NotificationHub(syncEngine, notificationChannels)
     liveActivityNotifier?.start()
+    widgetRefreshNotifier?.start()
 
     // Start HTTP service first (before tunnel, so tunnel has something to forward to)
     webServer = await startWebServer({
@@ -534,6 +544,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
             await happyBot?.stop()
             notificationHub?.stop()
             liveActivityNotifier?.stop()
+            widgetRefreshNotifier?.stop()
             syncEngine?.stop()
             sseManager?.stop()
             webServer?.stop()

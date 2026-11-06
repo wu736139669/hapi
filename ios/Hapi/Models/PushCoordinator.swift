@@ -20,7 +20,31 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         let coordinator = PushCoordinator.shared
         UNUserNotificationCenter.current().delegate = coordinator
         coordinator.registerNotificationCategories()
+        WidgetRefreshScheduler.register()
+        WidgetRefreshScheduler.schedule()
         return true
+    }
+
+    func applicationDidEnterBackground(_ application: UIApplication) {
+        WidgetRefreshScheduler.schedule()
+    }
+
+    /// Silent widget-refresh wake-up. Alert pushes go through the
+    /// Notification Service Extension instead; this path has no alert and
+    /// intentionally only refreshes the active hub's snapshot.
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        guard WidgetRefreshScheduler.isSilentPush(userInfo) else {
+            completionHandler(.noData)
+            return
+        }
+        Task { @MainActor in
+            let refreshed = await WidgetRefreshBridge.shared.refresh()
+            completionHandler(refreshed ? .newData : .failed)
+        }
     }
 
     func application(
@@ -108,21 +132,19 @@ final class PushCoordinator: NSObject {
         Task {
             await self.refreshAuthorizationStatus()
             guard isPaired else { return }
-            if self.authorizationStatus == .authorized || self.authorizationStatus == .provisional {
-                UIApplication.shared.registerForRemoteNotifications()
-            }
+            // Register even when alert permission is denied: the same APNs
+            // token is used for silent widget-refresh pushes (no alert).
+            UIApplication.shared.registerForRemoteNotifications()
         }
     }
 
     /// A hub was just paired: prompt for notification permission now (the
     /// Android timing — never on the pristine first open, right away once a
-    /// hub actually exists), then register. If the APNs token is already in
-    /// hand the new hub registers immediately; otherwise the token callback
-    /// registers everything.
+    /// hub actually exists), then register. Registration is not gated on the
+    /// prompt result because silent widget refreshes do not need alerts.
     func hubPaired(_ hubUrl: String) {
         Task {
-            let granted = await self.requestAuthorizationIfNeeded()
-            guard granted else { return }
+            _ = await self.requestAuthorizationIfNeeded()
             UIApplication.shared.registerForRemoteNotifications()
             if self.apnsTokenHex != nil {
                 await self.registerHubs([hubUrl])
@@ -170,8 +192,7 @@ final class PushCoordinator: NSObject {
     /// every paired hub with a fresh token.
     func reregisterAll() {
         Task {
-            let granted = await self.requestAuthorizationIfNeeded()
-            guard granted else { return }
+            _ = await self.requestAuthorizationIfNeeded()
             UIApplication.shared.registerForRemoteNotifications()
             if self.apnsTokenHex != nil, let hubs = self.environment?.registry.hubs {
                 await self.registerHubs(hubs)

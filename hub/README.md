@@ -81,6 +81,15 @@ registration and sends none; the app ends activities on background. Live
 Activity `content-state` is encrypted with the same per-install key and a
 separate AAD (`hapi-live-activity-v1`).
 
+The same direct-APNs mode sends throttled **silent background pushes**
+(`content-available: 1`, `apns-push-type: background`) to registered iOS
+devices when a widget-visible session state changes. The app wakes briefly,
+fetches `/api/sessions` over its authenticated connection and rewrites the
+widget snapshot; a `BGAppRefreshTask` provides a periodic fallback. The
+notifier coalesces patches and sends at most one wake per namespace per
+15 seconds; relay mode does not send these pushes. Force-quit apps and
+system-throttled background pushes are best-effort, not real-time.
+
 ## Running
 
 Binary (single executable):

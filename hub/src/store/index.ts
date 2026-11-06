@@ -152,6 +152,7 @@ export class Store {
         this.ensureSessionShareSchema()
         this.ensureUsageReconciliationSchema()
         this.ensureLiveActivitySchema()
+        this.ensureFcmDevicePushKey()
         this.ensureSessionLastUserMessageSchema()
 
         if (dbPath !== ':memory:' && !dbPath.startsWith('file::memory:')) {
@@ -1401,6 +1402,21 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_live_activity_session
                 ON live_activity_tokens(namespace, session_id);
         `)
+    }
+
+    /**
+     * Additive repair for databases created by a build whose `fcm_devices`
+     * schema predated `push_key`: `/api/devices/register` otherwise 500s on
+     * every iOS registration and silent/alert push never gets a device row.
+     * The migration ladder's V23→V24 step is skipped when a drifted database
+     * already reports a newer user_version.
+     */
+    private ensureFcmDevicePushKey(): void {
+        const columns = this.db.prepare('PRAGMA table_info(fcm_devices)').all() as Array<{ name: string }>
+        if (columns.length === 0) return
+        if (!columns.some((column) => column.name === 'push_key')) {
+            this.db.exec('ALTER TABLE fcm_devices ADD COLUMN push_key TEXT')
+        }
     }
 
     /**

@@ -7,6 +7,9 @@ import HapiProtocol
 protocol WidgetSnapshotControlling: AnyObject {
     func update(_ sessions: [SessionSummary], hubUrl: String)
     func flush()
+    /// Background tasks must wait for the App Group write before they report
+    /// completion; iOS may suspend the process immediately afterwards.
+    func flushAndWait() async
     func clear()
 }
 
@@ -14,6 +17,7 @@ protocol WidgetSnapshotControlling: AnyObject {
 final class NoopWidgetSnapshotController: WidgetSnapshotControlling {
     func update(_ sessions: [SessionSummary], hubUrl: String) {}
     func flush() {}
+    func flushAndWait() async {}
     func clear() {}
 }
 
