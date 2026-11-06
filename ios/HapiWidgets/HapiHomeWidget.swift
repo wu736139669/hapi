@@ -14,7 +14,7 @@ struct HapiHomeWidget: Widget {
         ) { entry in
             HapiWidgetView(entry: entry)
         }
-        .configurationDisplayName("Happy Coding")
+        .configurationDisplayName("HappyCoding")
         .description("Running sessions and requests that need you.")
         .supportedFamilies([
             .systemSmall,
@@ -315,7 +315,7 @@ private struct RectangularAccessory: View {
             HStack(spacing: 4) {
                 Image(systemName: "waveform")
                     .font(.caption2)
-                Text(verbatim: "Happy Coding")
+                Text(verbatim: "HappyCoding")
                     .font(.caption2.weight(.bold))
                 Spacer(minLength: 0)
                 if snapshot.needsApprovalCount > 0 {
@@ -347,7 +347,7 @@ private struct InlineAccessory: View {
 
     var body: some View {
         Label {
-            Text(verbatim: "Happy Coding · \(snapshot.runningCount) working · \(snapshot.needsApprovalCount) approvals")
+            Text(verbatim: "HappyCoding · \(snapshot.runningCount) working · \(snapshot.needsApprovalCount) approvals")
         } icon: {
             Image(systemName: "waveform")
         }
@@ -361,7 +361,7 @@ private struct WidgetHeader: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Text(verbatim: "Happy Coding")
+            Text(verbatim: "HappyCoding")
                 .font(.system(size: 10, weight: .bold, design: .rounded))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

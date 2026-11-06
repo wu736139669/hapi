@@ -33,7 +33,7 @@ struct SessionLiveActivityWidget: Widget {
                             .fill(color)
                             .frame(width: 7, height: 7)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(verbatim: state?.title ?? "Happy Coding")
+                            Text(verbatim: state?.title ?? "HappyCoding")
                                 .font(.subheadline.weight(.semibold))
                                 .lineLimit(1)
                             if let project = state?.project, !project.isEmpty {
@@ -152,7 +152,7 @@ private struct SessionActivityLockScreen: View {
                     Image(systemName: "waveform")
                         .foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(verbatim: "Happy Coding")
+                        Text(verbatim: "HappyCoding")
                             .font(.subheadline.weight(.semibold))
                         Text("Open the app to view this session.")
                             .font(.caption)

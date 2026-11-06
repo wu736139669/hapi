@@ -481,13 +481,13 @@
 				CODE_SIGN_ENTITLEMENTS = Hapi/Hapi.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Hapi/Hapi-macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 12;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				DEVELOPMENT_TEAM = X75CUV458P;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Hapi/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Happy Coding";
+				INFOPLIST_KEY_CFBundleDisplayName = "HappyCoding";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = NO;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -516,13 +516,13 @@
 				CODE_SIGN_ENTITLEMENTS = Hapi/Hapi.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Hapi/Hapi-macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 12;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				DEVELOPMENT_TEAM = X75CUV458P;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Hapi/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Happy Coding";
+				INFOPLIST_KEY_CFBundleDisplayName = "HappyCoding";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = NO;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -549,7 +549,7 @@
 				CODE_SIGN_ENTITLEMENTS = HapiNotificationService/HapiNotificationService.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "HapiNotificationService/HapiNotificationService-macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 12;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				DEVELOPMENT_TEAM = X75CUV458P;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -578,7 +578,7 @@
 				CODE_SIGN_ENTITLEMENTS = HapiNotificationService/HapiNotificationService.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "HapiNotificationService/HapiNotificationService-macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 12;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				DEVELOPMENT_TEAM = X75CUV458P;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -607,11 +607,11 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = HapiWidgets/HapiWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 12;
 				DEVELOPMENT_TEAM = X75CUV458P;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HapiWidgets/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Happy Coding";
+				INFOPLIST_KEY_CFBundleDisplayName = "HappyCoding";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -637,11 +637,11 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = HapiWidgets/HapiWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 12;
 				DEVELOPMENT_TEAM = X75CUV458P;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HapiWidgets/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Happy Coding";
+				INFOPLIST_KEY_CFBundleDisplayName = "HappyCoding";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
