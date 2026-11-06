@@ -321,7 +321,7 @@ function createWebApp(options: {
     app.route('/api', createEventsRoutes(options.getSseManager, options.getSyncEngine, options.getVisibilityTracker, {
         isGuestTokenActive: (shareToken) => options.store.sessionShares.getActiveByToken(shareToken) !== null
     }))
-    app.route('/api', createSessionsRoutes(options.getSyncEngine))
+    app.route('/api', createSessionsRoutes(options.getSyncEngine, options.store))
     app.route('/api', createMessagesRoutes(options.getSyncEngine))
     app.route('/api', createPermissionsRoutes(options.getSyncEngine))
     app.route('/api', createMachinesRoutes(options.getSyncEngine, options.getTeamService, { dataDir: configuration.dataDir }))

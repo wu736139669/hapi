@@ -84,6 +84,8 @@ export type SessionSummary = {
     createdAt?: number
     /** Original timestamp of the latest user message; absent before any input. */
     lastUserMessageAt?: number
+    /** Last human prompt text, capped server-side; display-only preview. */
+    lastUserMessagePreview?: string
     pinned?: boolean
     globalPinned?: boolean
     metadata: SessionSummaryMetadata | null

@@ -40,6 +40,22 @@ export class SessionStore {
         return updateSessionReadState(this.db, id, namespace, request)
     }
 
+    /** Latest human prompt preview per session, for list/widget display. */
+    getLastUserMessagePreviews(sessionIds: readonly string[]): Map<string, string> {
+        const ids = [...new Set(sessionIds)].filter((id) => id.length > 0)
+        if (ids.length === 0) return new Map()
+        const placeholders = ids.map(() => '?').join(', ')
+        const rows = this.db.prepare(`
+            SELECT session_id, text FROM session_last_user_messages
+            WHERE session_id IN (${placeholders})
+        `).all(...ids) as Array<{ session_id: string; text: string }>
+        const previews = new Map<string, string>()
+        for (const row of rows) {
+            if (row.text.trim()) previews.set(row.session_id, row.text)
+        }
+        return previews
+    }
+
     getOrCreateSession(
         tag: string,
         metadata: unknown,

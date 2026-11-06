@@ -6,7 +6,7 @@ import { MachineStore } from './machineStore'
 import { MessageStore } from './messageStore'
 import { addMessage } from './messages'
 import { clearCachedStatements } from './statementCache'
-import { backfillLastUserMessageAt } from './sessionUserActivity'
+import { backfillLastUserMessageAt, backfillLastUserMessagePreviews } from './sessionUserActivity'
 import type { StoredMessage } from './types'
 import { PushStore } from './pushStore'
 import { FcmStore } from './fcmStore'
@@ -152,6 +152,7 @@ export class Store {
         this.ensureSessionShareSchema()
         this.ensureUsageReconciliationSchema()
         this.ensureLiveActivitySchema()
+        this.ensureSessionLastUserMessageSchema()
 
         if (dbPath !== ':memory:' && !dbPath.startsWith('file::memory:')) {
             for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
@@ -1400,6 +1401,24 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_live_activity_session
                 ON live_activity_tokens(namespace, session_id);
         `)
+    }
+
+    /**
+     * Additive preview table for the last human prompt. It is created outside
+     * the migration ladder (older hubs must keep opening the DB) and is
+     * filled for existing sessions on first start; new messages update it in
+     * the insertion transaction.
+     */
+    private ensureSessionLastUserMessageSchema(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS session_last_user_messages (
+                session_id TEXT PRIMARY KEY,
+                text TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+        `)
+        backfillLastUserMessagePreviews(this.db)
     }
 
     /**

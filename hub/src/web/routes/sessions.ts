@@ -34,6 +34,7 @@ import type { SlashCommand } from '@hapi/protocol/apiTypes'
 import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import type { SyncEngine, Session } from '../../sync/syncEngine'
+import type { Store } from '../../store'
 import { RpcTargetMissingError } from '../../sync/rpcGateway'
 import type { WebAppEnv } from '../middleware/auth'
 import { loadScratchlistAttachmentLimitsFromEnv } from '../../config/scratchlistAttachmentLimits'
@@ -84,7 +85,10 @@ function estimateBase64Bytes(base64: string): number {
     return Math.floor((len * 3) / 4) - padding
 }
 
-export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
+export function createSessionsRoutes(
+    getSyncEngine: () => SyncEngine | null,
+    store?: Store
+): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
     app.get('/sessions', (c) => {
@@ -116,11 +120,14 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             sessionRecords = sessionRecords.slice(0, limit)
         }
         const scheduledStats = engine.getFutureScheduledMessageStats(sessionRecords.map((session) => session.id))
+        const previews = store?.sessions.getLastUserMessagePreviews(sessionRecords.map((session) => session.id)) ?? new Map()
         const sessions = sessionRecords.map((session) => {
             const summary = toSessionSummary(session)
             const scheduled = scheduledStats.get(session.id)
+            const preview = previews.get(session.id)
             return {
                 ...summary,
+                ...(preview ? { lastUserMessagePreview: preview } : {}),
                 futureScheduledMessageCount: scheduled?.count ?? 0,
                 nextScheduledAt: scheduled?.nextScheduledAt ?? null
             }
