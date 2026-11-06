@@ -722,7 +722,17 @@ struct SessionRowView: View {
                 .lineLimit(1)
                 .accessibilityHidden(detailText == nil)
             Spacer(minLength: 12)
-            if let status = row.status, let symbol = status.symbolName {
+            if showsSpinner {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .controlSize(.mini)
+                    .tint(spinnerColor)
+                    // Same slot as the attention symbols so rows align.
+                    .frame(width: metrics.statusSlotSize, height: metrics.statusSlotSize)
+                    .fixedSize()
+                    .layoutPriority(1)
+                    .accessibilityLabel(Text("Running"))
+            } else if let status = row.status, let symbol = status.symbolName {
                 Image(systemName: symbol)
                     .symbolVariant(.none)
                     .symbolRenderingMode(.monochrome)
@@ -736,6 +746,19 @@ struct SessionRowView: View {
         }
         .font(.system(size: metrics.detailSize))
         .foregroundStyle(theme.textSecondary)
+    }
+
+    /// Thinking rows get the green spinner; background-only work gets the
+    /// blue one. Pending attention keeps its symbol instead.
+    private var showsSpinner: Bool {
+        if row.status == .running { return true }
+        return row.status == nil
+            && row.summary.active
+            && row.summary.backgroundTaskCount > 0
+    }
+
+    private var spinnerColor: Color {
+        row.status == .running ? theme.success : theme.accent
     }
 
     private var detailText: String? {

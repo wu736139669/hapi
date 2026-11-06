@@ -44,8 +44,11 @@ struct HapiWidgetProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<HapiWidgetEntry>) -> Void) {
         let now = Date()
         let entry = HapiWidgetEntry(date: now, snapshot: WidgetSnapshotStore.load() ?? .empty)
-        // Pushes reload the timeline immediately; this is only the fallback.
-        completion(Timeline(entries: [entry], policy: .after(now.addingTimeInterval(15 * 60))))
+        // WidgetKit widgets are snapshots, not live streams. The app and the
+        // NSE reload immediately on changes; this five-minute fallback
+        // catches reloads the system throttled. Running elapsed text ticks
+        // live via Text(timerInterval:); status only changes on a reload.
+        completion(Timeline(entries: [entry], policy: .after(now.addingTimeInterval(5 * 60))))
     }
 }
 
@@ -361,6 +364,11 @@ private struct WidgetHeader: View {
 
     var body: some View {
         HStack(spacing: 5) {
+            Image("HappyCodingIcon")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 18, height: 18)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
             Text(verbatim: "HappyCoding")
                 .font(.system(size: 10, weight: .bold, design: .rounded))
                 .foregroundStyle(.secondary)
