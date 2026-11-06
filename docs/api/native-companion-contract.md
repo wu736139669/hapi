@@ -205,8 +205,10 @@ can read notification content (PUSH SPEC v1).
   rejects the registration otherwise. Keep it in the Keychain (shared with
   the Notification Service Extension via a Keychain access group). Both
   iOS targets declare `$(AppIdentifierPrefix)run.hapi.companion.push` in
-  `keychain-access-groups`; no App Group container is used for this key.
-  Rotate it by re-registering.
+  `keychain-access-groups`. The app also mirrors the key into the protected
+  App Group container so the Live Activity extension can decrypt while the
+  Lock Screen makes the data-protection Keychain unavailable; the App Group
+  is shared only with HAPI's own extensions. Rotate it by re-registering.
 - Upsert on `(namespace, deviceId, platform)`, same as Android. Unregister
   is the same `DELETE /api/devices/register` `{ "token": ... }`.
 
@@ -392,7 +394,8 @@ seconds.
 - Envelope: `base64(nonce[12] || ciphertext || tag[16])`, key = the device's
   32-byte `pushKey`, AAD = ASCII `hapi-live-activity-v1` (domain-separated
   from the alert channel's `hapi-push-v1`).
-- The widget extension decrypts with the shared Keychain access group
+- The widget extension decrypts with the per-install key from the protected
+  App Group mirror, falling back to the shared Keychain access group
   `$(AppIdentifierPrefix)run.hapi.companion.push`; Apple and any proxy see
   ciphertext plus routing metadata only.
 - `startedAt`/`updatedAt` are epoch ms. `title` follows the web/iOS title
