@@ -70,7 +70,7 @@ struct ChatView: View {
         self.onNavigateToSession = onNavigateToSession
     }
 
-    var body: some View {
+    private var content: some View {
         Group {
             if model.isInitialLoading {
                 initialLoading
@@ -87,6 +87,10 @@ struct ChatView: View {
                 ChatTranscriptView(model: model)
             }
         }
+    }
+
+    var body: some View {
+        content
         // Reconnection must not resize the transcript and trigger its
         // viewport/bottom-follow layout handlers. Keep it below any warning.
         .overlay(alignment: .top) {
