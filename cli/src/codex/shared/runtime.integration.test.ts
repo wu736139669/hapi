@@ -106,19 +106,19 @@ describe.skipIf(process.env.HAPI_RUN_SHARED_CODEX_TESTS !== '1')('installed Code
             const nativeRequests = vi.fn(); client.setServerRequestHandler(nativeRequests); await initializeSharedClient(client);
             await client.request('thread/resume', { threadId });
             web.user?.({ content: { text: 'ASK ASYNC' } }, 'async-prompt');
-            await vi.waitFor(() => expect(Object.keys(web.state.requests ?? {})).toHaveLength(2), { timeout: 15_000 });
+            await vi.waitFor(() => expect(Object.keys(web.state.requests ?? {})).toHaveLength(1), { timeout: 15_000 });
             expect(nativeRequests).not.toHaveBeenCalled();
-            const [choice, details] = asyncQuestionsForItem(threadId, { type: 'agentMessage', id: 'call_async', delivery: 'async', questions });
-            expect(web.messages).toContainEqual(expect.objectContaining({ type: 'tool-call', name: 'request_user_input', callId: choice.id }));
+            const [question] = asyncQuestionsForItem(threadId, { type: 'agentMessage', id: 'call_async', delivery: 'async', questions });
+            expect(web.messages).toContainEqual(expect.objectContaining({ type: 'tool-call', name: 'request_user_input', callId: question.id }));
             await vi.waitFor(() => expect(modelRequests.length).toBe(2));
-            await web.rpc.get('permission')!({ id: choice.id, approved: true, answers: { [choice.questionItemId]: ['Web'] } });
+            await web.rpc.get('permission')!({ id: question.id, approved: true, answers: {
+                [question.questions[0].questionItemId]: ['Web'],
+                [question.questions[1].questionItemId]: ['user_note: From mobile']
+            } });
             release();
-            await vi.waitFor(() => expect(web.state.completedRequests?.[choice.id]?.status).toBe('resolved'), { timeout: 15_000 });
+            await vi.waitFor(() => expect(web.state.completedRequests?.[question.id]?.status).toBe('resolved'), { timeout: 15_000 });
             await vi.waitFor(() => expect(web.state.steeringActive).toBe(false), { timeout: 15_000 });
-            expect(web.state.requests?.[details.id]).toBeDefined();
-            await web.rpc.get('permission')!({ id: details.id, approved: true, answers: { [details.questionItemId]: ['user_note: From mobile'] } });
-            await vi.waitFor(() => expect(web.state.completedRequests?.[details.id]?.status).toBe('resolved'), { timeout: 15_000 });
-            await vi.waitFor(() => expect(web.messages).toContainEqual({ user: 'Any details?\nFrom mobile' }));
+            await vi.waitFor(() => expect(web.messages).toContainEqual({ user: 'Which client?\nWeb\n\nAny details?\nFrom mobile' }));
             await vi.waitFor(() => expect(JSON.stringify(modelRequests)).toContain('From mobile'), { timeout: 15_000 });
             expect(JSON.stringify(modelRequests)).toContain('send_user_message_question_reply');
             const history = record(record(await client.request('thread/read', { threadId, includeTurns: true })).thread);
