@@ -14,7 +14,7 @@
 	<true/>
 	<key>keychain-access-groups</key>
 	<array>
-		<string>$(AppIdentifierPrefix)run.hapi.companion.push</string>
+		<string>$(AppIdentifierPrefix)com.wusu.hapi.push</string>
 	</array>
 </dict>
 </plist>

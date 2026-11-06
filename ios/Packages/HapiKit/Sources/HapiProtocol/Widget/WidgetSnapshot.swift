@@ -185,7 +185,7 @@ public enum WidgetSnapshotBuilder {
 /// Shared App Group file store. The widget target and the app/NSE use the
 /// same path; tests inject a temporary directory.
 public enum WidgetSnapshotStore {
-    public static let appGroupIdentifier = "group.run.hapi.app"
+    public static let appGroupIdentifier = "group.com.wusu.hapi"
     public static let fileName = "widget-snapshot.json"
     public static let widgetKind = "HapiHomeWidget"
 

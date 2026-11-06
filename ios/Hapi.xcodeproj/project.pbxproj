@@ -483,7 +483,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
-				DEVELOPMENT_TEAM = XJB862F92W;
+				DEVELOPMENT_TEAM = X75CUV458P;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Hapi/Info.plist;
@@ -499,7 +499,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.34.1;
-				PRODUCT_BUNDLE_IDENTIFIER = run.hapi.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wusu.hapi;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTS_MACCATALYST = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -518,7 +518,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
-				DEVELOPMENT_TEAM = XJB862F92W;
+				DEVELOPMENT_TEAM = X75CUV458P;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Hapi/Info.plist;
@@ -534,7 +534,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.34.1;
-				PRODUCT_BUNDLE_IDENTIFIER = run.hapi.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wusu.hapi;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTS_MACCATALYST = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -551,7 +551,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
-				DEVELOPMENT_TEAM = XJB862F92W;
+				DEVELOPMENT_TEAM = X75CUV458P;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HapiNotificationService/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = HapiNotificationService;
@@ -562,7 +562,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.34.1;
-				PRODUCT_BUNDLE_IDENTIFIER = run.hapi.app.HapiNotificationService;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wusu.hapi.HapiNotificationService;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SUPPORTS_MACCATALYST = YES;
@@ -580,7 +580,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
-				DEVELOPMENT_TEAM = XJB862F92W;
+				DEVELOPMENT_TEAM = X75CUV458P;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HapiNotificationService/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = HapiNotificationService;
@@ -591,7 +591,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.34.1;
-				PRODUCT_BUNDLE_IDENTIFIER = run.hapi.app.HapiNotificationService;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wusu.hapi.HapiNotificationService;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SUPPORTS_MACCATALYST = YES;
@@ -608,7 +608,7 @@
 				CODE_SIGN_ENTITLEMENTS = HapiWidgets/HapiWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = XJB862F92W;
+				DEVELOPMENT_TEAM = X75CUV458P;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HapiWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = HAPI;
@@ -619,7 +619,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.34.1;
-				PRODUCT_BUNDLE_IDENTIFIER = run.hapi.app.HapiWidgets;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wusu.hapi.HapiWidgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -638,7 +638,7 @@
 				CODE_SIGN_ENTITLEMENTS = HapiWidgets/HapiWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = XJB862F92W;
+				DEVELOPMENT_TEAM = X75CUV458P;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HapiWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = HAPI;
@@ -649,7 +649,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.34.1;
-				PRODUCT_BUNDLE_IDENTIFIER = run.hapi.app.HapiWidgets;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wusu.hapi.HapiWidgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -668,7 +668,7 @@
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				PRODUCT_BUNDLE_IDENTIFIER = run.hapi.companion.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wusu.hapi.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -686,7 +686,7 @@
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				PRODUCT_BUNDLE_IDENTIFIER = run.hapi.companion.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wusu.hapi.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
