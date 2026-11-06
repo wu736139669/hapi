@@ -28,6 +28,9 @@ public final class LastSeenStore {
     public private(set) var persistenceError: String?
     /// Sessions whose visible chat follows its tail; never persisted.
     public private(set) var followedTails: [String: Int] = [:]
+    /// Read-watermark observers (the widget snapshot) run after a committed
+    /// local change. Ignored by Observation so it cannot form a cycle.
+    @ObservationIgnored public var onChange: (@MainActor () -> Void)?
     @ObservationIgnored private let directory: URL?
     @ObservationIgnored private var namespace: String?
     @ObservationIgnored private let writer = ReadStateWriter()
@@ -71,6 +74,7 @@ public final class LastSeenStore {
         }
         self.sender = sender
         sync()
+        onChange?()
     }
 
     public func setForeground(_ value: Bool) {
@@ -110,6 +114,7 @@ public final class LastSeenStore {
                 guard self.namespace == identity else { return }
                 self.state = next
                 self.persistenceError = nil
+                self.onChange?()
             } catch { self.persistenceError = error.localizedDescription }
         }
         mutationTask = task

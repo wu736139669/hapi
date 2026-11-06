@@ -170,6 +170,22 @@ struct WidgetSnapshotTests {
         #expect(snapshot.sessions.first { $0.id == "unknown" }?.flavor == nil)
     }
 
+    @Test func marksUnreadRowsFromTheReadWatermark() {
+        let now = 1_700_000_000_000
+        let snapshot = WidgetSnapshotBuilder.build(
+            sessions: [
+                summary(id: "unread", thinking: true, updatedAt: now, name: "Unread"),
+                summary(id: "read", thinking: false, updatedAt: now, name: "Read")
+            ],
+            hubUrl: "https://hub.example.com",
+            unreadSessionIds: ["unread"],
+            now: now
+        )
+
+        #expect(snapshot.sessions.first { $0.id == "unread" }?.isUnread == true)
+        #expect(snapshot.sessions.first { $0.id == "read" }?.isUnread == nil)
+    }
+
     @Test func snapshotRoundTripsThroughTheAppGroupFile() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("WidgetSnapshotTests-\(UUID().uuidString)", isDirectory: true)
@@ -202,6 +218,7 @@ struct WidgetSnapshotTests {
         var updated = try #require(WidgetSnapshotStore.load(from: directory))
         #expect(updated.sessions.first?.status == .needsApproval)
         #expect(updated.sessions.first?.pendingCount == 1)
+        #expect(updated.sessions.first?.isUnread == true)
         #expect(updated.runningCount == 0)
         #expect(updated.needsApprovalCount == 1)
 
@@ -219,6 +236,7 @@ struct WidgetSnapshotTests {
         updated = try #require(WidgetSnapshotStore.load(from: directory))
         #expect(updated.sessions.first?.id == "s2")
         #expect(updated.sessions.first?.status == .needsInput)
+        #expect(updated.sessions.first?.isUnread == true)
         #expect(updated.needsInputCount == 1)
 
         #expect(!WidgetSnapshotStore.applyPush(

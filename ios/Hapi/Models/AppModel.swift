@@ -235,7 +235,7 @@ final class AppModel {
             session?.enterForeground()
             liveActivity.appDidBecomeActive()
             if let session {
-                widgetSnapshots.update(session.sessionStore.sessions, hubUrl: session.hubUrl)
+                widgetSnapshots.update(session.sessionStore.sessions, unreadSessionIds: Self.unreadSessionIds(for: session), hubUrl: session.hubUrl)
             } else {
                 widgetSnapshots.clear()
             }
@@ -271,13 +271,13 @@ final class AppModel {
         }
         do {
             try await session.sessionStore.refresh()
-            widgetSnapshots.update(session.sessionStore.sessions, hubUrl: session.hubUrl)
+            widgetSnapshots.update(session.sessionStore.sessions, unreadSessionIds: Self.unreadSessionIds(for: session), hubUrl: session.hubUrl)
             await widgetSnapshots.flushAndWait()
             return true
         } catch {
             // The cached snapshot is still better than an empty widget; the
             // next app/silent wake retries.
-            widgetSnapshots.update(session.sessionStore.sessions, hubUrl: session.hubUrl)
+            widgetSnapshots.update(session.sessionStore.sessions, unreadSessionIds: Self.unreadSessionIds(for: session), hubUrl: session.hubUrl)
             await widgetSnapshots.flushAndWait()
             return false
         }
@@ -313,6 +313,16 @@ final class AppModel {
         buildSession(hub: hub)
     }
 
+    private static func unreadSessionIds(for session: HubSession) -> Set<String> {
+        let state = session.lastSeenStore.state
+        let followedTails = session.lastSeenStore.followedTails
+        return Set(session.sessionStore.sessions.compactMap { summary in
+            LastSeenStore.isUnread(summary, state: state, followedTails: followedTails)
+                ? summary.id
+                : nil
+        })
+    }
+
     private func buildSession(hub: String) {
         guard let newSession = HubSession(
             hubUrl: hub,
@@ -327,18 +337,26 @@ final class AppModel {
         newSession.onTerminalAuthFailure = { [weak self] in
             self?.handleTerminalAuthFailure(for: hub)
         }
+        newSession.lastSeenStore.onChange = { [weak self, weak newSession] in
+            guard let self, let newSession, self.session === newSession else { return }
+            self.widgetSnapshots.update(
+                newSession.sessionStore.sessions,
+                unreadSessionIds: Self.unreadSessionIds(for: newSession),
+                hubUrl: newSession.hubUrl
+            )
+        }
         newSession.sessionStore.onSessionsChanged = { [weak self, weak newSession] sessions in
             // A refresh that lands after a hub switch must not repopulate the
             // new hub's coordinator with the old hub's sessions.
             guard let self, let newSession, self.session === newSession else { return }
             self.liveActivity.sessionsChanged(sessions)
-            self.widgetSnapshots.update(sessions, hubUrl: newSession.hubUrl)
+            self.widgetSnapshots.update(sessions, unreadSessionIds: Self.unreadSessionIds(for: newSession), hubUrl: newSession.hubUrl)
         }
         session = newSession
         state = .paired(activeHub: hub)
         hubs = registry.hubs
         liveActivity.attach(to: newSession)
-        widgetSnapshots.update(newSession.sessionStore.sessions, hubUrl: newSession.hubUrl)
+        widgetSnapshots.update(newSession.sessionStore.sessions, unreadSessionIds: Self.unreadSessionIds(for: newSession), hubUrl: newSession.hubUrl)
         if isForeground {
             newSession.enterForeground()
         }

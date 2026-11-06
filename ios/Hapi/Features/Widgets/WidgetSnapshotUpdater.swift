@@ -10,6 +10,7 @@ import WidgetKit
 final class WidgetSnapshotUpdater: WidgetSnapshotControlling {
     private struct Pending {
         let sessions: [SessionSummary]
+        let unreadSessionIds: Set<String>
         let hubUrl: String
     }
 
@@ -17,8 +18,8 @@ final class WidgetSnapshotUpdater: WidgetSnapshotControlling {
     private var debounceTask: Task<Void, Never>?
     private let debounce: Duration = .milliseconds(400)
 
-    func update(_ sessions: [SessionSummary], hubUrl: String) {
-        pending = Pending(sessions: sessions, hubUrl: hubUrl)
+    func update(_ sessions: [SessionSummary], unreadSessionIds: Set<String>, hubUrl: String) {
+        pending = Pending(sessions: sessions, unreadSessionIds: unreadSessionIds, hubUrl: hubUrl)
         debounceTask?.cancel()
         debounceTask = Task { [debounce] in
             do {
@@ -40,7 +41,8 @@ final class WidgetSnapshotUpdater: WidgetSnapshotControlling {
         self.pending = nil
         let snapshot = WidgetSnapshotBuilder.build(
             sessions: pending.sessions,
-            hubUrl: pending.hubUrl
+            hubUrl: pending.hubUrl,
+            unreadSessionIds: pending.unreadSessionIds
         )
         Task.detached(priority: .utility) {
             try? WidgetSnapshotStore.save(snapshot)
@@ -57,7 +59,8 @@ final class WidgetSnapshotUpdater: WidgetSnapshotControlling {
         self.pending = nil
         let snapshot = WidgetSnapshotBuilder.build(
             sessions: pending.sessions,
-            hubUrl: pending.hubUrl
+            hubUrl: pending.hubUrl,
+            unreadSessionIds: pending.unreadSessionIds
         )
         await Task.detached(priority: .utility) {
             try? WidgetSnapshotStore.save(snapshot)

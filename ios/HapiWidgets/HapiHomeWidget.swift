@@ -422,10 +422,18 @@ private struct SessionRow: View {
                 size: style == .dense ? 15 : 14
             )
             VStack(alignment: .leading, spacing: 1) {
-                Text(session.title)
-                    .font(.system(size: style == .dense ? 12 : 11.5, weight: .semibold))
-                    .foregroundStyle(Color(uiColor: .label))
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    if session.isUnread == true {
+                        Circle()
+                            .fill(.blue)
+                            .frame(width: 5, height: 5)
+                            .accessibilityHidden(true)
+                    }
+                    Text(session.title)
+                        .font(.system(size: style == .dense ? 12 : 11.5, weight: .semibold))
+                        .foregroundStyle(Color(uiColor: .label))
+                        .lineLimit(1)
+                }
                 if !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.system(size: 9))
@@ -473,14 +481,18 @@ private struct SessionRow: View {
                 // WidgetKit draws dynamic text at the slot's leading edge
                 // unless the text itself is trailing-aligned.
                 ElapsedText(startedAt: startedAt, size: style == .dense ? 10 : 9.5)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(unreadTimeColor)
             } else {
                 RelativeTimeText(updatedAt: session.updatedAt, now: now)
                     .font(.system(size: style == .dense ? 9.5 : 9, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(unreadTimeColor)
             }
         }
         .layoutPriority(1)
+    }
+
+    private var unreadTimeColor: Color {
+        session.isUnread == true ? .blue : Color(uiColor: .secondaryLabel)
     }
 
     private var showsStatusText: Bool {

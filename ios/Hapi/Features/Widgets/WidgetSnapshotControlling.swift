@@ -5,7 +5,7 @@ import HapiProtocol
 /// writer is iOS-only (WidgetKit); Catalyst gets a no-op.
 @MainActor
 protocol WidgetSnapshotControlling: AnyObject {
-    func update(_ sessions: [SessionSummary], hubUrl: String)
+    func update(_ sessions: [SessionSummary], unreadSessionIds: Set<String>, hubUrl: String)
     func flush()
     /// Background tasks must wait for the App Group write before they report
     /// completion; iOS may suspend the process immediately afterwards.
@@ -15,7 +15,7 @@ protocol WidgetSnapshotControlling: AnyObject {
 
 @MainActor
 final class NoopWidgetSnapshotController: WidgetSnapshotControlling {
-    func update(_ sessions: [SessionSummary], hubUrl: String) {}
+    func update(_ sessions: [SessionSummary], unreadSessionIds: Set<String>, hubUrl: String) {}
     func flush() {}
     func flushAndWait() async {}
     func clear() {}

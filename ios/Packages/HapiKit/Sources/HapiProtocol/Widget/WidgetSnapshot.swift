@@ -28,6 +28,9 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         public var backgroundTaskCount: Int
         /// Last human prompt, single-line and capped. Nil when unknown.
         public var lastMessage: String?
+        /// Local read watermark says this session has output the operator
+        /// has not seen. Nil for snapshots written before unread tracking.
+        public var isUnread: Bool?
 
         public init(
             id: String,
@@ -41,7 +44,8 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
             todoCompleted: Int = 0,
             todoTotal: Int = 0,
             backgroundTaskCount: Int = 0,
-            lastMessage: String? = nil
+            lastMessage: String? = nil,
+            isUnread: Bool? = nil
         ) {
             self.id = id
             self.title = title
@@ -55,6 +59,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
             self.todoTotal = todoTotal
             self.backgroundTaskCount = backgroundTaskCount
             self.lastMessage = lastMessage
+            self.isUnread = isUnread
         }
     }
 
@@ -110,6 +115,7 @@ public enum WidgetSnapshotBuilder {
     public static func build(
         sessions: [SessionSummary],
         hubUrl: String,
+        unreadSessionIds: Set<String> = [],
         now: Int = Int(Date().timeIntervalSince1970 * 1000),
         recentWindowMs: Int = defaultRecentWindowMs,
         limit: Int = defaultLimit
@@ -150,7 +156,8 @@ public enum WidgetSnapshotBuilder {
                 todoCompleted: summary.todoProgress?.completed ?? 0,
                 todoTotal: summary.todoProgress?.total ?? 0,
                 backgroundTaskCount: summary.backgroundTaskCount,
-                lastMessage: preview.isEmpty ? nil : preview
+                lastMessage: preview.isEmpty ? nil : preview,
+                isUnread: unreadSessionIds.contains(summary.id) ? true : nil
             )
         }
         .sorted { lhs, rhs in
@@ -288,6 +295,7 @@ public enum WidgetSnapshotStore {
             snapshot.adjustCounts(for: old, by: -1)
             snapshot.sessions[index].status = status
             snapshot.sessions[index].updatedAt = now
+            snapshot.sessions[index].isUnread = true
             if status == .needsApproval || status == .needsInput {
                 snapshot.sessions[index].pendingCount = max(1, snapshot.sessions[index].pendingCount)
             } else {
@@ -304,7 +312,8 @@ public enum WidgetSnapshotStore {
                 status: status,
                 startedAt: nil,
                 updatedAt: now,
-                pendingCount: status == .needsApproval || status == .needsInput ? 1 : 0
+                pendingCount: status == .needsApproval || status == .needsInput ? 1 : 0,
+                isUnread: true
             ), at: 0)
         }
         snapshot.adjustCounts(for: status, by: 1)
