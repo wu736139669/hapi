@@ -45,6 +45,7 @@ final class LiveActivityCoordinator: LiveActivityControlling {
         self.hub = hub
         remoteSupported = true
         guard prefs.enabled, ActivityAuthorizationInfo().areActivitiesEnabled else {
+            endRecoveredActivities()
             return
         }
         recoverActivities()
@@ -408,6 +409,26 @@ final class LiveActivityCoordinator: LiveActivityControlling {
                 lastStateKeys[sessionId] = Self.stateKey(state)
             }
             observe(activity)
+        }
+    }
+
+    /// Feature off (or disabled in iOS Settings): clear survivors from a
+    /// previous launch so the Lock Screen and Dynamic Island go quiet.
+    private func endRecoveredActivities() {
+        let existing = Activity<SessionActivityAttributes>.activities
+        guard !existing.isEmpty else { return }
+        log.info("Live Activities disabled; ending \(existing.count) existing activities")
+        let api = hub?.api
+        for activity in existing {
+            let token = activity.pushToken.map { data in
+                data.map { String(format: "%02x", $0) }.joined()
+            }
+            Task {
+                await activity.end(nil, dismissalPolicy: .immediate)
+                if let token, let api {
+                    try? await api.unregisterLiveActivityToken(token: token)
+                }
+            }
         }
     }
 

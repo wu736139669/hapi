@@ -191,10 +191,24 @@ final class NotificationService: UNNotificationServiceExtension {
     /// `AfterFirstUnlock`, so decryption works on the lock screen (any time
     /// after the first unlock since boot).
     static func readPushKey() -> Data? {
+        if let key = keychainPushKey() {
+            return key
+        }
+        // Lock-screen extension contexts can lose data-protection Keychain
+        // access; the app mirrors the key into the App Group for this path.
+        #if os(iOS) && !targetEnvironment(macCatalyst)
+        return LiveActivityKeyStore.load()
+        #else
+        return nil
+        #endif
+    }
+
+    private static func keychainPushKey() -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "run.hapi.companion.push",
             kSecAttrAccount as String: "pushKey",
+            kSecAttrAccessGroup as String: "X75CUV458P.com.wusu.hapi.push",
             kSecUseDataProtectionKeychain as String: true,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,

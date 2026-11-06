@@ -14,7 +14,7 @@ struct HapiHomeWidget: Widget {
         ) { entry in
             HapiWidgetView(entry: entry)
         }
-        .configurationDisplayName("HAPI")
+        .configurationDisplayName("Happy Coding")
         .description("Running sessions and requests that need you.")
         .supportedFamilies([
             .systemSmall,
@@ -56,6 +56,7 @@ private struct HapiWidgetView: View {
 
     var body: some View {
         content
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .widgetURL(topSessionURL)
             .containerBackground(for: .widget) {
                 if isAccessory {
@@ -128,14 +129,14 @@ private struct SmallWidget: View {
     let snapshot: WidgetSnapshot
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 5) {
             WidgetHeader(snapshot: snapshot)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text("\(snapshot.runningCount)")
-                    .font(.system(size: 38, weight: .light, design: .rounded))
+                    .font(.system(size: 34, weight: .light, design: .rounded))
                     .monospacedDigit()
                 Text("Working")
-                    .font(.caption2.weight(.semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 5) {
@@ -145,7 +146,10 @@ private struct SmallWidget: View {
                 if snapshot.needsInputCount > 0 {
                     CountLine(color: .purple, image: "bubble.left.fill", count: snapshot.needsInputCount, label: "Needs input")
                 }
-                if snapshot.needsApprovalCount == 0 && snapshot.needsInputCount == 0 {
+                if snapshot.idleCount > 0 {
+                    CountLine(color: .teal, image: "pause.circle.fill", count: snapshot.idleCount, label: "Active")
+                }
+                if snapshot.needsApprovalCount == 0 && snapshot.needsInputCount == 0 && snapshot.idleCount == 0 {
                     if let top = snapshot.sessions.first {
                         CountLine(color: top.status.color, image: top.status.symbol, count: nil, label: top.title)
                     } else {
@@ -166,12 +170,12 @@ private struct MediumWidget: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             WidgetHeader(snapshot: snapshot)
-                .padding(.bottom, 7)
+                .padding(.bottom, 4)
             if snapshot.sessions.isEmpty {
                 EmptyWidgetState()
             } else {
                 ForEach(snapshot.sessions.prefix(3)) { session in
-                    SessionRow(session: session, hubUrl: snapshot.hubUrl, compact: true)
+                    SessionRow(session: session, hubUrl: snapshot.hubUrl, style: .compact)
                 }
             }
             Spacer(minLength: 0)
@@ -186,17 +190,90 @@ private struct LargeWidget: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             WidgetHeader(snapshot: snapshot)
-                .padding(.bottom, 7)
-            if snapshot.sessions.isEmpty {
+                .padding(.bottom, 3)
+            if running.isEmpty && active.isEmpty {
                 EmptyWidgetState()
             } else {
-                ForEach(snapshot.sessions.prefix(7)) { session in
-                    SessionRow(session: session, hubUrl: snapshot.hubUrl, compact: false)
-                }
+                sections(maxRows: 9)
             }
             Spacer(minLength: 0)
-            FooterLine(snapshot: snapshot)
+            if hasFooter {
+                FooterLine(snapshot: snapshot)
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var running: [WidgetSnapshot.Session] {
+        snapshot.sessions.filter { $0.status == .working }
+    }
+
+    /// Active but not currently thinking: idle between turns, or waiting for
+    /// a human. Mirrors the web “活跃会话” group.
+    private var active: [WidgetSnapshot.Session] {
+        snapshot.sessions.filter {
+            switch $0.status {
+            case .needsApproval, .needsInput, .needsAttention, .idle:
+                return true
+            case .working, .done, .error:
+                return false
+            }
+        }
+    }
+
+    private var activeCount: Int {
+        snapshot.idleCount
+            + snapshot.needsApprovalCount
+            + snapshot.needsInputCount
+            + snapshot.needsAttentionCount
+    }
+
+    private var hasFooter: Bool {
+        snapshot.sessions.contains { $0.backgroundTaskCount > 0 || $0.todoTotal > 0 }
+    }
+
+    private func sections(maxRows: Int) -> some View {
+        let runningRows = Array(running.prefix(maxRows))
+        let activeRows = Array(active.prefix(max(0, maxRows - runningRows.count)))
+        return VStack(alignment: .leading, spacing: 0) {
+            if !runningRows.isEmpty {
+                SectionHeader(title: "Working", count: snapshot.runningCount, color: .blue)
+                ForEach(runningRows) { session in
+                    SessionRow(session: session, hubUrl: snapshot.hubUrl, style: .dense)
+                }
+            }
+            if !activeRows.isEmpty {
+                SectionHeader(title: "Active", count: activeCount, color: .teal)
+                    .padding(.top, runningRows.isEmpty ? 0 : 2)
+                ForEach(activeRows) { session in
+                    SessionRow(session: session, hubUrl: snapshot.hubUrl, style: .dense)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct SectionHeader: View {
+    let title: LocalizedStringKey
+    let count: Int
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(color)
+                .frame(width: 5, height: 5)
+            Text(title)
+                .font(.system(size: 9.5, weight: .bold))
+            Text("(\(count))")
+                .font(.system(size: 9.5, weight: .medium))
+                .monospacedDigit()
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.top, 4)
+        .padding(.bottom, 1)
     }
 }
 
@@ -238,7 +315,7 @@ private struct RectangularAccessory: View {
             HStack(spacing: 4) {
                 Image(systemName: "waveform")
                     .font(.caption2)
-                Text("HAPI")
+                Text(verbatim: "Happy Coding")
                     .font(.caption2.weight(.bold))
                 Spacer(minLength: 0)
                 if snapshot.needsApprovalCount > 0 {
@@ -270,7 +347,7 @@ private struct InlineAccessory: View {
 
     var body: some View {
         Label {
-            Text("HAPI · \(snapshot.runningCount) working · \(snapshot.needsApprovalCount) approvals")
+            Text(verbatim: "Happy Coding · \(snapshot.runningCount) working · \(snapshot.needsApprovalCount) approvals")
         } icon: {
             Image(systemName: "waveform")
         }
@@ -284,105 +361,153 @@ private struct WidgetHeader: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            HapiMark()
-                .frame(width: 15, height: 15)
-            Text("HAPI")
-                .font(.caption2.weight(.bold))
+            Text(verbatim: "Happy Coding")
+                .font(.system(size: 10, weight: .bold, design: .rounded))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
             Spacer(minLength: 0)
             if snapshot.needsApprovalCount > 0 || snapshot.needsInputCount > 0 {
                 Circle()
                     .fill(.orange)
-                    .frame(width: 6, height: 6)
+                    .frame(width: 7, height: 7)
             }
         }
     }
 }
 
-private struct HapiMark: View {
-    var body: some View {
-        RoundedRectangle(cornerRadius: 4.5, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [Color.blue, Color.purple],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .overlay {
-                Image(systemName: "waveform")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.white)
-            }
-    }
-}
-
 private struct SessionRow: View {
+    enum Style {
+        case compact
+        case dense
+    }
+
     let session: WidgetSnapshot.Session
     let hubUrl: String
-    let compact: Bool
+    let style: Style
 
     var body: some View {
         if let url = SessionLink.url(sessionId: session.id, hubUrl: hubUrl.isEmpty ? nil : hubUrl) {
-            Link(destination: url) { row }
+            // A Link label is shrink-wrapped by WidgetKit, which kept the
+            // trailing status/time from reaching the right edge. Render the
+            // full-width row and put a clear link on top instead.
+            row
+                .overlay {
+                    Link(destination: url) {
+                        Color.clear
+                            .contentShape(Rectangle())
+                    }
+                }
         } else {
             row
         }
     }
 
     private var row: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .center, spacing: 6) {
             Circle()
                 .fill(session.status.color)
-                .frame(width: 7, height: 7)
+                .frame(width: 6, height: 6)
             VStack(alignment: .leading, spacing: 1) {
                 Text(session.title)
-                    .font(.caption.weight(.semibold))
+                    .font(.system(size: style == .dense ? 12 : 11.5, weight: .semibold))
+                    .foregroundStyle(Color(uiColor: .label))
                     .lineLimit(1)
-                if compact {
-                    Text(session.project.isEmpty ? session.status.shortLabel : session.project)
+                if !subtitle.isEmpty {
+                    Text(subtitle)
                         .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color(uiColor: .secondaryLabel))
                         .lineLimit(1)
                 }
             }
-            Spacer(minLength: 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
             trailing
         }
-        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, style == .dense ? 2.5 : 3)
         .contentShape(Rectangle())
     }
 
-    @ViewBuilder
+    /// Project and the last human prompt on one line, so the large widget
+    /// can show roughly twice as many sessions as the old three-line row.
+    private var subtitle: String {
+        switch style {
+        case .compact:
+            return session.project.isEmpty ? session.status.shortLabel : session.project
+        case .dense:
+            var parts: [String] = []
+            if !session.project.isEmpty { parts.append(session.project) }
+            if let message = session.lastMessage, !message.isEmpty { parts.append(message) }
+            return parts.isEmpty ? session.status.shortLabel : parts.joined(separator: " · ")
+        }
+    }
+
+    /// Status and time are both pinned to the trailing edge so every row
+    /// scans the same way. The icon keeps the status visible without
+    /// repeating the section header; actionable states also show the label.
     private var trailing: some View {
-        switch session.status {
-        case .working:
-            if let startedAt = session.startedAt {
+        HStack(spacing: 4) {
+            StatusBadge(status: session.status, showsText: showsStatusText)
+            if session.status == .working, let startedAt = session.startedAt {
                 ElapsedText(startedAt: startedAt)
-                    .font(.caption2.monospacedDigit())
+                    .font(.system(size: style == .dense ? 10 : 9.5, weight: .medium).monospacedDigit())
                     .foregroundStyle(.secondary)
             } else {
-                StatusBadge(status: session.status)
+                RelativeTimeText(updatedAt: session.updatedAt)
+                    .font(.system(size: style == .dense ? 9.5 : 9, weight: .medium))
+                    .foregroundStyle(.secondary)
             }
-        case .done:
-            Text(Date(timeIntervalSince1970: Double(session.updatedAt) / 1000), style: .relative)
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-        default:
-            StatusBadge(status: session.status)
+        }
+    }
+
+    private var showsStatusText: Bool {
+        switch session.status {
+        case .needsApproval, .needsInput, .needsAttention, .done, .error:
+            return true
+        case .working, .idle:
+            return false
         }
     }
 }
 
 private struct StatusBadge: View {
     let status: LiveActivityContentState.Status
+    var showsText = true
 
     var body: some View {
-        Label(status.shortLabel, systemImage: status.symbol)
-            .font(.system(size: 8, weight: .semibold))
-            .labelStyle(.titleAndIcon)
-            .foregroundStyle(status.color)
-            .lineLimit(1)
+        if showsText {
+            Label(status.shortLabel, systemImage: status.symbol)
+                .font(.system(size: 9, weight: .semibold))
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(status.color)
+                .lineLimit(1)
+        } else {
+            Image(systemName: status.symbol)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(status.color)
+        }
+    }
+}
+
+/// Compact relative time matching the web list: “刚刚”, “13分钟前”,
+/// “1小时前”. Shared by the home widget and Live Activity surfaces.
+enum WidgetRelativeTime {
+    static func text(updatedAt: Int, now: Date = Date()) -> String {
+        let date = Date(timeIntervalSince1970: Double(updatedAt) / 1000)
+        guard now.timeIntervalSince(date) >= 60 else {
+            return String(localized: "Just now")
+        }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        formatter.dateTimeStyle = .named
+        return formatter.localizedString(for: date, relativeTo: now)
+    }
+}
+
+private struct RelativeTimeText: View {
+    let updatedAt: Int
+
+    var body: some View {
+        Text(WidgetRelativeTime.text(updatedAt: updatedAt))
     }
 }
 
@@ -395,16 +520,16 @@ private struct CountLine: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: image)
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(color)
-                .frame(width: 11)
+                .frame(width: 13)
             if let count {
                 Text("\(count)")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 11, weight: .bold))
                     .monospacedDigit()
             }
             Text(label)
-                .font(.system(size: 9))
+                .font(.system(size: 10))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
@@ -433,7 +558,7 @@ private struct FooterLine: View {
         }
         .font(.system(size: 9))
         .foregroundStyle(.secondary)
-        .padding(.top, 5)
+        .padding(.top, 3)
     }
 }
 
@@ -441,7 +566,7 @@ private struct EmptyWidgetState: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("No running sessions")
-                .font(.caption.weight(.semibold))
+                .font(.system(size: 10, weight: .semibold))
             Text("Open HAPI to start one.")
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
@@ -466,6 +591,7 @@ private extension LiveActivityContentState.Status {
         case .needsApproval: return .orange
         case .needsInput: return .purple
         case .needsAttention: return .red
+        case .idle: return .teal
         case .done: return .green
         case .error: return .red
         }
@@ -477,6 +603,7 @@ private extension LiveActivityContentState.Status {
         case .needsApproval: return "hand.raised.fill"
         case .needsInput: return "bubble.left.fill"
         case .needsAttention: return "exclamationmark.bubble.fill"
+        case .idle: return "pause.circle.fill"
         case .done: return "checkmark.circle.fill"
         case .error: return "xmark.octagon.fill"
         }
@@ -488,6 +615,7 @@ private extension LiveActivityContentState.Status {
         case .needsApproval: return String(localized: "Needs approval")
         case .needsInput: return String(localized: "Needs input")
         case .needsAttention: return String(localized: "Needs attention")
+        case .idle: return String(localized: "Active")
         case .done: return String(localized: "Done")
         case .error: return String(localized: "Error")
         }
@@ -499,6 +627,7 @@ private extension LiveActivityContentState.Status {
         case .needsApproval: return String(localized: "Needs approval")
         case .needsInput: return String(localized: "Needs input")
         case .needsAttention: return String(localized: "Needs attention")
+        case .idle: return String(localized: "Active")
         case .done: return String(localized: "Done")
         case .error: return String(localized: "Error")
         }

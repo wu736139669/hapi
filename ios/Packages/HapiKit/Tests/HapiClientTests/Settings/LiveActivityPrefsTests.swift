@@ -11,17 +11,17 @@ struct LiveActivityPrefsTests {
         return (defaults, suiteName)
     }
 
-    @Test func defaultsToEnabledAndRoundTrips() throws {
+    @Test func defaultsToDisabledAndRoundTrips() throws {
         let (defaults, suiteName) = try makeDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        #expect(LiveActivityPrefs(defaults: defaults).enabled)
-
-        LiveActivityPrefs(defaults: defaults).setEnabled(false)
         #expect(!LiveActivityPrefs(defaults: defaults).enabled)
 
         LiveActivityPrefs(defaults: defaults).setEnabled(true)
         #expect(LiveActivityPrefs(defaults: defaults).enabled)
+
+        LiveActivityPrefs(defaults: defaults).setEnabled(false)
+        #expect(!LiveActivityPrefs(defaults: defaults).enabled)
     }
 
     @Test func storageKeyIsStable() {

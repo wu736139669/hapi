@@ -17,6 +17,10 @@ public struct LiveActivityContentState: Codable, Hashable, Sendable {
         case needsApproval
         case needsInput
         case needsAttention
+        /// Active session that is not currently thinking (waiting between
+        /// turns). Used by the home-screen snapshot only; the hub never sends
+        /// this as a Live Activity state.
+        case idle
         case done
         case error
     }

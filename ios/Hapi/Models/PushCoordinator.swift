@@ -1,5 +1,6 @@
 import Foundation
 import HapiClient
+import HapiProtocol
 import Observation
 import OSLog
 import Security
@@ -598,11 +599,15 @@ enum PushKeychain {
     static let service = "run.hapi.companion.push"
     static let pushKeyAccount = "pushKey"
     static let deviceIdAccount = "deviceId"
+    /// Personal-signing branch: the app, NSE and widget share this explicit
+    /// keychain access group. The official branch keeps the default group.
+    static let accessGroup = "X75CUV458P.com.wusu.hapi.push"
+    private static let log = Logger(subsystem: "run.hapi.companion", category: "keychain")
 
     /// The stored end-to-end key, if any (no generation — the extension-side
     /// read uses the same query shape).
     static func readPushKey() -> Data? {
-        read(account: pushKeyAccount)
+        read(account: pushKeyAccount) ?? LiveActivityKeyStore.load()
     }
 
     /// The per-install key, generated **once** and regenerated only when the
@@ -610,10 +615,20 @@ enum PushKeychain {
     /// re-registers on this same pass).
     static func ensurePushKey() -> PushDeviceKey? {
         if let data = read(account: pushKeyAccount), let key = PushDeviceKey(data: data) {
+            // Mirror for the Live Activity extension, which can render on the
+            // lock screen where the data-protection Keychain is unavailable.
+            _ = LiveActivityKeyStore.save(key.data)
+            return key
+        }
+        if let data = LiveActivityKeyStore.load(), let key = PushDeviceKey(data: data) {
+            // The App Group copy survives a transient Keychain failure.
+            _ = write(account: pushKeyAccount, data: key.data)
             return key
         }
         let key = PushDeviceKey.generate()
-        guard write(account: pushKeyAccount, data: key.data) else { return nil }
+        let keychainStored = write(account: pushKeyAccount, data: key.data)
+        let mirrored = LiveActivityKeyStore.save(key.data)
+        guard keychainStored || mirrored else { return nil }
         return key
     }
 
@@ -636,7 +651,13 @@ enum PushKeychain {
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess else {
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecSuccess {
+            log.info("keychain read \(account, privacy: .public) ok")
+        } else {
+            log.error("keychain read \(account, privacy: .public) failed: \(status, privacy: .public)")
+        }
+        guard status == errSecSuccess else {
             return nil
         }
         return item as? Data
@@ -646,12 +667,24 @@ enum PushKeychain {
         let query = baseQuery(account: account)
         let update: [String: Any] = [kSecValueData as String: data]
         let updateStatus = SecItemUpdate(query as CFDictionary, update as CFDictionary)
-        if updateStatus == errSecSuccess { return true }
-        guard updateStatus == errSecItemNotFound else { return false }
+        if updateStatus == errSecSuccess {
+            log.info("keychain update \(account, privacy: .public) ok")
+            return true
+        }
+        guard updateStatus == errSecItemNotFound else {
+            log.error("keychain update \(account, privacy: .public) failed: \(updateStatus, privacy: .public)")
+            return false
+        }
         var add = query
         add[kSecValueData as String] = data
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+        let addStatus = SecItemAdd(add as CFDictionary, nil)
+        if addStatus == errSecSuccess {
+            log.info("keychain add \(account, privacy: .public) ok")
+            return true
+        }
+        log.error("keychain add \(account, privacy: .public) failed: \(addStatus, privacy: .public)")
+        return false
     }
 
     private static func baseQuery(account: String) -> [String: Any] {
@@ -659,6 +692,7 @@ enum PushKeychain {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecAttrAccessGroup as String: accessGroup,
             kSecUseDataProtectionKeychain as String: true,
         ]
     }

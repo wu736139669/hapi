@@ -22,6 +22,8 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         public var todoCompleted: Int
         public var todoTotal: Int
         public var backgroundTaskCount: Int
+        /// Last human prompt, single-line and capped. Nil when unknown.
+        public var lastMessage: String?
 
         public init(
             id: String,
@@ -33,7 +35,8 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
             pendingCount: Int = 0,
             todoCompleted: Int = 0,
             todoTotal: Int = 0,
-            backgroundTaskCount: Int = 0
+            backgroundTaskCount: Int = 0,
+            lastMessage: String? = nil
         ) {
             self.id = id
             self.title = title
@@ -45,6 +48,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
             self.todoCompleted = todoCompleted
             self.todoTotal = todoTotal
             self.backgroundTaskCount = backgroundTaskCount
+            self.lastMessage = lastMessage
         }
     }
 
@@ -61,6 +65,8 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
     public var needsApprovalCount: Int
     public var needsInputCount: Int
     public var needsAttentionCount: Int
+    /// Active sessions between turns; distinct from running and done.
+    public var idleCount: Int
 
     public init(
         generatedAt: Int,
@@ -69,7 +75,8 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         runningCount: Int? = nil,
         needsApprovalCount: Int? = nil,
         needsInputCount: Int? = nil,
-        needsAttentionCount: Int? = nil
+        needsAttentionCount: Int? = nil,
+        idleCount: Int? = nil
     ) {
         self.generatedAt = generatedAt
         self.hubUrl = hubUrl
@@ -78,6 +85,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         self.needsApprovalCount = needsApprovalCount ?? sessions.filter { $0.status == .needsApproval }.count
         self.needsInputCount = needsInputCount ?? sessions.filter { $0.status == .needsInput }.count
         self.needsAttentionCount = needsAttentionCount ?? sessions.filter { $0.status == .needsAttention }.count
+        self.idleCount = idleCount ?? sessions.filter { $0.status == .idle }.count
     }
 
     public static let empty = WidgetSnapshot(generatedAt: 0, hubUrl: "", sessions: [])
@@ -90,7 +98,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
 /// row). The small/medium widget uses the first rows; the large widget uses
 /// up to eight.
 public enum WidgetSnapshotBuilder {
-    public static let defaultLimit = 8
+    public static let defaultLimit = 20
     public static let defaultRecentWindowMs = 15 * 60 * 1000
 
     public static func build(
@@ -102,26 +110,28 @@ public enum WidgetSnapshotBuilder {
     ) -> WidgetSnapshot {
         let cutoff = now - recentWindowMs
         let rows = sessions.compactMap { summary -> WidgetSnapshot.Session? in
-            let tracked = LiveActivityPolicy.isTracked(
-                active: summary.active,
-                thinking: summary.thinking,
-                pendingRequestsCount: summary.pendingRequestsCount
-            )
             let status: LiveActivityContentState.Status
-            if tracked {
-                guard let liveStatus = LiveActivityPolicy.status(
-                    active: summary.active,
-                    thinking: summary.thinking,
-                    pendingRequestsCount: summary.pendingRequestsCount,
-                    pendingRequestKinds: Set(summary.pendingRequestKinds)
-                ) else {
-                    return nil
+            if summary.active {
+                if summary.pendingRequestsCount > 0 {
+                    status = LiveActivityPolicy.status(
+                        active: true,
+                        thinking: summary.thinking,
+                        pendingRequestsCount: summary.pendingRequestsCount,
+                        pendingRequestKinds: Set(summary.pendingRequestKinds)
+                    ) ?? .needsAttention
+                } else if summary.thinking {
+                    status = .working
+                } else {
+                    // Active sessions between turns stay in the “active”
+                    // group regardless of age, matching the web session
+                    // list. The row cap keeps the widget bounded.
+                    status = .idle
                 }
-                status = liveStatus
             } else {
                 guard summary.updatedAt >= cutoff else { return nil }
                 status = .done
             }
+            let preview = lastMessage(for: summary)
             return WidgetSnapshot.Session(
                 id: summary.id,
                 title: title(for: summary),
@@ -132,7 +142,8 @@ public enum WidgetSnapshotBuilder {
                 pendingCount: summary.pendingRequestsCount,
                 todoCompleted: summary.todoProgress?.completed ?? 0,
                 todoTotal: summary.todoProgress?.total ?? 0,
-                backgroundTaskCount: summary.backgroundTaskCount
+                backgroundTaskCount: summary.backgroundTaskCount,
+                lastMessage: preview.isEmpty ? nil : preview
             )
         }
         .sorted { lhs, rhs in
@@ -150,7 +161,8 @@ public enum WidgetSnapshotBuilder {
             runningCount: rows.filter { $0.status == .working }.count,
             needsApprovalCount: rows.filter { $0.status == .needsApproval }.count,
             needsInputCount: rows.filter { $0.status == .needsInput }.count,
-            needsAttentionCount: rows.filter { $0.status == .needsAttention }.count
+            needsAttentionCount: rows.filter { $0.status == .needsAttention }.count,
+            idleCount: rows.filter { $0.status == .idle }.count
         )
     }
 
@@ -170,13 +182,23 @@ public enum WidgetSnapshotBuilder {
         return path.split(separator: "/").last.map(String.init) ?? ""
     }
 
+    /// One-line, length-capped preview of the latest human prompt. The hub
+    /// already caps the source text; this collapses newlines and trims for
+    /// the single-line widget row.
+    public static func lastMessage(for summary: SessionSummary) -> String {
+        guard let raw = summary.lastUserMessagePreview else { return "" }
+        let collapsed = raw.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        return String(collapsed.prefix(140))
+    }
+
     private static func priority(_ status: LiveActivityContentState.Status) -> Int {
         switch status {
         case .needsAttention: return 6
         case .needsApproval: return 5
         case .needsInput: return 4
         case .error: return 6
-        case .working: return 2
+        case .working: return 3
+        case .idle: return 2
         case .done: return 1
         }
     }
@@ -301,6 +323,7 @@ private extension WidgetSnapshot {
         case .needsApproval: needsApprovalCount = max(0, needsApprovalCount + delta)
         case .needsInput: needsInputCount = max(0, needsInputCount + delta)
         case .needsAttention: needsAttentionCount = max(0, needsAttentionCount + delta)
+        case .idle: idleCount = max(0, idleCount + delta)
         case .done, .error: break
         }
     }

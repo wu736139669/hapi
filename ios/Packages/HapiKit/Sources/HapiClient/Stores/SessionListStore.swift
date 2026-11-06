@@ -186,6 +186,9 @@ public final class SessionListStore: SessionListStoring {
             if let cached = cachedRows[row.id]?.lastUserMessageAt, cached > (row.lastUserMessageAt ?? Int.min) {
                 next.lastUserMessageAt = cached
             }
+            if next.lastUserMessagePreview == nil {
+                next.lastUserMessagePreview = cachedRows[row.id]?.lastUserMessagePreview
+            }
             return next
         }
         setSessions(sortSessionSummaries(reconciled))
@@ -394,6 +397,9 @@ public final class SessionListStore: SessionListStoring {
         summary.contentRevision = [existing?.contentRevision, session.contentRevision].compactMap { $0 }.max()
         summary.readState = SessionReadState.merge(existing?.readState, session.readState)
         summary.lastUserMessageAt = session.lastUserMessageAt.map { max(existing?.lastUserMessageAt ?? 0, $0) } ?? existing?.lastUserMessageAt
+        // The full-session projection has no prompt text; keep the last
+        // preview fetched from the list endpoint so widgets don't blank it.
+        summary.lastUserMessagePreview = existing?.lastUserMessagePreview
         if let index {
             list[index] = summary
         } else {
