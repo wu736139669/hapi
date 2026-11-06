@@ -86,6 +86,23 @@
         }
       }
     },
+    "No running sessions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нет запущенных сеансов"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有运行中的会话"
+          }
+        }
+      }
+    },
     "Open HAPI" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -99,6 +116,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开 HAPI"
+          }
+        }
+      }
+    },
+    "Open HAPI to start one." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Откройте HAPI, чтобы начать сеанс."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 HAPI 开始一个会话。"
           }
         }
       }

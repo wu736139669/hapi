@@ -2,6 +2,10 @@ import CryptoKit
 import Foundation
 import Security
 import UserNotifications
+#if os(iOS) && !targetEnvironment(macCatalyst)
+import HapiProtocol
+import WidgetKit
+#endif
 
 /// Notification Service Extension (P3): APNs delivers
 /// `{aps: {mutable-content: 1, alert: <generic>}, hapi: {v: 1, e: <envelope>}}`
@@ -37,6 +41,7 @@ final class NotificationService: UNNotificationServiceExtension {
 
         if let fields = Self.decryptedFields(from: request.content.userInfo) {
             Self.apply(fields, to: content)
+            Self.updateWidgetSnapshot(fields)
         }
         contentHandler(content)
     }
@@ -76,8 +81,7 @@ final class NotificationService: UNNotificationServiceExtension {
 
     /// Contract slice of `PushPayload` (see the header note): display title,
     /// display body (ready-summary composition), category for actions.
-    static func apply(_ fields: [String: String], to content: UNMutableNotificationContent) {
-        let type = fields["type"] ?? ""
+    static func apply(_ fields: [String: String], to content: UNMutableNotificationContent) {        let type = fields["type"] ?? ""
         let contractVersion = fields["contractVersion"]
         let knownVersion = contractVersion == nil || isBlank(contractVersion!) || contractVersion == "1"
 
@@ -102,6 +106,22 @@ final class NotificationService: UNNotificationServiceExtension {
         userInfo["hapiDecrypted"] = fields
         content.userInfo = userInfo
     }
+
+#if os(iOS) && !targetEnvironment(macCatalyst)
+    /// Best-effort widget snapshot refresh from a decrypted alert. The
+    /// alert path already has the session/type; the app will overwrite the
+    /// snapshot with exact counts on its next run.
+    private static func updateWidgetSnapshot(_ fields: [String: String]) {
+        guard let type = fields["type"], let sessionId = fields["sessionId"] else { return }
+        if WidgetSnapshotStore.applyPush(
+            type: type,
+            sessionId: sessionId,
+            sessionName: fields["sessionName"]
+        ) {
+            WidgetCenter.shared.reloadTimelines(ofKind: WidgetSnapshotStore.widgetKind)
+        }
+    }
+#endif
 
     private static func displayBody(_ fields: [String: String], type: String) -> String {
         if type == "ready",

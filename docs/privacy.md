@@ -46,6 +46,8 @@ Your hub, coding agents, plugins, and command-line tools may send prompts, sourc
 
 iOS Live Activities use the same per-install key and an independently domain-separated AES-256-GCM envelope (`hapi-live-activity-v1`). Apple and any relay receive ciphertext plus routing metadata only; the widget extension decrypts on device with the shared Keychain key. Live Activity remote updates currently require a hub in direct-APNs mode; relay-mode hubs report `remote:false` and the app ends the activity on background rather than showing a frozen card.
 
+Home-screen and Lock Screen status widgets read a small, display-only snapshot from the app's App Group container (`group.run.hapi.app`). It contains session/project names, status, counts and timestamps — never message text, files, or hub credentials. The snapshot is written by the app and refreshed by the Notification Service Extension from already-decrypted pushes; it stays on the device and is not sent to Apple or any relay. Widgets are visible on the Home Screen when the device is unlocked; use the system privacy/redaction options if project names should be hidden on the Lock Screen.
+
 ### HAPI native push relay
 
 The default hub configuration uses the official relay at `https://push.hapi.run` for iOS push and for Android push when no private Firebase credentials are configured. This service is separate from the optional network tunnel enabled by `hapi hub --relay`. Encryption protects notification content, **not all metadata**:

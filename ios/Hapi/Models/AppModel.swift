@@ -54,6 +54,7 @@ final class AppModel {
     let registry: HubRegistry
     let liveActivityPrefs: LiveActivityPrefs
     let liveActivity: any LiveActivityControlling
+    let widgetSnapshots: any WidgetSnapshotControlling
     private let credentialStore: any CredentialStoring
     private let performer: any HTTPPerforming
     private let pairingService: HubPairingService
@@ -77,6 +78,7 @@ final class AppModel {
         let liveActivityPrefs = LiveActivityPrefs()
         self.liveActivityPrefs = liveActivityPrefs
         self.liveActivity = LiveActivityControllerFactory.make(prefs: liveActivityPrefs)
+        self.widgetSnapshots = WidgetSnapshotControllerFactory.make()
         restore()
         // Push wiring (P3): the coordinator is a process singleton (UIKit
         // delegates outlive any model); it pulls navigation + suppression
@@ -108,6 +110,7 @@ final class AppModel {
             activate(hub: hub)
             return
         }
+        widgetSnapshots.clear()
         state = .unpaired
     }
 
@@ -149,6 +152,7 @@ final class AppModel {
         if wasActive {
             // End + unregister while the old hub's API still works.
             liveActivity.detach()
+            widgetSnapshots.clear()
             session?.shutdown()
             session = nil
         }
@@ -226,12 +230,18 @@ final class AppModel {
             isForeground = true
             session?.enterForeground()
             liveActivity.appDidBecomeActive()
+            if let session {
+                widgetSnapshots.update(session.sessionStore.sessions, hubUrl: session.hubUrl)
+            } else {
+                widgetSnapshots.clear()
+            }
             // Re-registers every hub when the APNs token arrives — the
             // cheap-upsert healing pass (Android registrar `start()`).
             PushCoordinator.shared.appDidBecomeActive(isPaired: state != .unpaired)
         case .background:
             isForeground = false
             liveActivity.appDidBackground()
+            widgetSnapshots.flush()
             session?.enterBackground()
         case .inactive:
             break // transitional; no connection changes
@@ -283,6 +293,7 @@ final class AppModel {
             performer: performer
         ) else {
             // Unreachable for registry-normalized origins; fail closed.
+            widgetSnapshots.clear()
             state = .unpaired
             return
         }
@@ -294,11 +305,13 @@ final class AppModel {
             // new hub's coordinator with the old hub's sessions.
             guard let self, let newSession, self.session === newSession else { return }
             self.liveActivity.sessionsChanged(sessions)
+            self.widgetSnapshots.update(sessions, hubUrl: newSession.hubUrl)
         }
         session = newSession
         state = .paired(activeHub: hub)
         hubs = registry.hubs
         liveActivity.attach(to: newSession)
+        widgetSnapshots.update(newSession.sessionStore.sessions, hubUrl: newSession.hubUrl)
         if isForeground {
             newSession.enterForeground()
         }
@@ -310,6 +323,7 @@ final class AppModel {
     /// pairing (or the next hub) with a banner.
     private func handleTerminalAuthFailure(for hub: String) {
         liveActivity.detach()
+        widgetSnapshots.clear()
         session = nil // the session shut itself down before calling back
         authFailureNotice = hub
         // No JWT left to authenticate a push unregister; just drop the hub

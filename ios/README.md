@@ -218,9 +218,10 @@ provider credentials as described below.
   after-first-unlock so lock-screen pushes decrypt), swaps in the real
   title/body, stamps the action category, and stores the decrypted fields in
   `userInfo` for the tap/action handlers. Undecryptable payloads deliver
-  the generic alert unchanged. The appex links nothing beyond the SDK — it
-  carries an SDK-only copy of the HapiKit `PushEnvelope` decrypt, kept honest
-  by the shared test vector.
+  the generic alert unchanged. The appex carries an SDK-only copy of the
+  HapiKit `PushEnvelope` decrypt, kept honest by the shared test vector. It
+  also links `HapiProtocol` for the App Group widget snapshot (see below);
+  the decryption copy remains self-contained.
 - **Actions.** `permission-request` → Allow / Deny; `ready` and
   `task-notification` → inline Reply. `input-request` previews the first
   question, remaining question count and session name, with tap-to-open only
@@ -307,18 +308,51 @@ lock-screen/Dynamic Island UI, Keychain read), and the hub's
 `src/live-activity/` notifier. The cross-language cipher vector is
 `shared/fixtures/live-activity/content-state-v1.json`.
 
+### Home-screen and Lock Screen widgets
+
+The same `HapiWidgets` extension also hosts static WidgetKit widgets for the
+Home Screen, Lock Screen accessories and StandBy. They are snapshot-driven,
+not real-time, and never hold hub credentials.
+
+- **Data:** the app writes a small `widget-snapshot.json` to the App Group
+  container `group.run.hapi.app` (`HapiProtocol/Widget/WidgetSnapshot.swift`).
+  It contains only display fields: session id/title/project, status, elapsed
+  start, pending/todo/background counts, hub origin, and exact status totals.
+- **Refresh:** `SessionListStore` changes debounce into a snapshot write;
+  the Notification Service Extension also applies each decrypted push to the
+  snapshot and calls `WidgetCenter.reloadTimelines` — so `ready` /
+  `permission-request` / `input-request` update the widget while the app is
+  suspended. The TimelineProvider falls back to a 15-minute policy.
+- **Surfaces:** systemSmall (totals + top attention), systemMedium (3 rows),
+  systemLarge (up to 7 rows + progress), accessoryCircular /
+  accessoryRectangular / accessoryInline, and StandBy (reuses the large
+  layout). Every session row deep-links to `hapicompanion://sessions/<id>`.
+- **Scope:** active hub only; attention-first ordering; recently completed
+  sessions stay visible for 15 minutes so the large widget can show a “done”
+  row. No Control Center controls.
+- **Privacy:** the snapshot contains project/session names (no message text,
+  no JWT). It lives in the App Group and is protected
+  `completeUntilFirstUserAuthentication`. Add `.privacySensitive` or a
+  privacy toggle if names must not show on the Lock Screen.
+- **Signing:** enable **App Groups** for the app, `HapiNotificationService`
+  and `HapiWidgets` with `group.run.hapi.app`; keep the shared Keychain group
+  for the push/Live Activity keys. The widget target stays iOS-only.
+- **Layer map:** `HapiProtocol/Widget/` (snapshot model/store/builder),
+  `Hapi/Features/Widgets/` (debounced writer), `HapiWidgets/HapiHomeWidget.swift`
+  (families + timeline), and the NSE's `updateWidgetSnapshot` hook.
+
 ## Layout
 
 | Path | Responsibility |
 |---|---|
 | `Hapi.xcodeproj/` | App, notification extension, widget extension and app-hosted tests. App sources use Xcode synchronized folders. |
 | `Hapi/Models/` | `AppModel` pairing/navigation, active `HubSession`, per-chat `ChatSession`, and `PushCoordinator`. |
-| `Hapi/Features/` | SwiftUI screens and app models for pairing, sessions, chat, new sessions, files, Scratchlist and settings; UIKit transcript hosting; Live Activity coordinator. |
-| `Packages/HapiKit/Sources/HapiProtocol/` | Foundation wire models, catalogs, pairing/deep-link parsers, versioned patches, chat reduction, message-window logic, Git parsers, and the Live Activity content-state/cipher contract. |
+| `Hapi/Features/` | SwiftUI screens and app models for pairing, sessions, chat, new sessions, files, Scratchlist and settings; UIKit transcript hosting; Live Activity coordinator; widget snapshot writer. |
+| `Packages/HapiKit/Sources/HapiProtocol/` | Foundation wire models, catalogs, pairing/deep-link parsers, versioned patches, chat reduction, message-window logic, Git parsers, Live Activity content-state/cipher, and the widget snapshot model/store. |
 | `Packages/HapiKit/Sources/HapiClient/` | Auth/REST/SSE, stores and disk snapshots, message windows, chat interaction, attachments, dictation, push, Live Activity endpoints/prefs, and testable feature logic. |
 | `Packages/HapiKit/Sources/HapiUI/` | Reusable Markdown, syntax highlighting, diff rendering, theme and typography. |
-| `HapiNotificationService/` | SDK-only extension that decrypts APNs content using the shared Keychain key. |
-| `HapiWidgets/` | WidgetKit extension: Live Activity lock-screen/Dynamic Island UI plus the shared-key decrypt. iOS-only (no Catalyst). |
+| `HapiNotificationService/` | Appex that decrypts APNs content with the shared Keychain key and refreshes the App Group widget snapshot on push. |
+| `HapiWidgets/` | WidgetKit extension: Live Activity lock-screen/Dynamic Island UI, home/lock-screen/StandBy status widgets, and the shared-key decrypt. iOS-only (no Catalyst). |
 | `Packages/HapiKit/Tests/`, `HapiTests/` | Package and app-hosted verification. |
 
 The app owns navigation, lifecycle and screen presentation; HapiKit supplies
