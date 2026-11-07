@@ -166,6 +166,12 @@ private struct SessionActivityLockScreen: View {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    private var dateLabel: String? {
+        guard let state else { return nil }
+        return Date(timeIntervalSince1970: Double(state.updatedAt) / 1000)
+            .formatted(.dateTime.month().day().weekday(.abbreviated))
+    }
+
     var body: some View {
         Group {
             if let state {
@@ -173,8 +179,8 @@ private struct SessionActivityLockScreen: View {
                     Image("HappyCodingIcon")
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 44, height: 44)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .frame(width: 58, height: 58)
+                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text(state.title)
@@ -201,12 +207,16 @@ private struct SessionActivityLockScreen: View {
                         }
                     }
 
-                    Spacer(minLength: 12)
+                    Spacer(minLength: 8)
 
-                    VStack(alignment: .trailing, spacing: 8) {
-                        LiveActivityTimeText(state: state, isStale: isStale)
-                            .font(.caption.monospacedDigit().weight(.medium))
-                            .foregroundStyle(.secondary)
+                    VStack(alignment: .trailing, spacing: 5) {
+                        LiveActivityClockText(state: state, isStale: isStale)
+                        if let dateLabel {
+                            Text(verbatim: dateLabel)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                         LiveStatusChip(status: state.status, isStale: isStale)
                     }
                 }
@@ -272,6 +282,41 @@ private struct LiveStatusChip: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
         .background(tint.opacity(0.13), in: Capsule())
+    }
+}
+
+/// Large lock-screen clock. Working sessions show live elapsed time; settled
+/// sessions show the last update clock instead of a tiny relative label.
+private struct LiveActivityClockText: View {
+    let state: LiveActivityContentState
+    let isStale: Bool
+
+    private var font: Font {
+        .system(size: 26, weight: .semibold, design: .rounded).monospacedDigit()
+    }
+
+    var body: some View {
+        Group {
+            if isStale {
+                Image(systemName: "pause.fill")
+                    .font(.caption2)
+            } else if state.status == .working {
+                Text(
+                    timerInterval: Date(timeIntervalSince1970: Double(state.startedAt) / 1000)...Date.distantFuture,
+                    countsDown: false
+                )
+            } else {
+                Text(
+                    Date(timeIntervalSince1970: Double(state.updatedAt) / 1000)
+                        .formatted(date: .omitted, time: .shortened)
+                )
+            }
+        }
+        .font(font)
+        .foregroundStyle(Color(uiColor: .label))
+        .multilineTextAlignment(.trailing)
+        .lineLimit(1)
+        .frame(width: 86, alignment: .trailing)
     }
 }
 
