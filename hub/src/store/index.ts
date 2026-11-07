@@ -6,7 +6,7 @@ import { MachineStore } from './machineStore'
 import { MessageStore } from './messageStore'
 import { addMessage } from './messages'
 import { clearCachedStatements } from './statementCache'
-import { backfillLastUserMessageAt, backfillLastUserMessagePreviews } from './sessionUserActivity'
+import { backfillLastAssistantMessagePreviews, backfillLastUserMessageAt, backfillLastUserMessagePreviews } from './sessionUserActivity'
 import type { StoredMessage } from './types'
 import { PushStore } from './pushStore'
 import { FcmStore } from './fcmStore'
@@ -154,6 +154,7 @@ export class Store {
         this.ensureLiveActivitySchema()
         this.ensureFcmDevicePushKey()
         this.ensureSessionLastUserMessageSchema()
+        this.ensureSessionLastAssistantMessageSchema()
 
         if (dbPath !== ':memory:' && !dbPath.startsWith('file::memory:')) {
             for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
@@ -1435,6 +1436,19 @@ export class Store {
             );
         `)
         backfillLastUserMessagePreviews(this.db)
+    }
+
+    /** Additive mirror of the latest assistant result for widget review. */
+    private ensureSessionLastAssistantMessageSchema(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS session_last_assistant_messages (
+                session_id TEXT PRIMARY KEY,
+                text TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+        `)
+        backfillLastAssistantMessagePreviews(this.db)
     }
 
     /**

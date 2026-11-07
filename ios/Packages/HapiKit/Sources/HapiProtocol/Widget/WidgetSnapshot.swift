@@ -28,6 +28,8 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         public var backgroundTaskCount: Int
         /// Last human prompt, single-line and capped. Nil when unknown.
         public var lastMessage: String?
+        /// Last assistant result, single-line and capped. Nil when unknown.
+        public var lastResult: String?
         /// Local read watermark says this session has output the operator
         /// has not seen. Nil for snapshots written before unread tracking.
         public var isUnread: Bool?
@@ -45,6 +47,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
             todoTotal: Int = 0,
             backgroundTaskCount: Int = 0,
             lastMessage: String? = nil,
+            lastResult: String? = nil,
             isUnread: Bool? = nil
         ) {
             self.id = id
@@ -59,6 +62,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
             self.todoTotal = todoTotal
             self.backgroundTaskCount = backgroundTaskCount
             self.lastMessage = lastMessage
+            self.lastResult = lastResult
             self.isUnread = isUnread
         }
     }
@@ -144,6 +148,7 @@ public enum WidgetSnapshotBuilder {
                 status = .done
             }
             let preview = lastMessage(for: summary)
+            let result = lastResult(for: summary)
             return WidgetSnapshot.Session(
                 id: summary.id,
                 title: title(for: summary),
@@ -157,6 +162,7 @@ public enum WidgetSnapshotBuilder {
                 todoTotal: summary.todoProgress?.total ?? 0,
                 backgroundTaskCount: summary.backgroundTaskCount,
                 lastMessage: preview.isEmpty ? nil : preview,
+                lastResult: result.isEmpty ? nil : result,
                 isUnread: unreadSessionIds.contains(summary.id) ? true : nil
             )
         }
@@ -205,6 +211,13 @@ public enum WidgetSnapshotBuilder {
         return String(collapsed.prefix(140))
     }
 
+    /// One-line, length-capped preview of the latest assistant result.
+    public static func lastResult(for summary: SessionSummary) -> String {
+        guard let raw = summary.lastAssistantMessagePreview else { return "" }
+        let collapsed = raw.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        return String(collapsed.prefix(160))
+    }
+
     private static func priority(_ status: LiveActivityContentState.Status) -> Int {
         switch status {
         case .needsAttention: return 6
@@ -224,6 +237,10 @@ public enum WidgetSnapshotStore {
     public static let appGroupIdentifier = "group.com.wusu.hapi"
     public static let fileName = "widget-snapshot.json"
     public static let widgetKind = "HapiHomeWidget"
+    public static let runningWidgetKind = "HapiRunningWidget"
+    public static let reviewWidgetKind = "HapiReviewWidget"
+    /// All home-screen widget kinds that consume this snapshot.
+    public static let homeWidgetKinds = [widgetKind, runningWidgetKind, reviewWidgetKind]
 
     /// Production location, or nil when the App Group entitlement is absent.
     public static func containerURL() -> URL? {

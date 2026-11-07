@@ -118,7 +118,9 @@ final class NotificationService: UNNotificationServiceExtension {
             sessionId: sessionId,
             sessionName: fields["sessionName"]
         ) {
-            WidgetCenter.shared.reloadTimelines(ofKind: WidgetSnapshotStore.widgetKind)
+            for kind in WidgetSnapshotStore.homeWidgetKinds {
+                WidgetCenter.shared.reloadTimelines(ofKind: kind)
+            }
         }
     }
 #endif

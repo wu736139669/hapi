@@ -17,6 +17,10 @@ function open(path = ':memory:'): Store {
     return store
 }
 const user = (text = 'hello') => ({ role: 'user', content: { type: 'text', text } })
+const assistant = (text = 'done') => ({
+    role: 'agent',
+    content: { type: 'output', data: { type: 'assistant', message: { content: [{ type: 'text', text }] } } }
+})
 const create = (store: Store, tag = 's') => store.sessions.getOrCreateSession(tag, { path: '/tmp', host: 'mac' }, null, 'default')
 
 describe('persisted last user-message time', () => {
@@ -35,6 +39,17 @@ describe('persisted last user-message time', () => {
         expect(at()).toBe(100)
         store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: '', attachments: [{ name: 'image.png' }] } }, 'attachment', null, 500)
         expect(at()).toBe(500)
+    })
+
+    it('records the latest assistant result preview for the widget review mode', () => {
+        const store = open()
+        const session = create(store)
+        store.messages.addMessage(session.id, assistant('first result'), undefined, null, 100)
+        store.messages.addMessage(session.id, user(), 'prompt', null, 200)
+        store.messages.addMessage(session.id, assistant('second result'), undefined, null, 300)
+
+        expect(store.sessions.getLastAssistantMessagePreviews([session.id]).get(session.id)).toBe('second result')
+        expect(store.sessions.getLastUserMessagePreviews([session.id]).get(session.id)).toBe('hello')
     })
 
     it('preserves original time through import, copy, merge and restart', () => {

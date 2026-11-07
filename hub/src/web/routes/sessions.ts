@@ -121,13 +121,16 @@ export function createSessionsRoutes(
         }
         const scheduledStats = engine.getFutureScheduledMessageStats(sessionRecords.map((session) => session.id))
         const previews = store?.sessions.getLastUserMessagePreviews(sessionRecords.map((session) => session.id)) ?? new Map()
+        const assistantPreviews = store?.sessions.getLastAssistantMessagePreviews(sessionRecords.map((session) => session.id)) ?? new Map()
         const sessions = sessionRecords.map((session) => {
             const summary = toSessionSummary(session)
             const scheduled = scheduledStats.get(session.id)
             const preview = previews.get(session.id)
+            const assistantPreview = assistantPreviews.get(session.id)
             return {
                 ...summary,
                 ...(preview ? { lastUserMessagePreview: preview } : {}),
+                ...(assistantPreview ? { lastAssistantMessagePreview: assistantPreview } : {}),
                 futureScheduledMessageCount: scheduled?.count ?? 0,
                 nextScheduledAt: scheduled?.nextScheduledAt ?? null
             }

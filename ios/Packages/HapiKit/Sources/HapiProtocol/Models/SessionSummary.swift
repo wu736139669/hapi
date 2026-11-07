@@ -108,6 +108,8 @@ public struct SessionSummary: Codable, Equatable, Sendable {
     public var lastUserMessageAt: Int?
     /// Display-only preview of the last human prompt from the hub.
     public var lastUserMessagePreview: String?
+    /// Display-only preview of the last assistant result from the hub.
+    public var lastAssistantMessagePreview: String?
     public var updatedAt: Int
     public var pinned: Bool?
     public var globalPinned: Bool?
@@ -141,6 +143,7 @@ public struct SessionSummary: Codable, Equatable, Sendable {
         createdAt: Int? = nil,
         lastUserMessageAt: Int? = nil,
         lastUserMessagePreview: String? = nil,
+        lastAssistantMessagePreview: String? = nil,
         pinned: Bool? = nil,
         globalPinned: Bool? = nil,
         metadata: SessionSummaryMetadata? = nil,
@@ -168,6 +171,7 @@ public struct SessionSummary: Codable, Equatable, Sendable {
         self.updatedAt = updatedAt
         self.lastUserMessageAt = lastUserMessageAt
         self.lastUserMessagePreview = lastUserMessagePreview
+        self.lastAssistantMessagePreview = lastAssistantMessagePreview
         self.createdAt = createdAt
         self.pinned = pinned
         self.globalPinned = globalPinned

@@ -328,7 +328,8 @@ not real-time, and never hold hub credentials.
   container (`HapiProtocol/Widget/WidgetSnapshot.swift`).
   It contains display fields: session id/title/project, status, elapsed
   start, pending/todo/background counts, hub origin, exact status totals, and
-  a short preview of the last human prompt. No full transcript or credentials.
+  short previews of the last human prompt and last assistant result. No full
+  transcript or credentials.
 - **Refresh:** `SessionListStore` changes debounce into a snapshot write;
   the Notification Service Extension also applies each decrypted push to the
   snapshot and calls `WidgetCenter.reloadTimelines` — so `ready` /

@@ -5,6 +5,8 @@ import WidgetKit
 struct HapiWidgetsBundle: WidgetBundle {
     var body: some Widget {
         HapiHomeWidget()
+        HapiRunningWidget()
+        HapiReviewWidget()
         SessionLiveActivityWidget()
     }
 }

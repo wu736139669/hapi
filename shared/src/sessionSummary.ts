@@ -86,6 +86,8 @@ export type SessionSummary = {
     lastUserMessageAt?: number
     /** Last human prompt text, capped server-side; display-only preview. */
     lastUserMessagePreview?: string
+    /** Last assistant result text, capped server-side; display-only preview. */
+    lastAssistantMessagePreview?: string
     pinned?: boolean
     globalPinned?: boolean
     metadata: SessionSummaryMetadata | null

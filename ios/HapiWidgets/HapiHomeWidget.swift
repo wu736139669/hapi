@@ -392,10 +392,17 @@ private struct SessionRow: View {
         case dense
     }
 
+    enum SubtitleMode {
+        case projectAndMessage
+        case task
+        case result
+    }
+
     let session: WidgetSnapshot.Session
     let hubUrl: String
     let style: Style
     let now: Date
+    var subtitleMode: SubtitleMode = .projectAndMessage
 
     var body: some View {
         if let url = SessionLink.url(sessionId: session.id, hubUrl: hubUrl.isEmpty ? nil : hubUrl) {
@@ -452,6 +459,15 @@ private struct SessionRow: View {
     /// Project and the last human prompt on one line, so the large widget
     /// can show roughly twice as many sessions as the old three-line row.
     private var subtitle: String {
+        if subtitleMode == .task {
+            if let task = session.lastMessage, !task.isEmpty { return task }
+            return session.project.isEmpty ? session.status.shortLabel : session.project
+        }
+        if subtitleMode == .result {
+            if let result = session.lastResult, !result.isEmpty { return result }
+            if let message = session.lastMessage, !message.isEmpty { return message }
+            return session.project.isEmpty ? session.status.shortLabel : session.project
+        }
         switch style {
         case .compact:
             return session.project.isEmpty ? session.status.shortLabel : session.project
@@ -689,5 +705,124 @@ private extension LiveActivityContentState.Status {
         case .done: return String(localized: "Done")
         case .error: return String(localized: "Error")
         }
+    }
+}
+
+// MARK: - Focused modes
+
+/// Running-only component: the subtitle is the task you gave the agent.
+struct HapiRunningWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: WidgetSnapshotStore.runningWidgetKind, provider: HapiWidgetProvider()) { entry in
+            HapiModeWidgetView(entry: entry, mode: .running)
+        }
+        .configurationDisplayName("Running")
+        .description("Running sessions and the task you gave them.")
+        .supportedFamilies([.systemMedium, .systemLarge])
+    }
+}
+
+/// Review component: unread results, with the last assistant output.
+struct HapiReviewWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: WidgetSnapshotStore.reviewWidgetKind, provider: HapiWidgetProvider()) { entry in
+            HapiModeWidgetView(entry: entry, mode: .review)
+        }
+        .configurationDisplayName("Review")
+        .description("Unread results waiting for your review.")
+        .supportedFamilies([.systemMedium, .systemLarge])
+    }
+}
+
+private struct HapiModeWidgetView: View {
+    enum Mode {
+        case running
+        case review
+    }
+
+    let entry: HapiWidgetEntry
+    let mode: Mode
+
+    @Environment(\.widgetFamily) private var family
+
+    private var rows: [WidgetSnapshot.Session] {
+        switch mode {
+        case .running:
+            return entry.snapshot.sessions.filter { $0.status == .working }
+        case .review:
+            return entry.snapshot.sessions.filter { $0.isUnread == true && $0.status != .working }
+        }
+    }
+
+    private var subtitleMode: SessionRow.SubtitleMode {
+        mode == .running ? .task : .result
+    }
+
+    private var topURL: URL? {
+        guard let top = rows.first else { return nil }
+        return SessionLink.url(
+            sessionId: top.id,
+            hubUrl: entry.snapshot.hubUrl.isEmpty ? nil : entry.snapshot.hubUrl
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            WidgetHeader(snapshot: entry.snapshot)
+            modeHeader
+            if rows.isEmpty {
+                if mode == .running {
+                    Text("No running sessions")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 8)
+                } else {
+                    Text("No unread results")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 8)
+                }
+            } else {
+                ForEach(rows.prefix(family == .systemLarge ? 9 : 3)) { session in
+                    SessionRow(
+                        session: session,
+                        hubUrl: entry.snapshot.hubUrl,
+                        style: .dense,
+                        now: entry.date,
+                        subtitleMode: subtitleMode
+                    )
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .widgetURL(topURL)
+        .containerBackground(for: .widget) {
+            HapiWidgetBackground()
+        }
+    }
+
+    private var modeTitle: LocalizedStringKey {
+        switch mode {
+        case .running: return "Working"
+        case .review: return "Review"
+        }
+    }
+
+    private var modeHeader: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(mode == .running ? Color.blue : Color.teal)
+                .frame(width: 6, height: 6)
+            Text(modeTitle)
+                .font(.system(size: 9.5, weight: .bold))
+            Text("(\(rows.count))")
+                .font(.system(size: 9.5, weight: .medium))
+                .monospacedDigit()
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.top, 5)
+        .padding(.bottom, 1)
     }
 }

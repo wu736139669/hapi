@@ -47,7 +47,9 @@ final class WidgetSnapshotUpdater: WidgetSnapshotControlling {
         Task.detached(priority: .utility) {
             try? WidgetSnapshotStore.save(snapshot)
             await MainActor.run {
-                WidgetCenter.shared.reloadTimelines(ofKind: WidgetSnapshotStore.widgetKind)
+                for kind in WidgetSnapshotStore.homeWidgetKinds {
+                    WidgetCenter.shared.reloadTimelines(ofKind: kind)
+                }
             }
         }
     }
@@ -65,7 +67,9 @@ final class WidgetSnapshotUpdater: WidgetSnapshotControlling {
         await Task.detached(priority: .utility) {
             try? WidgetSnapshotStore.save(snapshot)
             await MainActor.run {
-                WidgetCenter.shared.reloadTimelines(ofKind: WidgetSnapshotStore.widgetKind)
+                for kind in WidgetSnapshotStore.homeWidgetKinds {
+                    WidgetCenter.shared.reloadTimelines(ofKind: kind)
+                }
             }
         }.value
     }
@@ -77,7 +81,9 @@ final class WidgetSnapshotUpdater: WidgetSnapshotControlling {
         Task.detached(priority: .utility) {
             try? WidgetSnapshotStore.save(.empty)
             await MainActor.run {
-                WidgetCenter.shared.reloadTimelines(ofKind: WidgetSnapshotStore.widgetKind)
+                for kind in WidgetSnapshotStore.homeWidgetKinds {
+                    WidgetCenter.shared.reloadTimelines(ofKind: kind)
+                }
             }
         }
     }
