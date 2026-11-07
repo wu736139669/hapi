@@ -747,6 +747,32 @@ describe('ApiMachineClient SpawnHappySession handler', () => {
         }
     })
 
+    it('forwards the team token so the child gets HAPI_TEAM_TOKEN', async () => {
+        const machine = makeMachine('machine-spawn-team')
+        const client = new ApiMachineClient('cli-token', machine, [workspaceRoot])
+        const spawnSession = vi.fn(async () => ({ type: 'success' as const, sessionId: 'session-team' }))
+
+        client.setRPCHandlers({
+            spawnSession,
+            stopSession: vi.fn(async () => 'stopped' as const),
+            requestShutdown: vi.fn()
+        })
+
+        try {
+            await callSpawnHappySession(client, machine.id, {
+                directory: workspaceRoot,
+                agent: 'claude',
+                team: { id: 'team-1', name: 'Team One', role: 'lead', token: 'hapi_team_abc123' }
+            })
+
+            expect(spawnSession).toHaveBeenCalledWith(expect.objectContaining({
+                team: { id: 'team-1', name: 'Team One', role: 'lead', token: 'hapi_team_abc123' }
+            }))
+        } finally {
+            client.shutdown()
+        }
+    })
+
     it('returns childStarted:false on outside_workspace_roots so hub deletes the stub', async () => {
         const machine = makeMachine('machine-spawn-outside')
         const client = new ApiMachineClient('cli-token', machine, [workspaceRoot])

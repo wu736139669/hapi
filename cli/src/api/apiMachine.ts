@@ -567,7 +567,10 @@ export class ApiMachineClient {
                     ? {
                         id: String(team.id ?? ''),
                         name: String(team.name ?? ''),
-                        role: String(team.role ?? '')
+                        role: String(team.role ?? ''),
+                        // Team-scoped token: run.ts exports it as HAPI_TEAM_TOKEN
+                        // so the child can call hub team APIs directly.
+                        ...(typeof team.token === 'string' && team.token ? { token: team.token } : {})
                     }
                     : undefined
             })

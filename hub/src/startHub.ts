@@ -320,6 +320,21 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         : null
     if (teamService) {
         console.log(`[Hub] Agent Team: enabled (${config.teamsDbPath})`)
+        // Resume/reopen goes straight to rpcGateway, bypassing the spawn route
+        // that normally attaches team context. Rebuild it from membership so a
+        // resumed member keeps HAPI_TEAM_* (prompt, role, scoped token).
+        const service = teamService
+        syncEngine?.setTeamContextResolver((sessionId, namespace) => {
+            const membership = service.resolveMembership(sessionId, namespace)
+            if (!membership) return null
+            const token = service.getOrCreateAgentToken(namespace, membership.team.id) ?? undefined
+            return {
+                id: membership.team.id,
+                name: membership.team.name,
+                role: membership.member.role,
+                ...(token ? { token } : {})
+            }
+        })
         // One-time, idempotent: file pre-requirement history under requirements.
         try {
             teamService.backfillRequirements()

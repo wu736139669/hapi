@@ -69,6 +69,11 @@ type StartHappyServerOptions = {
         workingDirectory: string;
         flavor: string;
     };
+    /**
+     * Override the hub feature probe. Omit to probe /api/teams/feature
+     * (404 = teams disabled). Tests use this to exercise the team tool set.
+     */
+    teamToolsEnabled?: boolean;
 };
 
 /**
@@ -393,6 +398,94 @@ function createHapiMcpServer(
         }
     });
 
+    type SpawnPeerToolArgs = {
+        directory?: string
+        message?: string
+        name?: string
+        machine?: string
+        agent?: string
+        model?: string
+        effort?: string
+        sessionType?: 'simple' | 'worktree'
+        permissionMode?: string
+        role?: string
+        task?: string
+        modelReasoningEffort?: string
+        requirementId?: string
+        worktree?: boolean
+        worktreeName?: string
+    }
+
+    /**
+     * Plain peer spawn. Also the fallback for the unified spawn_peer tool when
+     * the caller omits `role` (team mode).
+     */
+    const runPeerSpawn = async (args: SpawnPeerToolArgs) => {
+        const directory = args.directory
+        const message = args.message
+        if (!directory || !message) {
+            return {
+                content: [{
+                    type: 'text' as const,
+                    text: 'Failed to spawn peer: pass role to spawn a team member, or directory + message to spawn a peer session.',
+                }],
+                isError: true,
+            }
+        }
+        logger.debug('[hapiMCP] spawn_peer:', directory, args.machine ? `machine=${args.machine}` : '');
+        try {
+            const metadata = client.getMetadata()
+            const summaryMeta = toSessionSummaryMetadata(metadata)
+            const result = await spawnPeer({
+                directory,
+                cwd: resolveMcpSpawnPeerCwd({
+                    workingDirectory,
+                    skillWorkingDirectory: skillLookup?.workingDirectory,
+                    sessionPath: metadata?.path,
+                }),
+                message,
+                name: args.name,
+                machine: args.machine,
+                agent: args.agent as Parameters<typeof spawnPeer>[0]['agent'],
+                model: args.model,
+                effort: args.effort,
+                sessionType: args.sessionType,
+                permissionMode: args.permissionMode as Parameters<typeof spawnPeer>[0]['permissionMode'],
+                parent: {
+                    sessionId: client.sessionId,
+                    name: metadata?.name ?? null,
+                    agentSessionId: summaryMeta?.agentSessionId ?? null,
+                },
+                requireParent: true,
+            });
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Spawned ${result.sessionId} (${result.name})`,
+                    },
+                ],
+                isError: false,
+            };
+        } catch (error) {
+            const message = error instanceof SpawnPeerError
+                ? error.message
+                : error instanceof Error
+                    ? error.message
+                    : String(error);
+            logger.debug('[hapiMCP] spawn_peer failed:', message);
+            return {
+                content: [
+                    {
+                        type: 'text' as const,
+                        text: `Failed to spawn peer: ${message}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    }
+
     if (!peerToolsDisabled) {
         mcp.registerTool<any, any>('ping_peer', {
             description: PING_PEER_TOOL_DESCRIPTION,
@@ -436,74 +529,17 @@ function createHapiMcpServer(
             }
         });
 
-        mcp.registerTool<any, any>('spawn_peer', {
-            description: SPAWN_PEER_TOOL_DESCRIPTION,
-            title: 'Spawn Peer Session',
-            inputSchema: spawnPeerInputSchema,
-        }, async (args: {
-            directory: string
-            message: string
-            name?: string
-            machine?: string
-            agent?: string
-            model?: string
-            effort?: string
-            sessionType?: 'simple' | 'worktree'
-            permissionMode?: string
-        }) => {
-            logger.debug('[hapiMCP] spawn_peer:', args.directory, args.machine ? `machine=${args.machine}` : '');
-            try {
-                const metadata = client.getMetadata()
-                const summaryMeta = toSessionSummaryMetadata(metadata)
-                const result = await spawnPeer({
-                    directory: args.directory,
-                    cwd: resolveMcpSpawnPeerCwd({
-                        workingDirectory,
-                        skillWorkingDirectory: skillLookup?.workingDirectory,
-                        sessionPath: metadata?.path,
-                    }),
-                    message: args.message,
-                    name: args.name,
-                    machine: args.machine,
-                    agent: args.agent as Parameters<typeof spawnPeer>[0]['agent'],
-                    model: args.model,
-                    effort: args.effort,
-                    sessionType: args.sessionType,
-                    permissionMode: args.permissionMode as Parameters<typeof spawnPeer>[0]['permissionMode'],
-                    parent: {
-                        sessionId: client.sessionId,
-                        name: metadata?.name ?? null,
-                        agentSessionId: summaryMeta?.agentSessionId ?? null,
-                    },
-                    requireParent: true,
-                });
-                return {
-                    content: [
-                        {
-                            type: 'text' as const,
-                            text: `Spawned ${result.sessionId} (${result.name})`,
-                        },
-                    ],
-                    isError: false,
-                };
-            } catch (error) {
-                const message = error instanceof SpawnPeerError
-                    ? error.message
-                    : error instanceof Error
-                        ? error.message
-                        : String(error);
-                logger.debug('[hapiMCP] spawn_peer failed:', message);
-                return {
-                    content: [
-                        {
-                            type: 'text' as const,
-                            text: `Failed to spawn peer: ${message}`,
-                        },
-                    ],
-                    isError: true,
-                };
-            }
-        });
+        // With Agent Team tools on, spawn_peer is registered once by the team
+        // block below (team-aware dispatch). Registering it here too makes the
+        // MCP SDK throw `Tool spawn_peer is already registered` on every
+        // request, so the whole hapi MCP surface returns 500.
+        if (!teamToolsEnabled) {
+            mcp.registerTool<any, any>('spawn_peer', {
+                description: SPAWN_PEER_TOOL_DESCRIPTION,
+                title: 'Spawn Peer Session',
+                inputSchema: spawnPeerInputSchema,
+            }, async (args: SpawnPeerToolArgs) => runPeerSpawn(args));
+        }
 
         mcp.registerTool<any, any>('inspect_peer', {
             description: INSPECT_PEER_TOOL_DESCRIPTION,
@@ -673,21 +709,44 @@ function createHapiMcpServer(
             }
         });
 
+        // Single spawn_peer registration for team-enabled hubs. Passing `role`
+        // spawns a roster member; omitting it falls back to a plain peer spawn,
+        // so non-team sessions on a teams-enabled hub keep working.
         mcp.registerTool<any, any>('spawn_peer', {
-            description: 'Agent Team: spawn a new teammate session (own context window) with a role and an initial task. Members inherit your tool/model/thinking level/permission by default - only override when the human asks. Spawning costs tokens - prefer reusing idle members; requires user approval.',
-            title: 'Spawn Team Peer',
+            description: `${SPAWN_PEER_TOOL_DESCRIPTION} Agent Team mode: when this session belongs to a team, pass role (and optional task/requirementId) instead of directory/message to spawn a roster member. Members inherit your tool/model/thinking level/permission by default - override only when the human asks; spawning costs tokens - prefer reusing idle members; requires user approval.`,
+            title: 'Spawn Peer Session',
             inputSchema: z.object({
-                role: z.string().min(1).describe('Role / display name, e.g. "Builder A" or "Reviewer". Must be unique in the team.'),
-                task: z.string().min(1).optional().describe('Initial task brief delivered to the new member'),
-                agent: z.string().min(1).optional().describe('Agent flavor (claude, codex, ...). Defaults to the caller flavor.'),
-                model: z.string().min(1).optional().describe('Optional model override (defaults to yours)'),
-                modelReasoningEffort: z.string().min(1).max(50).optional().describe('Optional thinking-level override (defaults to yours)'),
-                permissionMode: z.string().min(1).max(50).optional().describe('Optional permission-mode override (defaults to yours)'),
-                requirementId: z.string().min(1).optional().describe('Requirement the new member\'s task belongs to (see team_status)'),
-                worktree: z.boolean().optional().describe('Run the member in an isolated git worktree (default: follow the caller)'),
-                worktreeName: z.string().min(1).max(80).optional().describe('Explicit worktree name'),
+                // Team mode (pass role).
+                role: z.string().trim().min(1).optional().describe('Team mode: role / display name for the new member, e.g. "Builder A" or "Reviewer". Must be unique in the team.'),
+                task: z.string().min(1).optional().describe('Team mode: initial task brief delivered to the new member'),
+                requirementId: z.string().min(1).optional().describe('Team mode: requirement the new member\'s task belongs to (see team_status)'),
+                worktree: z.boolean().optional().describe('Team mode: run the member in an isolated git worktree (default: follow the caller)'),
+                worktreeName: z.string().min(1).max(80).optional().describe('Team mode: explicit worktree name'),
+                modelReasoningEffort: z.string().min(1).max(50).optional().describe('Team mode: thinking-level override (defaults to yours)'),
+                // Peer mode (omit role).
+                directory: z.string().trim().min(1).optional()
+                    .describe('Peer mode: working directory for the new session on the target machine (must exist there)'),
+                message: z.string().min(1).optional().describe('Peer mode: required first user message (the remit). Empty spawn is a failed spawn.'),
+                name: z.string().trim().min(1).max(SESSION_NAME_MAX_LENGTH).optional().describe('Peer mode: session display name'),
+                machine: z.string().trim().min(1).optional()
+                    .describe(
+                        'Peer mode: optional target runner: hub machine UUID or hostname (metadata.host / displayName from GET /api/machines). '
+                        + 'Omit to spawn on this host.'
+                    ),
+                effort: z.string().trim().min(1).optional().describe('Peer mode: effort override (flavor-dependent).'),
+                sessionType: z.enum(['simple', 'worktree']).optional()
+                    .describe('Peer mode: simple or worktree. Default simple (use directory as cwd). worktree creates a new tree from directory.'),
+                // Shared.
+                agent: z.enum(CREATABLE_AGENT_FLAVORS as unknown as [string, ...string[]]).optional()
+                    .describe('Agent flavor override. Team members default to the caller flavor; peers resolve hub peerSpawnDefaults then stock claude.'),
+                model: z.string().trim().min(1).optional().describe('Model override for the resolved agent flavor.'),
+                permissionMode: PermissionModeSchema.optional()
+                    .describe('Permission mode override. Team members inherit yours by default; peers use hub/stock default (yolo).'),
             }),
-        }, async (args: { role: string; task?: string; agent?: string; model?: string; modelReasoningEffort?: string; permissionMode?: string; requirementId?: string; worktree?: boolean; worktreeName?: string }) => {
+        }, async (args: SpawnPeerToolArgs) => {
+            if (!args.role) {
+                return await runPeerSpawn(args);
+            }
             try {
                 const status = await requireTeam();
                 const result = await spawnTeamMember({
@@ -871,7 +930,7 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
     // Team tools are registered only when the hub reports the feature enabled
     // (probe -> 404 when disabled, so nothing changes for non-team hubs).
     // Membership itself is resolved per tool call, so mid-life team joins work.
-    const teamToolsEnabled = await probeTeamsSupport();
+    const teamToolsEnabled = options.teamToolsEnabled ?? await probeTeamsSupport();
     const transports = new Map<string, StreamableHTTPServerTransport>();
     const mcps = new Map<string, McpServer>();
 
@@ -917,7 +976,9 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
 
             await transport.handleRequest(req, res);
         } catch (error) {
-            logger.debug("Error handling request:", error);
+            // Error objects stringify as {} under the JSON logger, hiding the
+            // actual reason (e.g. a duplicate tool registration).
+            logger.debug("Error handling request:", error instanceof Error ? `${error.name}: ${error.message}` : error);
             if (!res.headersSent) {
                 res.writeHead(500).end();
             }

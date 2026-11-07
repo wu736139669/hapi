@@ -259,6 +259,18 @@ export class SyncEngine {
      */
     private hubOwnerUserId: string = '1'
 
+    /**
+     * Team context for resumed sessions. startHub wires this to TeamService:
+     * the runner only receives team context with the spawn RPC, so a generic
+     * resume would otherwise drop HAPI_TEAM_ID/prompt/token for team members.
+     */
+    private teamContextResolver?: (sessionId: string, namespace: string) => {
+        id: string
+        name: string
+        role: string
+        token?: string
+    } | null
+
     constructor(
         private readonly store: Store,
         private readonly io: Server,
@@ -306,6 +318,15 @@ export class SyncEngine {
 
     setHubOwnerUserId(ownerUserId: string | number): void {
         this.hubOwnerUserId = String(ownerUserId)
+    }
+
+    setTeamContextResolver(resolver: (sessionId: string, namespace: string) => {
+        id: string
+        name: string
+        role: string
+        token?: string
+    } | null): void {
+        this.teamContextResolver = resolver
     }
 
     stop(): void {
@@ -3889,6 +3910,10 @@ export class SyncEngine {
                 this.sessionReadyIds.delete(access.sessionId)
                 this.writeCodexResumePending(access.sessionId, namespace, { machineId: targetMachine.id, nativeSessionId: resumeToken })
             }
+            // Resume bypasses the spawn route, so re-attach team context here.
+            // Without it a resumed team member loses HAPI_TEAM_ID (prompt block)
+            // and HAPI_TEAM_TOKEN even though it is still on the roster.
+            const teamContext = this.teamContextResolver?.(access.sessionId, namespace) ?? undefined
             const spawnResult = await this.rpcGateway.spawnSession(
                 targetMachine.id,
                 directory,
@@ -3905,7 +3930,10 @@ export class SyncEngine {
                 access.sessionId,
                 session.collaborationMode ?? undefined,
                 session.copilotAgentMode ?? undefined,
-                resumedStartingMode
+                resumedStartingMode,
+                undefined,
+                undefined,
+                teamContext
             )
 
             if (spawnResult.type !== 'success') {

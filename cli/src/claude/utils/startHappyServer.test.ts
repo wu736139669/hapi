@@ -559,3 +559,48 @@ describe('startHappyServer peer tools kill switch', () => {
         expect(names).toEqual(expect.arrayContaining(['display_image', 'display_video', 'display_media']))
     })
 })
+
+describe('startHappyServer Agent Team tools', () => {
+    let client: Client | null
+    let stopServer: (() => void) | null
+
+    afterEach(async () => {
+        await client?.close()
+        stopServer?.()
+    })
+
+    it('registers spawn_peer once and still serves MCP requests', async () => {
+        // Regression: the peer block and the team block both registered
+        // spawn_peer when teams were enabled, so the MCP SDK threw on every
+        // request and the whole hapi MCP surface answered 500.
+        const sessionClient = {
+            sessionId: 'team-session-id',
+            getMetadata: () => null,
+            updateMetadata: vi.fn(),
+            sendAgentMessage: vi.fn(),
+            sendClaudeSessionMessage: vi.fn()
+        } as unknown as ApiSessionClient
+        const server = await startHappyServer(sessionClient, { teamToolsEnabled: true })
+        stopServer = server.stop
+        expect(server.toolNames.filter((name) => name === 'spawn_peer')).toHaveLength(1)
+
+        client = new Client(
+            { name: 'hapi-team-tools-test', version: '1.0.0' },
+            { capabilities: {} }
+        )
+        await client.connect(new StreamableHTTPClientTransport(new URL(server.url)))
+
+        const tools = await client.listTools()
+        const names = tools.tools.map((tool) => tool.name)
+        expect(names.filter((name) => name === 'spawn_peer')).toHaveLength(1)
+        expect(names).toEqual(expect.arrayContaining([
+            'team_status',
+            'team_read',
+            'team_send',
+            'team_task',
+            'team_requirement',
+            'spawn_peer',
+            'list_peers'
+        ]))
+    })
+})
