@@ -27,6 +27,7 @@ struct SessionLiveActivityWidget: Widget {
         } dynamicIsland: { context in
             let state = Self.decrypt(context.state, sessionId: context.attributes.sessionId)
             let color = state?.status.tint ?? .gray
+            let petName = Self.petName(for: state?.status)
             let detailText = Self.detailText(
                 for: context.attributes.sessionId,
                 status: state?.status
@@ -34,11 +35,10 @@ struct SessionLiveActivityWidget: Widget {
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     HStack(alignment: .center, spacing: 7) {
-                        Image("HappyCodingIcon")
+                        Image(petName)
                             .resizable()
                             .scaledToFit()
                             .frame(width: 22, height: 22)
-                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                         VStack(alignment: .leading, spacing: 1) {
                             Text(verbatim: state?.title ?? "HappyCoding")
                                 .font(.subheadline.weight(.semibold))
@@ -85,11 +85,10 @@ struct SessionLiveActivityWidget: Widget {
                 }
             } compactLeading: {
                 ZStack(alignment: .bottomTrailing) {
-                    Image("HappyCodingIcon")
+                    Image(petName)
                         .resizable()
                         .scaledToFit()
                         .frame(width: 18, height: 18)
-                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                     Circle()
                         .fill(color)
                         .frame(width: 6, height: 6)
@@ -111,12 +110,22 @@ struct SessionLiveActivityWidget: Widget {
                         .font(.caption2)
                 }
             } minimal: {
-                Image("HappyCodingIcon")
+                Image(petName)
                     .resizable()
                     .scaledToFit()
                     .frame(width: 16, height: 16)
-                    .clipShape(Circle())
             }
+        }
+    }
+
+    static func petName(for status: LiveActivityContentState.Status?) -> String {
+        switch status {
+        case .working: return "HappyCodingPetWorking"
+        case .needsApproval, .needsInput, .needsAttention, .error:
+            return "HappyCodingPetAttention"
+        case .done: return "HappyCodingPetCompleted"
+        case .idle: return "HappyCodingPetIdle"
+        case .none: return "HappyCodingPetOnline"
         }
     }
 
@@ -166,6 +175,10 @@ private struct SessionActivityLockScreen: View {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    private var petName: String {
+        SessionLiveActivityWidget.petName(for: state?.status)
+    }
+
     private var dateLabel: String? {
         guard let state else { return nil }
         return Date(timeIntervalSince1970: Double(state.updatedAt) / 1000)
@@ -176,11 +189,10 @@ private struct SessionActivityLockScreen: View {
         Group {
             if let state {
                 HStack(alignment: .center, spacing: 12) {
-                    Image("HappyCodingIcon")
+                    Image(petName)
                         .resizable()
                         .scaledToFit()
                         .frame(width: 58, height: 58)
-                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text(state.title)
@@ -225,11 +237,10 @@ private struct SessionActivityLockScreen: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 HStack(spacing: 8) {
-                    Image("HappyCodingIcon")
+                    Image("HappyCodingPetOnline")
                         .resizable()
                         .scaledToFit()
                         .frame(width: 28, height: 28)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     VStack(alignment: .leading, spacing: 1) {
                         Text(verbatim: "HappyCoding")
                             .font(.subheadline.weight(.semibold))
