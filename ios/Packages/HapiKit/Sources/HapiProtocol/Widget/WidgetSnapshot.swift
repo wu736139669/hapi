@@ -424,3 +424,22 @@ public enum FocusSelectionStore {
         defaults?.removeObject(forKey: key)
     }
 }
+
+/// Timestamp of the last user-initiated widget refresh, used to give the
+/// otherwise silent refresh button visible feedback.
+public enum WidgetRefreshFeedback {
+    public static let key = "widget.lastManualRefresh"
+
+    private static var defaults: UserDefaults? {
+        UserDefaults(suiteName: WidgetSnapshotStore.appGroupIdentifier)
+    }
+
+    public static func mark(now: Date = Date()) {
+        defaults?.set(now.timeIntervalSince1970, forKey: key)
+    }
+
+    public static func last() -> Date? {
+        guard let seconds = defaults?.double(forKey: key), seconds > 0 else { return nil }
+        return Date(timeIntervalSince1970: seconds)
+    }
+}

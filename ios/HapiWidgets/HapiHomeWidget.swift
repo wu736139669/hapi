@@ -402,6 +402,7 @@ private struct WidgetHeader: View {
                     .fill(.orange)
                     .frame(width: 7, height: 7)
             }
+            WidgetRefreshButton()
         }
     }
 }
@@ -881,6 +882,49 @@ struct HapiFocusSessionIntent: AppIntent {
     }
 }
 
+/// Manual timeline reload for the small refresh control. Unlike background
+/// reloads this is user-initiated, so WidgetKit generally honors it even when
+/// the automatic budget is exhausted; it redraws the current App Group
+/// snapshot (opening the app is still what fetches new hub data).
+struct HapiRefreshWidgetIntent: AppIntent {
+    static var title: LocalizedStringResource = "Refresh"
+
+    func perform() async throws -> some IntentResult {
+        WidgetRefreshFeedback.mark()
+        for kind in WidgetSnapshotStore.homeWidgetKinds {
+            WidgetCenter.shared.reloadTimelines(ofKind: kind)
+        }
+        return .result()
+    }
+}
+
+private struct WidgetRefreshButton: View {
+    private var recentRefresh: Date? {
+        guard let last = WidgetRefreshFeedback.last(),
+              Date().timeIntervalSince(last) < 600 else { return nil }
+        return last
+    }
+
+    var body: some View {
+        Button(intent: HapiRefreshWidgetIntent()) {
+            HStack(spacing: 2) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 9.5, weight: .semibold))
+                if let recentRefresh {
+                    Text(recentRefresh, style: .time)
+                        .font(.system(size: 8, weight: .medium))
+                        .monospacedDigit()
+                }
+            }
+            .frame(minWidth: 20, minHeight: 20)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .accessibilityLabel("Refresh")
+    }
+}
+
 private struct HapiFocusWidgetView: View {
     let entry: HapiWidgetEntry
 
@@ -1033,6 +1077,7 @@ private struct HapiFocusWidgetView: View {
                 mediumMetaLine(session)
                 Spacer(minLength: 6)
                 focusSwitcher(for: session)
+                WidgetRefreshButton()
             }
             .padding(.top, 1)
 
