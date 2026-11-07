@@ -10,6 +10,9 @@ protocol WidgetSnapshotControlling: AnyObject {
     /// Background tasks must wait for the App Group write before they report
     /// completion; iOS may suspend the process immediately afterwards.
     func flushAndWait() async
+    /// Force a WidgetKit reload after a foreground flush; background writes
+    /// are deliberately throttled to stay inside the system reload budget.
+    func reloadNow()
     func clear()
 }
 
@@ -18,6 +21,7 @@ final class NoopWidgetSnapshotController: WidgetSnapshotControlling {
     func update(_ sessions: [SessionSummary], unreadSessionIds: Set<String>, hubUrl: String) {}
     func flush() {}
     func flushAndWait() async {}
+    func reloadNow() {}
     func clear() {}
 }
 

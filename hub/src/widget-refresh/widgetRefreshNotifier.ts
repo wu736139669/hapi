@@ -14,13 +14,20 @@ export type WidgetRefreshNotifierOptions = {
     debounceMs?: number
     /** Minimum gap between silent wakes for one namespace. */
     throttleMs?: number
+    /**
+     * Extra fingerprint for widget-visible data that lives outside the
+     * in-memory Session (currently the last assistant result preview).
+     * Without this, a result that lands while the status stays `working`
+     * never wakes the phone.
+     */
+    assistantPreviewFingerprint?: (sessionIds: readonly string[]) => string
     now?: () => number
 }
 
 type Timer = ReturnType<typeof setTimeout>
 
 const DEFAULT_DEBOUNCE_MS = 750
-const DEFAULT_THROTTLE_MS = 15_000
+const DEFAULT_THROTTLE_MS = 60_000
 
 /**
  * Turns widget-visible session transitions into silent APNs wake-ups. The
@@ -111,7 +118,7 @@ export class WidgetRefreshNotifier {
 
     private evaluate(namespace: string): void {
         if (this.stopped) return
-        const fingerprint = widgetFingerprint(this.syncEngine.getSessionsByNamespace(namespace))
+        const fingerprint = this.fingerprint(namespace)
         if (fingerprint === this.lastFingerprint.get(namespace)) return
 
         const elapsed = this.now() - (this.lastSentAt.get(namespace) ?? 0)
@@ -130,7 +137,7 @@ export class WidgetRefreshNotifier {
 
     private send(namespace: string): void {
         if (this.stopped) return
-        const fingerprint = widgetFingerprint(this.syncEngine.getSessionsByNamespace(namespace))
+        const fingerprint = this.fingerprint(namespace)
         if (fingerprint === this.lastFingerprint.get(namespace)) return
 
         this.lastFingerprint.set(namespace, fingerprint)
@@ -154,6 +161,15 @@ export class WidgetRefreshNotifier {
                     this.lastFingerprint.delete(namespace)
                 }
             })
+    }
+
+    private fingerprint(namespace: string): string {
+        const sessions = this.syncEngine.getSessionsByNamespace(namespace)
+        const base = widgetFingerprint(sessions)
+        const previewKey = this.options.assistantPreviewFingerprint?.(
+            sessions.map((session) => session.id).sort()
+        )
+        return previewKey ? `${base}|preview:${previewKey}` : base
     }
 }
 

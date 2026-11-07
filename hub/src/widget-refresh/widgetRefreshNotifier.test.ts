@@ -76,13 +76,18 @@ function createSession(overrides: Partial<Session> = {}): Session {
     }
 }
 
-function setup(options: { enabled?: boolean; throttleMs?: number } = {}) {
+function setup(options: {
+    enabled?: boolean
+    throttleMs?: number
+    assistantPreviewFingerprint?: (sessionIds: readonly string[]) => string
+} = {}) {
     const engine = new FakeSyncEngine()
     const sender = new FakeSender()
     const notifier = new WidgetRefreshNotifier(engine as unknown as SyncEngine, sender, {
         enabled: options.enabled ?? true,
         debounceMs: 0,
-        throttleMs: options.throttleMs ?? 0
+        throttleMs: options.throttleMs ?? 0,
+        assistantPreviewFingerprint: options.assistantPreviewFingerprint
     })
     return { engine, sender, notifier }
 }
@@ -144,6 +149,42 @@ describe('WidgetRefreshNotifier', () => {
             namespace: 'default'
         })
         expect(sender.namespaces).toHaveLength(3)
+    })
+
+    it('sends when only the assistant result preview changes', async () => {
+        let preview = 'first result'
+        const { engine, sender, notifier } = setup({
+            assistantPreviewFingerprint: (sessionIds) => sessionIds
+                .map((id) => `${id}:${preview}`)
+                .join('|')
+        })
+        cleanup = () => notifier.stop()
+        engine.setSession(createSession())
+        notifier.start()
+
+        await emitAndSettle(engine, {
+            type: 'session-added',
+            sessionId: 'sess-1',
+            namespace: 'default'
+        })
+        expect(sender.namespaces).toHaveLength(1)
+
+        // Same session/status, new assistant output: the widget result is
+        // stale unless this wakes the phone.
+        preview = 'second result'
+        await emitAndSettle(engine, {
+            type: 'session-updated',
+            sessionId: 'sess-1',
+            namespace: 'default'
+        })
+        expect(sender.namespaces).toHaveLength(2)
+
+        await emitAndSettle(engine, {
+            type: 'session-updated',
+            sessionId: 'sess-1',
+            namespace: 'default'
+        })
+        expect(sender.namespaces).toHaveLength(2)
     })
 
     it('sends after a session disappears', async () => {

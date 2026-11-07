@@ -50,7 +50,10 @@ struct HapiWidgetProvider: TimelineProvider {
         // catches reloads the system throttled. Running elapsed text ticks
         // live via the dynamic timer; status only changes on a reload.
         let entry = HapiWidgetEntry(date: now, snapshot: snapshot)
-        completion(Timeline(entries: [entry], policy: .after(now.addingTimeInterval(5 * 60))))
+        // WidgetKit budgets timeline reloads. The app/silent-push path does the
+        // real refresh; this is a low-priority fallback. Five minutes burned
+        // through the budget and made background redraws stop.
+        completion(Timeline(entries: [entry], policy: .after(now.addingTimeInterval(15 * 60))))
     }
 }
 
@@ -244,13 +247,23 @@ private struct LargeWidget: View {
         let activeRows = Array(active.prefix(max(0, maxRows - runningRows.count)))
         return VStack(alignment: .leading, spacing: 0) {
             if !runningRows.isEmpty {
-                SectionHeader(title: "Working", count: snapshot.runningCount, color: .blue)
+                SectionHeader(
+                    title: "Working",
+                    count: snapshot.runningCount,
+                    color: .blue,
+                    hidden: max(0, running.count - runningRows.count)
+                )
                 ForEach(runningRows) { session in
                     SessionRow(session: session, hubUrl: snapshot.hubUrl, style: .dense, now: now)
                 }
             }
             if !activeRows.isEmpty {
-                SectionHeader(title: "Active", count: activeCount, color: .teal)
+                SectionHeader(
+                    title: "Active",
+                    count: activeCount,
+                    color: .teal,
+                    hidden: max(0, active.count - activeRows.count)
+                )
                     .padding(.top, runningRows.isEmpty ? 0 : 2)
                 ForEach(activeRows) { session in
                     SessionRow(session: session, hubUrl: snapshot.hubUrl, style: .dense, now: now)
@@ -265,6 +278,7 @@ private struct SectionHeader: View {
     let title: LocalizedStringKey
     let count: Int
     let color: Color
+    var hidden: Int = 0
 
     var body: some View {
         HStack(spacing: 4) {
@@ -276,6 +290,11 @@ private struct SectionHeader: View {
             Text("(\(count))")
                 .font(.system(size: 9.5, weight: .medium))
                 .monospacedDigit()
+            if hidden > 0 {
+                Text(verbatim: "+\(hidden)")
+                    .font(.system(size: 8.5, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
             Spacer(minLength: 0)
         }
         .foregroundStyle(.secondary)
@@ -831,99 +850,44 @@ private struct HapiModeWidgetView: View {
 /// One-session detail card: the task, the latest assistant result and progress.
 struct HapiFocusWidget: Widget {
     var body: some WidgetConfiguration {
-        AppIntentConfiguration(
-            kind: WidgetSnapshotStore.focusWidgetKind,
-            intent: FocusConfigurationIntent.self,
-            provider: FocusProvider()
-        ) { entry in
+        StaticConfiguration(kind: WidgetSnapshotStore.focusWidgetKind, provider: HapiWidgetProvider()) { entry in
             HapiFocusWidgetView(entry: entry)
         }
         .configurationDisplayName("Session Detail")
-        .description("Task and latest result for a chosen session.")
-        .supportedFamilies([.systemLarge])
+        .description("Task and latest result for one session.")
+        .supportedFamilies([.systemMedium, .systemLarge])
     }
 }
 
-struct HapiFocusEntry: TimelineEntry {
-    let date: Date
-    let snapshot: WidgetSnapshot
-    let sessionId: String?
-}
-
-struct FocusProvider: AppIntentTimelineProvider {
-    func placeholder(in context: Context) -> HapiFocusEntry {
-        HapiFocusEntry(date: Date(), snapshot: .empty, sessionId: nil)
-    }
-
-    func snapshot(for configuration: FocusConfigurationIntent, in context: Context) async -> HapiFocusEntry {
-        HapiFocusEntry(
-            date: Date(),
-            snapshot: WidgetSnapshotStore.load() ?? .empty,
-            sessionId: configuration.session?.id
-        )
-    }
-
-    func timeline(for configuration: FocusConfigurationIntent, in context: Context) async -> Timeline<HapiFocusEntry> {
-        let now = Date()
-        let entry = HapiFocusEntry(
-            date: now,
-            snapshot: WidgetSnapshotStore.load() ?? .empty,
-            sessionId: configuration.session?.id
-        )
-        return Timeline(entries: [entry], policy: .after(now.addingTimeInterval(5 * 60)))
-    }
-}
-
-struct FocusConfigurationIntent: WidgetConfigurationIntent {
-    static var title: LocalizedStringResource = "Session Detail"
-    static var description = IntentDescription("Pick a session for the detail card.")
+/// In-card prev/next switcher. Writes the shared selection and asks WidgetKit
+/// to redraw; widgets cannot scroll or page natively, so this exposes every
+/// session in the snapshot without per-widget configuration.
+struct HapiFocusSessionIntent: AppIntent {
+    static var title: LocalizedStringResource = "Show session"
 
     @Parameter(title: "Session")
-    var session: SessionEntity?
+    var sessionId: String
 
-    static var parameterSummary: some ParameterSummary {
-        Summary("Show \(\.$session)")
-    }
-}
+    init() {}
 
-struct SessionEntity: AppEntity {
-    let id: String
-    let title: String
-    let project: String
-
-    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Session"
-    static var defaultQuery = SessionEntityQuery()
-
-    var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(
-            title: "\(title)",
-            subtitle: project.isEmpty ? nil : "\(project)"
-        )
-    }
-}
-
-struct SessionEntityQuery: EntityQuery {
-    func entities(for identifiers: [String]) async throws -> [SessionEntity] {
-        let wanted = Set(identifiers)
-        return allEntities().filter { wanted.contains($0.id) }
+    init(sessionId: String) {
+        self.sessionId = sessionId
     }
 
-    func suggestedEntities() async throws -> [SessionEntity] {
-        allEntities()
-    }
-
-    private func allEntities() -> [SessionEntity] {
-        (WidgetSnapshotStore.load()?.sessions ?? []).map {
-            SessionEntity(id: $0.id, title: $0.title, project: $0.project)
-        }
+    func perform() async throws -> some IntentResult {
+        FocusSelectionStore.setSelectedSessionId(sessionId)
+        WidgetCenter.shared.reloadTimelines(ofKind: WidgetSnapshotStore.focusWidgetKind)
+        return .result()
     }
 }
 
 private struct HapiFocusWidgetView: View {
-    let entry: HapiFocusEntry
+    let entry: HapiWidgetEntry
+
+    @Environment(\.widgetFamily) private var family
 
     private var session: WidgetSnapshot.Session? {
-        if let selected = entry.sessionId,
+        if let selected = FocusSelectionStore.selectedSessionId(),
            let match = entry.snapshot.sessions.first(where: { $0.id == selected }) {
             return match
         }
@@ -936,11 +900,17 @@ private struct HapiFocusWidgetView: View {
     var body: some View {
         Group {
             if let session {
-                content(session)
-                    .widgetURL(SessionLink.url(
-                        sessionId: session.id,
-                        hubUrl: entry.snapshot.hubUrl.isEmpty ? nil : entry.snapshot.hubUrl
-                    ))
+                Group {
+                    if family == .systemMedium {
+                        mediumContent(session)
+                    } else {
+                        content(session)
+                    }
+                }
+                .widgetURL(SessionLink.url(
+                    sessionId: session.id,
+                    hubUrl: entry.snapshot.hubUrl.isEmpty ? nil : entry.snapshot.hubUrl
+                ))
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     WidgetHeader(snapshot: entry.snapshot)
@@ -969,6 +939,9 @@ private struct HapiFocusWidgetView: View {
                     .foregroundStyle(Color(uiColor: .label))
                     .lineLimit(1)
                 Spacer(minLength: 6)
+                Text(verbatim: session.status.shortLabel)
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(session.status.color)
                 if session.status == .working, let startedAt = session.startedAt {
                     ElapsedText(startedAt: startedAt, size: 12)
                         .foregroundStyle(.secondary)
@@ -980,11 +953,13 @@ private struct HapiFocusWidgetView: View {
             }
             .padding(.top, 5)
 
-            if !session.project.isEmpty {
+            HStack(spacing: 6) {
                 Text(session.project)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                Spacer(minLength: 0)
+                focusSwitcher(for: session)
             }
 
             detailSection(
@@ -1025,6 +1000,122 @@ private struct HapiFocusWidgetView: View {
             .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func mediumContent(_ session: WidgetSnapshot.Session) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image("HappyCodingIcon")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 16, height: 16)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                Text(session.title)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(Color(uiColor: .label))
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                Text(verbatim: session.status.shortLabel)
+                    .font(.system(size: 8.5, weight: .semibold))
+                    .foregroundStyle(session.status.color)
+                if session.status == .working, let startedAt = session.startedAt {
+                    ElapsedText(startedAt: startedAt, size: 10)
+                        .foregroundStyle(.secondary)
+                } else {
+                    RelativeTimeText(updatedAt: session.updatedAt, now: entry.date)
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.top, 1)
+
+            HStack(spacing: 6) {
+                mediumMetaLine(session)
+                Spacer(minLength: 6)
+                focusSwitcher(for: session)
+            }
+            .padding(.top, 1)
+
+            mediumResult(session)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private func mediumMetaLine(_ session: WidgetSnapshot.Session) -> some View {
+        let task = session.lastMessage?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !session.project.isEmpty || !task.isEmpty {
+            Group {
+                if session.project.isEmpty {
+                    Text(verbatim: task)
+                } else if task.isEmpty {
+                    Text(verbatim: session.project)
+                        .fontWeight(.semibold)
+                } else {
+                    Text(verbatim: session.project)
+                        .fontWeight(.semibold)
+                    + Text(verbatim: " · ")
+                    + Text(verbatim: task)
+                }
+            }
+            .font(.system(size: 9.5))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private func mediumResult(_ session: WidgetSnapshot.Session) -> some View {
+        let value = session.lastResult?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        (value.isEmpty ? Text("No result yet") : Text(verbatim: value))
+            .font(.system(size: 10.5))
+            .foregroundStyle(value.isEmpty ? Color(uiColor: .secondaryLabel) : Color(uiColor: .label))
+            .lineLimit(6)
+            .padding(.vertical, 2)
+            .padding(.horizontal, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 90, alignment: .topLeading)
+            .background {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.teal.opacity(0.08))
+            }
+            .padding(.top, 2)
+    }
+
+    @ViewBuilder
+    private func focusSwitcher(for session: WidgetSnapshot.Session) -> some View {
+        let sessions = entry.snapshot.sessions
+        if sessions.count > 1 {
+            let index = sessions.firstIndex { $0.id == session.id } ?? 0
+            let previous = sessions[(index - 1 + sessions.count) % sessions.count]
+            let next = sessions[(index + 1) % sessions.count]
+            HStack(spacing: 5) {
+                Button(intent: HapiFocusSessionIntent(sessionId: previous.id)) {
+                    Image(systemName: "chevron.left")
+                        .frame(width: 16, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Text("\(index + 1)/\(sessions.count)")
+                    .monospacedDigit()
+                Button(intent: HapiFocusSessionIntent(sessionId: next.id)) {
+                    Image(systemName: "chevron.right")
+                        .frame(width: 16, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background {
+                Capsule()
+                    .fill(Color.primary.opacity(0.06))
+            }
+        }
     }
 
     @ViewBuilder

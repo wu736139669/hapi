@@ -236,6 +236,8 @@ final class AppModel {
             liveActivity.appDidBecomeActive()
             if let session {
                 widgetSnapshots.update(session.sessionStore.sessions, unreadSessionIds: Self.unreadSessionIds(for: session), hubUrl: session.hubUrl)
+                widgetSnapshots.flush()
+                widgetSnapshots.reloadNow()
             } else {
                 widgetSnapshots.clear()
             }
@@ -265,8 +267,13 @@ final class AppModel {
     /// write before the background task completes.
     @MainActor
     func refreshForWidget() async -> Bool {
+        // A silent push can cold-launch the app before AppModel finishes
+        // restoring the active hub. Wait briefly instead of wiping the last
+        // good snapshot.
+        for _ in 0..<10 where session == nil {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
         guard let session else {
-            widgetSnapshots.clear()
             return false
         }
         do {

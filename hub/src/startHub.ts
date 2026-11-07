@@ -388,7 +388,15 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         widgetRefreshNotifier = new WidgetRefreshNotifier(
             syncEngine,
             new IosWidgetRefreshService(apnsClient, store),
-            { enabled: true }
+            {
+                enabled: true,
+                assistantPreviewFingerprint: (sessionIds) => {
+                    const previews = store.sessions.getLastAssistantMessagePreviews(sessionIds)
+                    return sessionIds
+                        .map((id) => `${id}:${previews.get(id) ?? ''}`)
+                        .join('\u0000')
+                }
+            }
         )
         console.log(`[Hub] iOS push: apns (${iosPushConfig.env}, topic: ${iosPushConfig.bundleId})`)
         console.log(`[Hub] iOS Live Activity: apns (topic: ${iosPushConfig.bundleId}.push-type.liveactivity)`)

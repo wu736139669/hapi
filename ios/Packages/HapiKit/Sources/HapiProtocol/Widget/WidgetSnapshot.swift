@@ -203,19 +203,59 @@ public enum WidgetSnapshotBuilder {
     }
 
     /// One-line, length-capped preview of the latest human prompt. The hub
-    /// already caps the source text; this collapses newlines and trims for
-    /// the single-line widget row.
+    /// already caps the source text; this strips Markdown, collapses newlines
+    /// and trims for the single-line widget row.
     public static func lastMessage(for summary: SessionSummary) -> String {
         guard let raw = summary.lastUserMessagePreview else { return "" }
-        let collapsed = raw.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-        return String(collapsed.prefix(140))
+        return plainPreview(raw, limit: 140)
     }
 
     /// One-line, length-capped preview of the latest assistant result.
     public static func lastResult(for summary: SessionSummary) -> String {
         guard let raw = summary.lastAssistantMessagePreview else { return "" }
-        let collapsed = raw.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-        return String(collapsed.prefix(160))
+        return plainPreview(raw, limit: 300)
+    }
+
+    /// Widget text is plain SwiftUI `Text`, not Markdown. Remove the common
+    /// markers so a preview never renders literal `**` or backticks.
+    private static func plainPreview(_ raw: String, limit: Int) -> String {
+        var text = raw
+        text = text.replacingOccurrences(of: "```", with: " ")
+        text = text.replacingOccurrences(of: "`", with: "")
+        text = text.replacingOccurrences(of: "**", with: "")
+        text = text.replacingOccurrences(of: "__", with: "")
+        text = text.replacingOccurrences(
+            of: #"!\[[^\]]*\]\([^)]*\)"#,
+            with: " ",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: #"\[([^\]]+)\]\([^)]+\)"#,
+            with: "$1",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: #"(?m)^\s{0,3}#{1,6}\s*"#,
+            with: "",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: #"(?m)^\s{0,3}>\s?"#,
+            with: "",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: #"(?m)^\s{0,3}(?:[-*+]|\d+[.)])\s+"#,
+            with: "",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: #"<[^>]+>"#,
+            with: " ",
+            options: .regularExpression
+        )
+        let collapsed = text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        return String(collapsed.prefix(limit))
     }
 
     private static func priority(_ status: LiveActivityContentState.Status) -> Int {
@@ -360,5 +400,27 @@ private extension WidgetSnapshot {
         case .idle: idleCount = max(0, idleCount + delta)
         case .done, .error: break
         }
+    }
+}
+
+/// Which session the Session Detail widget shows. Stored in the shared App
+/// Group so an interactive widget button can change it and request a reload.
+public enum FocusSelectionStore {
+    public static let key = "widget.focus.sessionId"
+
+    private static var defaults: UserDefaults? {
+        UserDefaults(suiteName: WidgetSnapshotStore.appGroupIdentifier)
+    }
+
+    public static func selectedSessionId() -> String? {
+        defaults?.string(forKey: key)
+    }
+
+    public static func setSelectedSessionId(_ sessionId: String) {
+        defaults?.set(sessionId, forKey: key)
+    }
+
+    public static func clear() {
+        defaults?.removeObject(forKey: key)
     }
 }

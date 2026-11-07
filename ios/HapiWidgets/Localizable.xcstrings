@@ -408,6 +408,23 @@
           }
         }
       }
+    },
+    "Show session" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Показать сеанс"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换会话"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

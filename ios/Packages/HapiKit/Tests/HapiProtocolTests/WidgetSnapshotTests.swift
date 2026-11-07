@@ -13,6 +13,7 @@ struct WidgetSnapshotTests {
         updatedAt: Int,
         lastUserMessageAt: Int? = nil,
         lastUserMessagePreview: String? = nil,
+        lastAssistantMessagePreview: String? = nil,
         name: String? = nil,
         flavor: String? = nil,
         path: String = "/Users/me/projects/hapi",
@@ -27,6 +28,7 @@ struct WidgetSnapshotTests {
             updatedAt: updatedAt,
             lastUserMessageAt: lastUserMessageAt,
             lastUserMessagePreview: lastUserMessagePreview,
+            lastAssistantMessagePreview: lastAssistantMessagePreview,
             metadata: SessionSummaryMetadata(name: name, path: path, flavor: flavor),
             metadataVersion: 1,
             agentStateVersion: 1,
@@ -153,6 +155,32 @@ struct WidgetSnapshotTests {
 
         #expect(snapshot.sessions.first(where: { $0.id == "s1" })?.lastMessage == "line one line two")
         #expect(snapshot.sessions.first(where: { $0.id == "s2" })?.lastMessage == nil)
+    }
+
+    @Test func stripsMarkdownFromWidgetPreviews() {
+        let now = 1_700_000_000_000
+        let snapshot = WidgetSnapshotBuilder.build(
+            sessions: [
+                summary(
+                    id: "s1",
+                    thinking: true,
+                    updatedAt: now,
+                    lastUserMessagePreview: "**fix** `login`",
+                    lastAssistantMessagePreview: """
+                    # Result
+                    - **Done** [link](https://example.com)
+                    1. next
+                    """,
+                    name: "Session"
+                )
+            ],
+            hubUrl: "https://hub.example.com",
+            now: now
+        )
+
+        let session = snapshot.sessions.first
+        #expect(session?.lastMessage == "fix login")
+        #expect(session?.lastResult == "Result Done link next")
     }
 
     @Test func carriesAgentFlavorForTheRowIcon() {

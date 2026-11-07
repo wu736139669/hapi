@@ -73,7 +73,13 @@ final class WidgetRefreshBridge {
     }
 
     func refresh() async -> Bool {
-        guard let handler else { return false }
-        return await handler()
+        // Cold launch from a silent push can race AppModel initialization.
+        for _ in 0..<10 {
+            if let handler {
+                return await handler()
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        return false
     }
 }
