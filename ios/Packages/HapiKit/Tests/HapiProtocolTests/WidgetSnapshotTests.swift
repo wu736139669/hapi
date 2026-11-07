@@ -183,7 +183,7 @@ struct WidgetSnapshotTests {
             now: now
         )
 
-        #expect(snapshot.sessions.first { $0.id == "running" }?.isUnread == nil)
+        #expect(snapshot.sessions.first { $0.id == "running" }?.isUnread == true)
         #expect(snapshot.sessions.first { $0.id == "unread" }?.isUnread == true)
         #expect(snapshot.sessions.first { $0.id == "read" }?.isUnread == nil)
     }
