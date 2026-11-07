@@ -239,8 +239,9 @@ public enum WidgetSnapshotStore {
     public static let widgetKind = "HapiHomeWidget"
     public static let runningWidgetKind = "HapiRunningWidget"
     public static let reviewWidgetKind = "HapiReviewWidget"
+    public static let focusWidgetKind = "HapiFocusWidget"
     /// All home-screen widget kinds that consume this snapshot.
-    public static let homeWidgetKinds = [widgetKind, runningWidgetKind, reviewWidgetKind]
+    public static let homeWidgetKinds = [widgetKind, runningWidgetKind, reviewWidgetKind, focusWidgetKind]
 
     /// Production location, or nil when the App Group entitlement is absent.
     public static func containerURL() -> URL? {

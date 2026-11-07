@@ -826,3 +826,149 @@ private struct HapiModeWidgetView: View {
         .padding(.bottom, 1)
     }
 }
+
+/// One-session detail card: the task, the latest assistant result and progress.
+struct HapiFocusWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: WidgetSnapshotStore.focusWidgetKind, provider: HapiWidgetProvider()) { entry in
+            HapiFocusWidgetView(entry: entry)
+        }
+        .configurationDisplayName("Focus")
+        .description("Task and latest result for one session.")
+        .supportedFamilies([.systemLarge])
+    }
+}
+
+private struct HapiFocusWidgetView: View {
+    let entry: HapiWidgetEntry
+
+    private var session: WidgetSnapshot.Session? {
+        entry.snapshot.sessions.first { $0.isUnread == true && $0.status != .working }
+            ?? entry.snapshot.sessions.first { $0.status == .working }
+            ?? entry.snapshot.sessions.first { $0.isUnread == true }
+            ?? entry.snapshot.sessions.first
+    }
+
+    var body: some View {
+        Group {
+            if let session {
+                content(session)
+                    .widgetURL(SessionLink.url(
+                        sessionId: session.id,
+                        hubUrl: entry.snapshot.hubUrl.isEmpty ? nil : entry.snapshot.hubUrl
+                    ))
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    WidgetHeader(snapshot: entry.snapshot)
+                    Text("No running sessions")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .containerBackground(for: .widget) {
+            HapiWidgetBackground()
+        }
+    }
+
+    private func content(_ session: WidgetSnapshot.Session) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            WidgetHeader(snapshot: entry.snapshot)
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Circle()
+                    .fill(session.status.color)
+                    .frame(width: 7, height: 7)
+                Text(session.title)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(Color(uiColor: .label))
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                if session.status == .working, let startedAt = session.startedAt {
+                    ElapsedText(startedAt: startedAt, size: 12)
+                        .foregroundStyle(.secondary)
+                } else {
+                    RelativeTimeText(updatedAt: session.updatedAt, now: entry.date)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.top, 5)
+
+            if !session.project.isEmpty {
+                Text(session.project)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            detailSection(
+                title: "Task",
+                text: session.lastMessage,
+                placeholder: "No task yet"
+            )
+
+            detailSection(
+                title: "Latest result",
+                text: session.lastResult,
+                placeholder: "No result yet",
+                highlighted: true
+            )
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 8) {
+                if session.pendingCount > 0 {
+                    Label("\(session.pendingCount)", systemImage: "hand.raised.fill")
+                        .foregroundStyle(.orange)
+                }
+                if session.todoTotal > 0 {
+                    ProgressView(
+                        value: Double(session.todoCompleted),
+                        total: Double(max(session.todoTotal, 1))
+                    )
+                    .frame(width: 64)
+                    Text("\(session.todoCompleted)/\(session.todoTotal)")
+                        .monospacedDigit()
+                }
+                Spacer(minLength: 0)
+                Text("Open chat")
+                    .foregroundStyle(.blue)
+                    .fontWeight(.semibold)
+            }
+            .font(.system(size: 9.5))
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private func detailSection(
+        title: LocalizedStringKey,
+        text: String?,
+        placeholder: LocalizedStringKey,
+        highlighted: Bool = false
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.secondary)
+            let value = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            (value.isEmpty ? Text(placeholder) : Text(verbatim: value))
+                .font(.system(size: 12))
+                .foregroundStyle(value.isEmpty ? Color(uiColor: .secondaryLabel) : Color(uiColor: .label))
+                .lineLimit(3)
+                .padding(.vertical, highlighted ? 7 : 0)
+                .padding(.horizontal, highlighted ? 9 : 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background {
+                    if highlighted {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(Color.teal.opacity(0.08))
+                    }
+                }
+        }
+        .padding(.top, 12)
+    }
+}

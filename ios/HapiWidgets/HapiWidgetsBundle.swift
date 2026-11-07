@@ -7,6 +7,7 @@ struct HapiWidgetsBundle: WidgetBundle {
         HapiHomeWidget()
         HapiRunningWidget()
         HapiReviewWidget()
+        HapiFocusWidget()
         SessionLiveActivityWidget()
     }
 }
