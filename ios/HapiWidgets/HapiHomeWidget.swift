@@ -423,7 +423,7 @@ private struct SessionRow: View {
             )
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    if session.isUnread == true {
+                    if showsUnread {
                         Circle()
                             .fill(.blue)
                             .frame(width: 5, height: 5)
@@ -492,7 +492,11 @@ private struct SessionRow: View {
     }
 
     private var unreadTimeColor: Color {
-        session.isUnread == true ? .blue : Color(uiColor: .secondaryLabel)
+        showsUnread ? .blue : Color(uiColor: .secondaryLabel)
+    }
+
+    private var showsUnread: Bool {
+        session.isUnread == true && session.status != .working
     }
 
     private var showsStatusText: Bool {

@@ -174,14 +174,16 @@ struct WidgetSnapshotTests {
         let now = 1_700_000_000_000
         let snapshot = WidgetSnapshotBuilder.build(
             sessions: [
-                summary(id: "unread", thinking: true, updatedAt: now, name: "Unread"),
+                summary(id: "running", thinking: true, updatedAt: now, name: "Running"),
+                summary(id: "unread", thinking: false, updatedAt: now, name: "Unread"),
                 summary(id: "read", thinking: false, updatedAt: now, name: "Read")
             ],
             hubUrl: "https://hub.example.com",
-            unreadSessionIds: ["unread"],
+            unreadSessionIds: ["running", "unread"],
             now: now
         )
 
+        #expect(snapshot.sessions.first { $0.id == "running" }?.isUnread == nil)
         #expect(snapshot.sessions.first { $0.id == "unread" }?.isUnread == true)
         #expect(snapshot.sessions.first { $0.id == "read" }?.isUnread == nil)
     }

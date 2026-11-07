@@ -157,7 +157,9 @@ public enum WidgetSnapshotBuilder {
                 todoTotal: summary.todoProgress?.total ?? 0,
                 backgroundTaskCount: summary.backgroundTaskCount,
                 lastMessage: preview.isEmpty ? nil : preview,
-                isUnread: unreadSessionIds.contains(summary.id) ? true : nil
+                // Running turns are inherently live; read/unread only makes
+                // sense once the session is waiting between turns.
+                isUnread: status != .working && unreadSessionIds.contains(summary.id) ? true : nil
             )
         }
         .sorted { lhs, rhs in
