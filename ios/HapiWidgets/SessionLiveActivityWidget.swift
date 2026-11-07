@@ -16,6 +16,7 @@ struct SessionLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: SessionActivityAttributes.self) { context in
             SessionActivityLockScreen(
+                sessionId: context.attributes.sessionId,
                 state: Self.decrypt(context.state, sessionId: context.attributes.sessionId),
                 isStale: context.isStale
             )
@@ -26,12 +27,18 @@ struct SessionLiveActivityWidget: Widget {
         } dynamicIsland: { context in
             let state = Self.decrypt(context.state, sessionId: context.attributes.sessionId)
             let color = state?.status.tint ?? .gray
+            let detailText = Self.detailText(
+                for: context.attributes.sessionId,
+                status: state?.status
+            )
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    HStack(alignment: .center, spacing: 6) {
-                        Circle()
-                            .fill(color)
-                            .frame(width: 7, height: 7)
+                    HStack(alignment: .center, spacing: 7) {
+                        Image("HappyCodingIcon")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 22, height: 22)
+                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                         VStack(alignment: .leading, spacing: 1) {
                             Text(verbatim: state?.title ?? "HappyCoding")
                                 .font(.subheadline.weight(.semibold))
@@ -54,13 +61,21 @@ struct SessionLiveActivityWidget: Widget {
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     if let state {
-                        HStack(spacing: 8) {
-                            StatusBadge(status: state.status, isStale: context.isStale)
-                            if state.hasCounts {
-                                ActivityCounts(state: state)
-                                    .font(.caption2)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 8) {
+                                StatusBadge(status: state.status, isStale: context.isStale)
+                                if state.hasCounts {
+                                    ActivityCounts(state: state)
+                                        .font(.caption2)
+                                }
+                                Spacer(minLength: 0)
                             }
-                            Spacer(minLength: 0)
+                            if let detailText {
+                                Text(verbatim: detailText)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
                         }
                     } else {
                         Text("Open the app to view this session.")
@@ -69,24 +84,52 @@ struct SessionLiveActivityWidget: Widget {
                     }
                 }
             } compactLeading: {
-                Image(systemName: state?.status.symbol ?? "waveform")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(color)
+                ZStack(alignment: .bottomTrailing) {
+                    Image("HappyCodingIcon")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 18, height: 18)
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    Circle()
+                        .fill(color)
+                        .frame(width: 6, height: 6)
+                        .overlay(Circle().stroke(.black, lineWidth: 1))
+                        .offset(x: 1, y: 1)
+                }
             } compactTrailing: {
                 if let state {
-                    LiveActivityTimeText(state: state, isStale: context.isStale)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 3) {
+                        Circle()
+                            .fill(color)
+                            .frame(width: 5, height: 5)
+                        LiveActivityTimeText(state: state, isStale: context.isStale)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
                     Image(systemName: "waveform")
                         .font(.caption2)
                 }
             } minimal: {
-                Image(systemName: state?.status.symbol ?? "waveform")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(color)
+                Image("HappyCodingIcon")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 16, height: 16)
+                    .clipShape(Circle())
             }
         }
+    }
+
+    private static func detailText(
+        for sessionId: String,
+        status: LiveActivityContentState.Status?
+    ) -> String? {
+        guard let session = WidgetSnapshotStore.load()?.sessions.first(where: { $0.id == sessionId }) else {
+            return nil
+        }
+        let raw = status == .done ? session.lastResult : session.lastMessage
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func decrypt(
@@ -108,49 +151,75 @@ struct SessionLiveActivityWidget: Widget {
 }
 
 private struct SessionActivityLockScreen: View {
+    let sessionId: String
     let state: LiveActivityContentState?
     let isStale: Bool
+
+    private var snapshotSession: WidgetSnapshot.Session? {
+        WidgetSnapshotStore.load()?.sessions.first { $0.id == sessionId }
+    }
+
+    private var detailText: String? {
+        guard let session = snapshotSession else { return nil }
+        let raw = state?.status == .done ? session.lastResult : session.lastMessage
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
 
     var body: some View {
         Group {
             if let state {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Circle()
-                            .fill(isStale ? Color.secondary : state.status.tint)
-                            .frame(width: 7, height: 7)
+                HStack(alignment: .center, spacing: 12) {
+                    Image("HappyCodingIcon")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 44, height: 44)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 4) {
                         Text(state.title)
                             .font(.headline)
                             .foregroundStyle(Color(uiColor: .label))
                             .lineLimit(1)
-                        Spacer(minLength: 6)
-                        LiveActivityTimeText(state: state, isStale: isStale)
-                            .font(.headline.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-
-                    HStack(spacing: 6) {
                         if !state.project.isEmpty {
                             Text(state.project)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
-                        Spacer(minLength: 4)
-                        StatusBadge(status: state.status, isStale: isStale)
+                        if let detailText {
+                            Text(verbatim: detailText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if state.hasCounts {
+                            ActivityCounts(state: state)
+                                .font(.caption2)
+                        }
                     }
 
-                    if state.hasCounts {
-                        ActivityCounts(state: state)
-                            .font(.caption2)
+                    Spacer(minLength: 12)
+
+                    VStack(alignment: .trailing, spacing: 8) {
+                        LiveActivityTimeText(state: state, isStale: isStale)
+                            .font(.caption.monospacedDigit().weight(.medium))
+                            .foregroundStyle(.secondary)
+                        LiveStatusChip(status: state.status, isStale: isStale)
                     }
                 }
-                .padding(.horizontal, 2)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 HStack(spacing: 8) {
-                    Image(systemName: "waveform")
-                        .foregroundStyle(.secondary)
+                    Image("HappyCodingIcon")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 28, height: 28)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     VStack(alignment: .leading, spacing: 1) {
                         Text(verbatim: "HappyCoding")
                             .font(.subheadline.weight(.semibold))
@@ -167,6 +236,45 @@ private struct SessionActivityLockScreen: View {
     }
 }
 
+/// Small colored status capsule shared by the lock-screen card and the
+/// Dynamic Island bottom region. A spinner replaces the old gear glyph for
+/// working sessions; the label remains explicit.
+private struct LiveStatusChip: View {
+    let status: LiveActivityContentState.Status
+    let isStale: Bool
+
+    private var label: String {
+        isStale ? String(localized: "Paused") : status.label
+    }
+
+    private var tint: Color {
+        isStale ? .secondary : status.tint
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if isStale {
+                Image(systemName: "pause.fill")
+            } else if status == .working {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(tint)
+                    .frame(width: 10, height: 10)
+                    .fixedSize()
+            } else {
+                Image(systemName: status.symbol)
+            }
+            Text(label)
+                .lineLimit(1)
+        }
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(tint)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(tint.opacity(0.13), in: Capsule())
+    }
+}
+
 /// Working rows show a live elapsed timer; waiting/active rows show the
 /// compact web-style relative time.
 private struct LiveActivityTimeText: View {
@@ -180,8 +288,15 @@ private struct LiveActivityTimeText: View {
         } else if state.status == .working {
             let start = Date(timeIntervalSince1970: Double(state.startedAt) / 1000)
             Text(timerInterval: min(start, Date())...Date.distantFuture, countsDown: false)
+                .monospacedDigit()
+                .multilineTextAlignment(.trailing)
+                .lineLimit(1)
+                .frame(width: 56, alignment: .trailing)
         } else {
             Text(WidgetRelativeTime.text(updatedAt: state.updatedAt))
+                .multilineTextAlignment(.trailing)
+                .lineLimit(1)
+                .frame(width: 56, alignment: .trailing)
         }
     }
 }
@@ -191,13 +306,7 @@ private struct StatusBadge: View {
     let isStale: Bool
 
     var body: some View {
-        Label(
-            isStale ? String(localized: "Paused") : status.label,
-            systemImage: isStale ? "pause.circle" : status.symbol
-        )
-        .font(.caption2.weight(.semibold))
-        .foregroundStyle(isStale ? Color.secondary : status.tint)
-        .lineLimit(1)
+        LiveStatusChip(status: status, isStale: isStale)
     }
 }
 

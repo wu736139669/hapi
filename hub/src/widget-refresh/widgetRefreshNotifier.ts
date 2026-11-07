@@ -27,7 +27,7 @@ export type WidgetRefreshNotifierOptions = {
 type Timer = ReturnType<typeof setTimeout>
 
 const DEFAULT_DEBOUNCE_MS = 750
-const DEFAULT_THROTTLE_MS = 60_000
+const DEFAULT_THROTTLE_MS = 30_000
 
 /**
  * Turns widget-visible session transitions into silent APNs wake-ups. The

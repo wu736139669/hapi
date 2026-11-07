@@ -17,9 +17,10 @@ final class WidgetSnapshotUpdater: WidgetSnapshotControlling {
     private var pending: Pending?
     private var debounceTask: Task<Void, Never>?
     private let debounce: Duration = .milliseconds(400)
-    /// WidgetKit budgets reloads. Background updates arrive every few seconds;
-    /// coalescing them keeps the system willing to redraw the widget at all.
-    private let minimumReloadInterval: TimeInterval = 60
+    /// WidgetKit budgets reloads, but a wide 60s window made normal session
+    /// changes feel stale. Keep background updates coalesced without making
+    /// the widget visibly lag behind the app.
+    private let minimumReloadInterval: TimeInterval = 15
     private var lastReloadAt: Date?
     private var delayedReload: Task<Void, Never>?
 

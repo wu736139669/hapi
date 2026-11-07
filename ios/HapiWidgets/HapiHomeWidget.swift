@@ -51,9 +51,9 @@ struct HapiWidgetProvider: TimelineProvider {
         // live via the dynamic timer; status only changes on a reload.
         let entry = HapiWidgetEntry(date: now, snapshot: snapshot)
         // WidgetKit budgets timeline reloads. The app/silent-push path does the
-        // real refresh; this is a low-priority fallback. Five minutes burned
-        // through the budget and made background redraws stop.
-        completion(Timeline(entries: [entry], policy: .after(now.addingTimeInterval(15 * 60))))
+        // real refresh; five minutes is the normal fallback and keeps a stale
+        // snapshot from surviving a longer gap.
+        completion(Timeline(entries: [entry], policy: .after(now.addingTimeInterval(5 * 60))))
     }
 }
 
