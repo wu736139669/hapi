@@ -68,7 +68,8 @@ struct ToolCallBlockView: View {
     private func headerRow(_ presentation: ToolCardPresentation) -> some View {
         ToolSummaryRow(
             presentation: presentation, state: block.tool.state,
-            showsStatus: block.tool.state != .pending || block.tool.permission?.status != .pending
+            showsStatus: block.tool.state != .pending || block.tool.permission?.status != .pending,
+            timing: ChatToolTiming.text(for: block)
         ) { openTool?(block) }
             .accessibilityHint(opensToolProcess(block)
                 ? String(localized: "View agent process") : String(localized: "View tool details"))
@@ -82,6 +83,7 @@ struct ToolSummaryRow: View {
     let presentation: ToolCardPresentation
     let state: ToolCallState
     var showsStatus = true
+    var timing: String? = nil
     let action: () -> Void
     @Environment(\.hapiTheme) private var theme
     @Environment(\.hapiTypography) private var typography
@@ -120,6 +122,12 @@ struct ToolSummaryRow: View {
                 }
                 if !stacksStatus { Spacer(minLength: 8) }
                 HStack(spacing: 8) {
+                    if let timing {
+                        Text(timing)
+                            .font(typography.captionFont)
+                            .foregroundStyle(theme.textHint)
+                            .lineLimit(1)
+                    }
                     if showsStatus && state != .completed {
                         ToolStatusIndicator(state: state)
                     }

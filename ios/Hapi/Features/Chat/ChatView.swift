@@ -107,6 +107,9 @@ struct ChatView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 QueuedMessagesBarView(interactor: model.interactor)
+                ChatComposerStatusBar(model: model) {
+                    configOpen = true
+                }
                 ChatComposerView(
                     interactor: model.interactor,
                     dictation: model.dictation,
@@ -392,9 +395,18 @@ struct ChatView: View {
 
     private var headerTitle: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(model.header.title)
-                .font(.headline)
-                .lineLimit(1)
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(headerStatus.color)
+                    .frame(width: 6, height: 6)
+                Text(model.header.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                Text(headerStatus.label)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(headerStatus.color)
+                    .lineLimit(1)
+            }
             if let subtitle = model.header.subtitle {
                 HStack(spacing: 4) {
                     if model.header.flavor != nil {
@@ -410,6 +422,14 @@ struct ChatView: View {
                 .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private var headerStatus: (label: String, color: Color) {
+        ChatSessionStatus.label(
+            active: model.header.active,
+            thinking: model.header.thinking,
+            reconnecting: model.isReconnecting
+        )
     }
 
     @ViewBuilder

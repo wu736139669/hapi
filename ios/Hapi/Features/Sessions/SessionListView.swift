@@ -683,13 +683,17 @@ struct SessionRowView: View {
     /// The agent owns the leading column; a presence badge marks connected
     /// sessions (pulsing while the agent works) instead of dimming the rest.
     private var agentIcon: some View {
-        AgentFlavorIconView(flavor: row.flavor, size: metrics.iconSize * 0.8)
-            .frame(width: metrics.iconSize, height: metrics.iconSize)
-            .overlay(alignment: .bottomTrailing) {
-                if row.summary.active {
-                    presenceBadge
-                }
+        ZStack {
+            RoundedRectangle(cornerRadius: metrics.iconSize * 0.28, style: .continuous)
+                .fill(theme.surface)
+            AgentFlavorIconView(flavor: row.flavor, size: metrics.iconSize * 0.72)
+        }
+        .frame(width: metrics.iconSize, height: metrics.iconSize)
+        .overlay(alignment: .bottomTrailing) {
+            if row.summary.active {
+                presenceBadge
             }
+        }
     }
 
     private var presenceBadge: some View {

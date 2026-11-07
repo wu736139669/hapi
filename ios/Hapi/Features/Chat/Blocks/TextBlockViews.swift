@@ -18,6 +18,7 @@ struct UserTextBlockView: View {
 
     @Environment(\.chatInteractions) private var interactions
     @Environment(\.hapiTypography) private var typography
+    @Environment(\.hapiTheme) private var theme
     @Environment(\.openChatMessage) private var openMessage
 
     init(block: UserTextBlock) {
@@ -57,7 +58,27 @@ struct UserTextBlockView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                .background(.tint.opacity(0.16))
+                .foregroundStyle(theme.textPrimary)
+                .background {
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 16,
+                        bottomLeadingRadius: 16,
+                        bottomTrailingRadius: 4,
+                        topTrailingRadius: 16,
+                        style: .continuous
+                    )
+                    .fill(theme.surface)
+                }
+                .overlay {
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 16,
+                        bottomLeadingRadius: 16,
+                        bottomTrailingRadius: 4,
+                        topTrailingRadius: 16,
+                        style: .continuous
+                    )
+                    .stroke(theme.divider, lineWidth: 1)
+                }
                 .clipShape(
                     .rect(
                         topLeadingRadius: 16,
@@ -84,6 +105,12 @@ struct UserTextBlockView: View {
                             .padding(.trailing, 4)
                     }
                 }
+                ChatMessageActionRow(
+                    timestamp: block.createdAt,
+                    copyText: block.text,
+                    metadata: nil,
+                    alignment: .trailing
+                )
             }
         }
     }
@@ -96,8 +123,19 @@ struct AgentTextBlockView: View {
     let block: AgentTextBlock
 
     var body: some View {
-        CachedMarkdownView(markdown: block.text)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 0) {
+            CachedMarkdownView(markdown: block.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            ChatMessageActionRow(
+                timestamp: block.createdAt,
+                copyText: block.text,
+                metadata: ChatMessageMeta(
+                    durationMs: block.durationMs,
+                    model: block.model,
+                    usage: block.usage
+                )
+            )
+        }
     }
 }
 
@@ -106,6 +144,7 @@ struct AgentTextBlockView: View {
 struct AgentReasoningBlockView: View {
     let block: AgentReasoningBlock
     @ChatStoredState private var expanded: Bool
+    @Environment(\.hapiTheme) private var theme
 
     init(block: AgentReasoningBlock) {
         self.block = block
@@ -130,10 +169,12 @@ struct AgentReasoningBlockView: View {
             if expanded {
                 CachedMarkdownView(markdown: block.text)
                     .opacity(0.75)
-                    .padding(.leading, 8)
+                    .padding(.leading, 4)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -155,7 +196,9 @@ struct AgentEventBlockView: View {
             CompactionSummaryCard(id: block.id, presentation: compact, expanded: $expanded)
         } else {
             let presentation = eventPresentation(block.event)
-            Text([presentation.icon, presentation.text].compactMap { $0 }.joined(separator: " "))
+            Text([presentation.icon, presentation.text, ChatTimeLabel.text(for: block.createdAt)]
+                .compactMap { $0 }
+                .joined(separator: " · "))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

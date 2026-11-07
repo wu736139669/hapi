@@ -15,6 +15,9 @@ struct ChatHeaderUI: Equatable {
     var flavor: String?
     var active: Bool
     var thinking: Bool
+    var project: String? = nil
+    var model: String? = nil
+    var effort: String? = nil
 }
 
 /// Presentation state machine for the read-only chat screen (M2f) — the iOS
@@ -706,10 +709,17 @@ final class ChatModel {
         let worktree = (detail?.metadata?.worktree ?? summary?.metadata?.worktree).map { tree in
             tree.name.trimmingCharacters(in: .whitespaces).isEmpty ? tree.branch : tree.name
         }
+        let project = (detail?.metadata?.path ?? summary?.metadata?.path)
+            .flatMap { $0.split(separator: "/").last.map(String.init) }
+        let model = detail?.model
+        let effort = detail?.effort ?? detail?.modelReasoningEffort
         let parts: [String] = [
             flavor.map { flavorLabel(forFlavor: $0) },
+            project,
             machineLabel,
             worktree,
+            model,
+            effort,
         ].compactMap { $0 }
 
         return ChatHeaderUI(
@@ -717,7 +727,10 @@ final class ChatModel {
             subtitle: parts.isEmpty ? nil : parts.joined(separator: " · "),
             flavor: flavor,
             active: detail?.active ?? summary?.active ?? false,
-            thinking: detail?.thinking ?? summary?.thinking ?? false
+            thinking: detail?.thinking ?? summary?.thinking ?? false,
+            project: project,
+            model: model,
+            effort: effort
         )
     }
 
