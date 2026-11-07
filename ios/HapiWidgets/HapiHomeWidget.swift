@@ -1,3 +1,4 @@
+import AppIntents
 import HapiProtocol
 import SwiftUI
 import UIKit
@@ -830,20 +831,103 @@ private struct HapiModeWidgetView: View {
 /// One-session detail card: the task, the latest assistant result and progress.
 struct HapiFocusWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: WidgetSnapshotStore.focusWidgetKind, provider: HapiWidgetProvider()) { entry in
+        AppIntentConfiguration(
+            kind: WidgetSnapshotStore.focusWidgetKind,
+            intent: FocusConfigurationIntent.self,
+            provider: FocusProvider()
+        ) { entry in
             HapiFocusWidgetView(entry: entry)
         }
-        .configurationDisplayName("Focus")
-        .description("Task and latest result for one session.")
+        .configurationDisplayName("Session Detail")
+        .description("Task and latest result for a chosen session.")
         .supportedFamilies([.systemLarge])
     }
 }
 
+struct HapiFocusEntry: TimelineEntry {
+    let date: Date
+    let snapshot: WidgetSnapshot
+    let sessionId: String?
+}
+
+struct FocusProvider: AppIntentTimelineProvider {
+    func placeholder(in context: Context) -> HapiFocusEntry {
+        HapiFocusEntry(date: Date(), snapshot: .empty, sessionId: nil)
+    }
+
+    func snapshot(for configuration: FocusConfigurationIntent, in context: Context) async -> HapiFocusEntry {
+        HapiFocusEntry(
+            date: Date(),
+            snapshot: WidgetSnapshotStore.load() ?? .empty,
+            sessionId: configuration.session?.id
+        )
+    }
+
+    func timeline(for configuration: FocusConfigurationIntent, in context: Context) async -> Timeline<HapiFocusEntry> {
+        let now = Date()
+        let entry = HapiFocusEntry(
+            date: now,
+            snapshot: WidgetSnapshotStore.load() ?? .empty,
+            sessionId: configuration.session?.id
+        )
+        return Timeline(entries: [entry], policy: .after(now.addingTimeInterval(5 * 60)))
+    }
+}
+
+struct FocusConfigurationIntent: WidgetConfigurationIntent {
+    static var title: LocalizedStringResource = "Session Detail"
+    static var description = IntentDescription("Pick a session for the detail card.")
+
+    @Parameter(title: "Session")
+    var session: SessionEntity?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Show \(\.$session)")
+    }
+}
+
+struct SessionEntity: AppEntity {
+    let id: String
+    let title: String
+    let project: String
+
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Session"
+    static var defaultQuery = SessionEntityQuery()
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(
+            title: "\(title)",
+            subtitle: project.isEmpty ? nil : "\(project)"
+        )
+    }
+}
+
+struct SessionEntityQuery: EntityQuery {
+    func entities(for identifiers: [String]) async throws -> [SessionEntity] {
+        let wanted = Set(identifiers)
+        return allEntities().filter { wanted.contains($0.id) }
+    }
+
+    func suggestedEntities() async throws -> [SessionEntity] {
+        allEntities()
+    }
+
+    private func allEntities() -> [SessionEntity] {
+        (WidgetSnapshotStore.load()?.sessions ?? []).map {
+            SessionEntity(id: $0.id, title: $0.title, project: $0.project)
+        }
+    }
+}
+
 private struct HapiFocusWidgetView: View {
-    let entry: HapiWidgetEntry
+    let entry: HapiFocusEntry
 
     private var session: WidgetSnapshot.Session? {
-        entry.snapshot.sessions.first { $0.isUnread == true && $0.status != .working }
+        if let selected = entry.sessionId,
+           let match = entry.snapshot.sessions.first(where: { $0.id == selected }) {
+            return match
+        }
+        return entry.snapshot.sessions.first { $0.isUnread == true && $0.status != .working }
             ?? entry.snapshot.sessions.first { $0.status == .working }
             ?? entry.snapshot.sessions.first { $0.isUnread == true }
             ?? entry.snapshot.sessions.first
