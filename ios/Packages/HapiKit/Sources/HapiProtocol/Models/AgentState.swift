@@ -102,18 +102,22 @@ public struct AgentState: Codable, Equatable, Sendable {
     public var requests: [String: AgentStateRequest]?
     /// Resolved requests keyed by request id.
     public var completedRequests: [String: AgentStateCompletedRequest]?
+    /// Epoch ms when the agent started compacting its context; nil otherwise.
+    public var contextCompactionStartedAt: Int?
 
     public init(
         controlledByUser: Bool? = nil,
         startingMode: SessionStartingMode? = nil,
         requests: [String: AgentStateRequest]? = nil,
         completedRequests: [String: AgentStateCompletedRequest]? = nil,
-        codexPlanProposalId: String? = nil
+        codexPlanProposalId: String? = nil,
+        contextCompactionStartedAt: Int? = nil
     ) {
         self.controlledByUser = controlledByUser
         self.startingMode = startingMode
         self.codexPlanProposalId = codexPlanProposalId
         self.requests = requests
         self.completedRequests = completedRequests
+        self.contextCompactionStartedAt = contextCompactionStartedAt
     }
 }

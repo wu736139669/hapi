@@ -12,6 +12,16 @@ private func calculateContextSize(_ usage: UsageData) -> Double {
     return (usage.cacheCreationInputTokens ?? 0) + (usage.cacheReadInputTokens ?? 0) + usage.inputTokens
 }
 
+/// Some Claude-compatible providers emit assistant snapshots with an all-zero
+/// usage object after long tool runs. Looking through them prevents the
+/// context bar from resetting to 0%.
+private func hasContextUsageSignal(_ usage: UsageData) -> Bool {
+    (usage.contextTokens ?? 0) > 0
+        || usage.inputTokens > 0
+        || (usage.cacheCreationInputTokens ?? 0) > 0
+        || (usage.cacheReadInputTokens ?? 0) > 0
+}
+
 /// Port of `isUsageVisibleInParentContext` — subagent usage must not drive
 /// the parent thread's context bar.
 private func isUsageVisibleInParentContext(_ msg: NormalizedMessage) -> Bool {
@@ -148,7 +158,9 @@ public func reduceChatBlocks(
     // Latest usage: the most recent parent-context message with usage data.
     var latestUsage: LatestUsage?
     for msg in normalized.reversed() {
-        if let usage = msg.usage, isUsageVisibleInParentContext(msg) {
+        if let usage = msg.usage,
+           isUsageVisibleInParentContext(msg),
+           hasContextUsageSignal(usage) {
             latestUsage = LatestUsage(
                 inputTokens: usage.inputTokens,
                 outputTokens: usage.outputTokens,

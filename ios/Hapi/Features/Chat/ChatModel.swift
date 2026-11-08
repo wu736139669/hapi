@@ -18,6 +18,10 @@ struct ChatHeaderUI: Equatable {
     var project: String? = nil
     var model: String? = nil
     var effort: String? = nil
+    var backgroundTaskCount: Int = 0
+    var serviceTier: String? = nil
+    var collaborationMode: CodexCollaborationMode? = nil
+    var isCompacting: Bool = false
 }
 
 /// Presentation state machine for the read-only chat screen (M2f) — the iOS
@@ -44,6 +48,10 @@ final class ChatModel {
     // MARK: Published render state
 
     private(set) var blocks: [VisibleChatBlock] = []
+    /// Reducer context usage for the composer meter; nil until a usage row
+    /// appears in the current window.
+    private(set) var latestUsage: LatestUsage?
+    private(set) var latestGoal: JSONValue?
     private(set) var header: ChatHeaderUI
     /// Workspace root, for path display in tool cards.
     private(set) var basePath: String?
@@ -87,6 +95,17 @@ final class ChatModel {
     private(set) var supersededSessionId: String?
 
     /// Delayed session-pipe notice; stable until the hub handshake arrives.
+    /// Goal/tasks/subagents/team summary for the collapsible status card.
+    var statusPanelData: ChatStatusPanelData? {
+        let detail = hub.sessionStore.detail(for: sessionId)
+        return ChatStatusPanelData.build(
+            goal: latestGoal,
+            tasks: detail?.todos,
+            blocks: blocks,
+            teamState: detail?.teamState
+        )
+    }
+
     var isReconnecting: Bool { chat.reconnectNotice.isVisible }
 
     // MARK: Export
@@ -582,12 +601,15 @@ final class ChatModel {
                 let detail = hub.sessionStore.detail(for: sessionId)
                 let summary = hub.sessionStore.sessions.first { $0.id == sessionId }
                 let machines = hub.machineStore.machines
-                let visible = await pipeline.run(
+                let output = await pipeline.runResult(
                     messages: window.messages,
                     agentState: detail?.agentState,
                     hasMoreMessages: window.hasMore,
                     directSendLocalIds: interactor.directSendLocalIds
                 )
+                let visible = output.blocks
+                latestUsage = output.latestUsage
+                latestGoal = output.latestGoal
                 let sources = Set(visible.flatMap { block -> [String] in
                     guard case .block(let value) = block else { return [] }
                     switch value {
@@ -730,7 +752,11 @@ final class ChatModel {
             thinking: detail?.thinking ?? summary?.thinking ?? false,
             project: project,
             model: model,
-            effort: effort
+            effort: effort,
+            backgroundTaskCount: detail?.backgroundTaskCount ?? summary?.backgroundTaskCount ?? 0,
+            serviceTier: detail?.serviceTier,
+            collaborationMode: detail?.collaborationMode,
+            isCompacting: detail?.agentState?.contextCompactionStartedAt != nil
         )
     }
 

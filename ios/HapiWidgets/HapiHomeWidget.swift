@@ -384,6 +384,7 @@ private struct InlineAccessory: View {
 
 private struct WidgetHeader: View {
     let snapshot: WidgetSnapshot
+    var showsRefresh = true
 
     var body: some View {
         HStack(spacing: 5) {
@@ -402,7 +403,9 @@ private struct WidgetHeader: View {
                     .fill(.orange)
                     .frame(width: 7, height: 7)
             }
-            WidgetRefreshButton()
+            if showsRefresh {
+                WidgetRefreshButton()
+            }
         }
     }
 }
@@ -1070,6 +1073,7 @@ private struct HapiFocusWidgetView: View {
                         .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
+                WidgetRefreshButton()
             }
             .padding(.top, 1)
 
@@ -1077,7 +1081,6 @@ private struct HapiFocusWidgetView: View {
                 mediumMetaLine(session)
                 Spacer(minLength: 6)
                 focusSwitcher(for: session)
-                WidgetRefreshButton()
             }
             .padding(.top, 1)
 
@@ -1121,7 +1124,7 @@ private struct HapiFocusWidgetView: View {
             .padding(.vertical, 2)
             .padding(.horizontal, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 90, alignment: .topLeading)
+            .frame(height: 84, alignment: .topLeading)
             .background {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color.teal.opacity(0.08))
@@ -1136,18 +1139,24 @@ private struct HapiFocusWidgetView: View {
             let index = sessions.firstIndex { $0.id == session.id } ?? 0
             let previous = sessions[(index - 1 + sessions.count) % sessions.count]
             let next = sessions[(index + 1) % sessions.count]
-            HStack(spacing: 5) {
+            HStack(spacing: 3) {
                 Button(intent: HapiFocusSessionIntent(sessionId: previous.id)) {
                     Image(systemName: "chevron.left")
-                        .frame(width: 16, height: 14)
+                        .frame(width: 20, height: 20)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                Text("\(index + 1)/\(sessions.count)")
-                    .monospacedDigit()
+                Button(intent: HapiFocusSessionIntent(sessionId: next.id)) {
+                    Text("\(index + 1)/\(sessions.count)")
+                        .monospacedDigit()
+                        .frame(minWidth: 26, minHeight: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Next session")
                 Button(intent: HapiFocusSessionIntent(sessionId: next.id)) {
                     Image(systemName: "chevron.right")
-                        .frame(width: 16, height: 14)
+                        .frame(width: 20, height: 20)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

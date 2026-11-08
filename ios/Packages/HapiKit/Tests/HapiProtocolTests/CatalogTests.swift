@@ -252,7 +252,7 @@ struct CatalogTests {
             NewSessionOption(value: "haiku", label: "Haiku"),
         ])
         #expect(NewSessionCatalogs.claudeEfforts == [
-            NewSessionOption(value: "auto", label: "Auto"),
+            NewSessionOption(value: "auto", label: "Default"),
             NewSessionOption(value: "low", label: "Low"),
             NewSessionOption(value: "medium", label: "Medium"),
             NewSessionOption(value: "high", label: "High"),
@@ -267,5 +267,38 @@ struct CatalogTests {
             NewSessionOption(value: "xhigh", label: "XHigh"),
         ])
         #expect(NewSessionCatalogs.effortLabel("xhigh") == "Xhigh")
+    }
+
+    @Test func claudeLaunchOptionsGroupOlderFamiliesAndKeepUnlistedSelection() {
+        let catalog = [
+            ClaudeModelSummary(value: "opus", displayName: "Opus 4.1", effortLevels: ["low", "high"]),
+            ClaudeModelSummary(value: "claude-opus-4-0", displayName: "Opus 4"),
+            ClaudeModelSummary(value: "sonnet", displayName: "Sonnet 4.5"),
+        ]
+        let options = NewSessionCatalogs.claudeLaunchModelOptions(
+            catalog: catalog,
+            selectedModel: "claude-old",
+            notListedSuffix: "not listed",
+            otherModelsLabel: "Other models"
+        )
+
+        #expect(options.map(\.value) == [
+            "auto", "claude-old", "opus", "sonnet", "claude-opus-4-0",
+        ])
+        #expect(options[1].label == "claude-old (not listed)")
+        #expect(options[4].group == "Other models")
+    }
+
+    @Test func claudeEffortOptionsUseTheSelectedModelLevels() {
+        let catalog = [
+            ClaudeModelSummary(value: "default", effortLevels: ["low", "medium"]),
+            ClaudeModelSummary(value: "opus", effortLevels: []),
+        ]
+        #expect(NewSessionCatalogs.claudeEffortOptions(
+            catalog: catalog, model: "auto", currentEffort: "auto"
+        )?.map(\.value) == ["auto", "low", "medium"])
+        #expect(NewSessionCatalogs.claudeEffortOptions(
+            catalog: catalog, model: "opus", currentEffort: "auto"
+        )?.map(\.value) == ["auto"])
     }
 }

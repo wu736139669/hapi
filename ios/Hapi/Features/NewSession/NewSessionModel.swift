@@ -41,6 +41,16 @@ enum CodexModelsState: Equatable {
     case failed(String)
 }
 
+/// Machine Claude-models catalog state (web `useClaudeModels`). The picker
+/// keeps the static presets while loading/failed and replaces them once the
+/// CLI catalog arrives.
+enum ClaudeModelsState: Equatable {
+    case hidden
+    case loading
+    case loaded([ClaudeModelSummary])
+    case failed(String)
+}
+
 /// Discovered model catalog of the selected non-Claude/Codex agent.
 enum AgentModelsState: Equatable {
     case hidden
@@ -78,11 +88,23 @@ private struct CachedAgentModels {
 /// `newSessionFormDraft.ts`) so backing out of the sheet loses nothing.
 /// JSON blobs in `UserDefaults`, keyed per hub (the Android original keys
 /// app-wide; per-hub matches this app's multi-hub stores).
+struct NewSessionLaunchSettings: Codable, Equatable {
+    var model: String
+    var effort: String
+    var modelReasoningEffort: String
+    var serviceTier: String
+    var permissionMode: String
+    var yolo: Bool
+}
+
 struct NewSessionPrefsData: Codable, Equatable {
     var lastMachineId: String?
     /// Machine id → most-recent-first spawn directories
     /// (cap `NewSessionLogic.maxRecentPaths`).
     var recentPaths: [String: [String]] = [:]
+    var lastAgent: String?
+    /// Machine + agent → last launch selections.
+    var launchSettings: [String: NewSessionLaunchSettings]?
 }
 
 struct NewSessionPrefsStore {
@@ -134,11 +156,13 @@ struct NewSessionPrefsStore {
 /// Web reference: `web/src/components/NewSession/index.tsx`.
 ///
 /// Option matrix (web create form):
-/// - model pickers: claude (static presets), codex (machine catalog; hidden
+/// - model pickers: claude (machine CLI catalog, static presets while it
+///   loads/fails), codex (machine catalog; hidden
 ///   when the runner lacks the RPC) and the `AgentModelCatalog` flavors —
 ///   agy/cursor/dsh/pi per machine, copilot/grok/kimi/opencode once the
 ///   directory exists. Cursor is a flat list of ACP ids (no variant drill-down).
-/// - effort: claude static levels, grok per-model efforts, pi thinking
+/// - effort: claude per-model catalog levels (static fallback), grok per-model
+///   efforts, pi thinking
 ///   levels; reasoning effort: codex catalog, opencode variants.
 /// - `startingMode` stays unset → the runner spawns `'remote'` (pty deferred).
 @MainActor @Observable
@@ -168,6 +192,7 @@ final class NewSessionModel {
     let directoryInput: NewSessionDirectoryModel
     var suggestions: [String] { directoryInput.suggestions }
     private(set) var codexModels: CodexModelsState = .hidden
+    private(set) var claudeModels: ClaudeModelsState = .hidden
     private(set) var agentModels: AgentModelsState = .hidden
     /// OpenCode variants keyed `provider/model`; nil until loaded.
     private(set) var opencodeVariants: [String: [String]]?
@@ -183,6 +208,8 @@ final class NewSessionModel {
 
     private let session: HubSession
     private let prefsStore: NewSessionPrefsStore
+    private let initialMachineId: String?
+    private let initialDirectory: String?
     /// Fired once with the new session id — navigate-replace to the chat.
     private let onCreated: @MainActor (String) -> Void
 
@@ -190,6 +217,9 @@ final class NewSessionModel {
     @ObservationIgnored private var availabilityTask: Task<Void, Never>?
     @ObservationIgnored private var defaultDirectoryTask: Task<Void, Never>?
     @ObservationIgnored private var codexFetchedForMachine: String?
+    @ObservationIgnored private var claudeModelsTask: Task<Void, Never>?
+    @ObservationIgnored private var claudeFetchedForMachine: String?
+    @ObservationIgnored private var claudeModelsCache: [String: [ClaudeModelSummary]] = [:]
     @ObservationIgnored private var agentModelsTask: Task<Void, Never>?
     @ObservationIgnored private var agentModelsFetched: AgentModelsRequest??
     @ObservationIgnored private var agentModelsCache: [AgentModelsRequest: CachedAgentModels] = [:]
@@ -197,16 +227,21 @@ final class NewSessionModel {
     @ObservationIgnored private var suppressSuggestions = false
     @ObservationIgnored private var spawnInFlight = false
     @ObservationIgnored private var hasStarted = false
+    @ObservationIgnored private var loadedDraft = false
     @ObservationIgnored private var directoryEdited = false
     @ObservationIgnored private var directoryEditVersion = 0
 
     init(
         session: HubSession,
         defaults: UserDefaults = .standard,
+        initialMachineId: String? = nil,
+        initialDirectory: String? = nil,
         onCreated: @escaping @MainActor (String) -> Void
     ) {
         self.session = session
         self.prefsStore = NewSessionPrefsStore(hubUrl: session.hubUrl, defaults: defaults)
+        self.initialMachineId = initialMachineId
+        self.initialDirectory = initialDirectory
         self.onCreated = onCreated
         self.directoryInput = NewSessionDirectoryModel(
             requester: session.api,
@@ -228,14 +263,32 @@ final class NewSessionModel {
             hasStarted = true
             prefsData = prefsStore.readPrefs()
             let draft = prefsStore.readDraft().map(NewSessionLogic.sanitizeDraft)
-            form = draft ?? NewSessionForm()
-            // A saved empty path can be intentional; never replace it on refresh.
-            directoryEdited = draft != nil
+            if let initialDirectory, !initialDirectory.isEmpty {
+                // A directory-header + starts a fresh form at that exact path;
+                // it must not inherit an unrelated draft.
+                form = NewSessionForm()
+                form.machineId = initialMachineId
+                form.directory = initialDirectory
+                loadedDraft = false
+                directoryEdited = true
+            } else {
+                loadedDraft = draft != nil
+                form = draft ?? NewSessionForm()
+                directoryEdited = draft != nil
+            }
+            if !loadedDraft, let raw = prefsData.lastAgent,
+               AgentFlavor.creatableFlavors.contains(AgentFlavor(rawValue: raw)) {
+                form.agent = AgentFlavor(rawValue: raw)
+            }
             suppressSuggestions = true
         }
         reconcileMachineSelection()
+        if !loadedDraft {
+            applyPreferredLaunchSettings()
+        }
         refreshAgentAvailability()
         refreshCodexModelsIfNeeded()
+        refreshClaudeModelsIfNeeded()
         refreshAgentModelsIfNeeded()
         scheduleDirectoryWork()
 
@@ -259,8 +312,11 @@ final class NewSessionModel {
             directoryBrowser.close()
             availabilityTask?.cancel()
             codexTask?.cancel()
+            claudeModelsTask?.cancel()
             availabilityFetchedForMachine = nil
             codexFetchedForMachine = nil
+            claudeFetchedForMachine = nil
+            claudeModels = .hidden
         } else {
             if directoryBrowser.isPresented,
                directoryBrowser.roots != selectedMachine.map(RemoteDirectoryPath.browseRoots) {
@@ -268,6 +324,7 @@ final class NewSessionModel {
             }
             refreshAgentAvailability()
             refreshCodexModelsIfNeeded()
+            refreshClaudeModelsIfNeeded()
         }
         refreshAgentModelsIfNeeded()
         scheduleDirectoryWork()
@@ -359,7 +416,16 @@ final class NewSessionModel {
     var modelOptions: [NewSessionOption]? {
         switch (form.agent, codexModels) {
         case (.claude, _):
-            return NewSessionCatalogs.claudeModels
+            let catalog: [ClaudeModelSummary]? = {
+                if case .loaded(let models) = claudeModels { return models }
+                return nil
+            }()
+            return NewSessionCatalogs.claudeLaunchModelOptions(
+                catalog: catalog,
+                selectedModel: form.model,
+                notListedSuffix: String(localized: "not listed"),
+                otherModelsLabel: String(localized: "Other models")
+            )
         case (.codex, .loaded(let models)):
             return [NewSessionOption(value: "auto", label: "Default")]
                 + models.map { NewSessionOption(value: $0.id, label: $0.displayName) }
@@ -384,7 +450,9 @@ final class NewSessionModel {
     }
 
     var modelsLoading: Bool {
-        (form.agent == .codex && codexModels == .loading) || agentModels == .loading
+        (form.agent == .codex && codexModels == .loading)
+            || (form.agent == .claude && claudeModels == .loading)
+            || agentModels == .loading
     }
 
     var modelsError: String? {
@@ -405,7 +473,16 @@ final class NewSessionModel {
     /// Claude effort, grok effort or pi thinking level; nil hides the field.
     var effortOptions: [NewSessionOption]? {
         switch form.agent {
-        case .claude: return NewSessionCatalogs.claudeEfforts
+        case .claude:
+            let catalog: [ClaudeModelSummary]? = {
+                if case .loaded(let models) = claudeModels { return models }
+                return nil
+            }()
+            return NewSessionCatalogs.claudeEffortOptions(
+                catalog: catalog,
+                model: form.model,
+                currentEffort: form.effort
+            )
         case .grok: return AgentModelCatalog.grokEffortOptions(response: loadedAgentModels, model: form.model)
         case .pi: return AgentModelCatalog.piEffortOptions(response: loadedAgentModels, model: form.model)
         default: return nil
@@ -448,6 +525,13 @@ final class NewSessionModel {
         let modes = form.agent.permissionModes
         guard form.agent == .grok, loadedAgentModels?.autoPermissionModeSupported == false else { return modes }
         return modes.filter { $0 != .auto }
+    }
+
+    /// Machine id whose Claude catalog the form needs, or nil for other
+    /// agents / no selected machine.
+    var claudeModelsRequest: String? {
+        guard form.agent == .claude, let machineId = selectedMachine?.id else { return nil }
+        return machineId
     }
 
     /// The discovered-model fetch the form needs now; nil when the flavor
@@ -605,8 +689,11 @@ final class NewSessionModel {
         form.serviceTier = .standard
         form.collaborationMode = .default
         form.copilotAgentMode = .interactive
+        applyPreferredLaunchSettings()
+        captureLaunchSettings()
         persistDraft()
         refreshCodexModelsIfNeeded()
+        refreshClaudeModelsIfNeeded()
         refreshAgentModelsIfNeeded()
     }
 
@@ -615,27 +702,35 @@ final class NewSessionModel {
         if form.agent == .codex {
             form = reconcileCodexSelections(form)
         }
+        if form.agent == .claude {
+            form = reconcileClaudeEffort(form)
+        }
         form = reconcileAgentModelSelections(form)
+        captureLaunchSettings()
         persistDraft()
     }
 
     func setEffort(_ effort: String) {
         form.effort = effort
+        captureLaunchSettings()
         persistDraft()
     }
 
     func setModelReasoningEffort(_ value: String) {
         form.modelReasoningEffort = value
+        captureLaunchSettings()
         persistDraft()
     }
 
     func setPermissionMode(_ mode: PermissionMode) {
         form.permissionMode = mode
+        captureLaunchSettings()
         persistDraft()
     }
 
     func setYolo(_ enabled: Bool) {
         form.yolo = enabled
+        captureLaunchSettings()
         persistDraft()
     }
 
@@ -652,6 +747,7 @@ final class NewSessionModel {
 
     func setServiceTier(_ tier: ServiceTier) {
         form.serviceTier = tier
+        captureLaunchSettings()
         persistDraft()
     }
 
@@ -667,7 +763,9 @@ final class NewSessionModel {
 
     func retryModels() {
         codexFetchedForMachine = nil
+        claudeFetchedForMachine = nil
         refreshCodexModelsIfNeeded()
+        refreshClaudeModelsIfNeeded(force: true)
         refreshAgentModelsIfNeeded(force: true)
     }
 
@@ -771,6 +869,25 @@ final class NewSessionModel {
         machineId.flatMap { prefsData.recentPaths[$0] } ?? []
     }
 
+    /// Recent spawn paths plus directories already used by sessions on this
+    /// machine (web `useDirectorySuggestions`), so existing projects are
+    /// visible before the user types anything.
+    var knownDirectories: [String] {
+        guard let machineId = form.machineId else { return recentPaths }
+        let recent = recentPaths(for: machineId)
+        let recentSet = Set(recent)
+        let sessionPaths = session.sessionStore.sessions
+            .filter { $0.metadata?.machineId == machineId }
+            .flatMap { summary -> [String] in
+                [summary.metadata?.path, summary.metadata?.worktree?.basePath].compactMap { $0 }
+            }
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let extras = Set(sessionPaths)
+            .subtracting(recentSet)
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        return recent + extras
+    }
+
     private func reconcileMachineSelection() {
         guard form.machineId == nil else { return }
         let machines = session.machineStore.machines.filter(\.active)
@@ -788,6 +905,9 @@ final class NewSessionModel {
         suppressSuggestions = true
         form.machineId = machineId
         form.model = "auto"
+        if !loadedDraft {
+            applyPreferredLaunchSettings()
+        }
         if resetDirectory {
             let machine = session.machineStore.machines.first { $0.id == machineId }
             directoryEdited = false
@@ -944,6 +1064,72 @@ final class NewSessionModel {
         }
     }
 
+    /// Fetches or reuses the selected machine's Claude model catalog. The
+    /// form keeps the static presets while this is loading or fails.
+    func refreshClaudeModelsIfNeeded(force: Bool = false) {
+        guard form.agent == .claude, let machineId = selectedMachine?.id else {
+            claudeModelsTask?.cancel()
+            claudeFetchedForMachine = nil
+            claudeModels = .hidden
+            return
+        }
+        if !force, let cached = claudeModelsCache[machineId] {
+            claudeFetchedForMachine = machineId
+            claudeModels = .loaded(cached)
+            form = reconcileClaudeEffort(form)
+            persistDraft()
+            return
+        }
+        if !force, claudeFetchedForMachine == machineId, claudeModels != .hidden {
+            return
+        }
+        claudeFetchedForMachine = machineId
+        claudeModelsTask?.cancel()
+        claudeModels = .loading
+        claudeModelsTask = Task { [weak self] in
+            guard let self else { return }
+            let state: ClaudeModelsState
+            do {
+                let response = try await self.session.api.machineClaudeModels(machineId: machineId)
+                state = response.success
+                    ? .loaded(response.availableModels ?? [])
+                    : .failed(response.error ?? String(localized: "Failed to load Claude models"))
+            } catch is CancellationError {
+                return
+            } catch {
+                state = .failed(
+                    (error as? LocalizedError)?.errorDescription
+                        ?? String(localized: "Failed to load Claude models")
+                )
+            }
+            guard !Task.isCancelled,
+                  self.form.machineId == machineId,
+                  self.form.agent == .claude
+            else { return }
+            self.claudeModels = state
+            if case .loaded(let models) = state {
+                self.claudeModelsCache[machineId] = models
+                self.form = self.reconcileClaudeEffort(self.form)
+                self.persistDraft()
+            }
+        }
+    }
+
+    private func reconcileClaudeEffort(_ current: NewSessionForm) -> NewSessionForm {
+        guard case .loaded(let models) = claudeModels else { return current }
+        guard let options = NewSessionCatalogs.claudeEffortOptions(
+            catalog: models,
+            model: current.model,
+            currentEffort: current.effort
+        ) else { return current }
+        if !options.contains(where: { $0.value == current.effort }) {
+            var next = current
+            next.effort = "auto"
+            return next
+        }
+        return current
+    }
+
     /// Fetches (or reuses) the catalog for ``agentModelsRequest``. The view
     /// calls this whenever the request changes — including when a typed
     /// directory turns out to exist.
@@ -1036,6 +1222,45 @@ final class NewSessionModel {
     private func codexFastTierVisible(_ current: NewSessionForm) -> Bool {
         guard current.agent == .codex, case .loaded(let models) = codexModels else { return false }
         return NewSessionLogic.codexModelAdvertisesFastTier(model: current.model, models: models)
+    }
+
+    private func launchSettingsKey(machineId: String, agent: AgentFlavor) -> String {
+        "\(machineId)|\(agent.rawValue)"
+    }
+
+    private func applyPreferredLaunchSettings() {
+        guard let machineId = form.machineId,
+              let settings = prefsData.launchSettings?[
+                launchSettingsKey(machineId: machineId, agent: form.agent)
+              ] else { return }
+        form.model = settings.model
+        form.effort = settings.effort
+        form.modelReasoningEffort = settings.modelReasoningEffort
+        if let tier = ServiceTier(rawValue: settings.serviceTier) {
+            form.serviceTier = tier
+        }
+        if let mode = PermissionMode(rawValue: settings.permissionMode),
+           form.agent.permissionModes.contains(mode) {
+            form.permissionMode = mode
+        }
+        form.yolo = settings.yolo
+    }
+
+    private func captureLaunchSettings() {
+        guard let machineId = form.machineId else { return }
+        prefsData.lastMachineId = machineId
+        prefsData.lastAgent = form.agent.rawValue
+        var settings = prefsData.launchSettings ?? [:]
+        settings[launchSettingsKey(machineId: machineId, agent: form.agent)] = NewSessionLaunchSettings(
+            model: form.model,
+            effort: form.effort,
+            modelReasoningEffort: form.modelReasoningEffort,
+            serviceTier: form.serviceTier.rawValue,
+            permissionMode: form.permissionMode.rawValue,
+            yolo: form.yolo
+        )
+        prefsData.launchSettings = settings
+        prefsStore.writePrefs(prefsData)
     }
 
     private func persistDraft() {

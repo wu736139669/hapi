@@ -9,11 +9,22 @@ import SwiftUI
 /// dismisses the sheet and pushes the chat — navigate-replace).
 struct NewSessionView: View {
     @State private var model: NewSessionModel
+    @State private var modelPickerPresented = false
     @Environment(\.dismiss) private var dismiss
     private let session: HubSession
 
-    init(session: HubSession, onCreated: @escaping @MainActor (String) -> Void) {
-        _model = State(initialValue: NewSessionModel(session: session, onCreated: onCreated))
+    init(
+        session: HubSession,
+        initialMachineId: String? = nil,
+        initialDirectory: String? = nil,
+        onCreated: @escaping @MainActor (String) -> Void
+    ) {
+        _model = State(initialValue: NewSessionModel(
+            session: session,
+            initialMachineId: initialMachineId,
+            initialDirectory: initialDirectory,
+            onCreated: onCreated
+        ))
         self.session = session
     }
 
@@ -52,6 +63,16 @@ struct NewSessionView: View {
                 model: model.directoryBrowser,
                 onSelect: model.selectBrowsedDirectory
             )
+            .macSheetSizing()
+        }
+        .sheet(isPresented: $modelPickerPresented) {
+            ModelPickerSheet(
+                options: model.modelOptions ?? [],
+                selected: model.form.model
+            ) { value in
+                model.setModel(value)
+                modelPickerPresented = false
+            }
             .macSheetSizing()
         }
         .onDisappear {
@@ -150,10 +171,11 @@ struct NewSessionView: View {
                 .buttonStyle(.plain)
             }
 
-            if !model.recentPaths.isEmpty {
+            let directories = model.knownDirectories
+            if !directories.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(model.recentPaths, id: \.self) { path in
+                    LazyHStack(spacing: 8) {
+                        ForEach(directories, id: \.self) { path in
                             FilterChip(label: path, selected: false) {
                                 model.pickRecentPath(path)
                             }
@@ -329,11 +351,14 @@ struct NewSessionView: View {
     private var optionsSection: some View {
         Section("Options") {
             if let options = model.modelOptions {
-                optionPicker(
-                    "Model",
-                    options: options,
-                    selection: Binding(get: { model.form.model }, set: { model.setModel($0) })
-                )
+                Button {
+                    modelPickerPresented = true
+                } label: {
+                    LabeledContent("Model") {
+                        Text(selectedModelLabel(options))
+                            .lineLimit(1)
+                    }
+                }
                 .disabled(model.modelsLoading || model.modelsError != nil)
                 if model.modelsLoading {
                     Text("Loading…")
@@ -464,14 +489,29 @@ struct NewSessionView: View {
         )
     }
 
+    private func selectedModelLabel(_ options: [NewSessionOption]) -> String {
+        options.first { $0.value == model.form.model }?.label ?? model.form.model
+    }
+
     private func optionPicker(
         _ title: LocalizedStringKey,
         options: [NewSessionOption],
         selection: Binding<String>
     ) -> some View {
-        Picker(title, selection: selection) {
-            ForEach(options, id: \.value) { option in
+        let ungrouped = options.filter { $0.group == nil }
+        let groupNames = options.compactMap(\.group).reduce(into: [String]()) { names, name in
+            if !names.contains(name) { names.append(name) }
+        }
+        return Picker(title, selection: selection) {
+            ForEach(ungrouped, id: \.value) { option in
                 Text(option.label).tag(option.value)
+            }
+            ForEach(groupNames, id: \.self) { group in
+                Section(group) {
+                    ForEach(options.filter { $0.group == group }, id: \.value) { option in
+                        Text(option.label).tag(option.value)
+                    }
+                }
             }
         }
     }
@@ -509,5 +549,74 @@ struct NewSessionView: View {
             return String(localized: "Create and Make Directory")
         }
         return String(localized: "Create")
+    }
+}
+
+
+private struct ModelPickerSheet: View {
+    let options: [NewSessionOption]
+    let selected: String
+    let onSelect: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    private var filtered: [NewSessionOption] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return options }
+        return options.filter {
+            $0.label.localizedCaseInsensitiveContains(trimmed)
+                || $0.value.localizedCaseInsensitiveContains(trimmed)
+        }
+    }
+
+    private var groupNames: [String] {
+        filtered.compactMap(\.group).reduce(into: [String]()) { names, name in
+            if !names.contains(name) { names.append(name) }
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(filtered.filter { $0.group == nil }, id: \.value) { option in
+                    row(option)
+                }
+                ForEach(groupNames, id: \.self) { group in
+                    Section(group) {
+                        ForEach(filtered.filter { $0.group == group }, id: \.value) { option in
+                            row(option)
+                        }
+                    }
+                }
+            }
+            .searchable(text: $query, prompt: "Search models")
+            .navigationTitle("Model")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func row(_ option: NewSessionOption) -> some View {
+        Button {
+            onSelect(option.value)
+        } label: {
+            HStack(spacing: 10) {
+                Text(option.label)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 8)
+                if option.value == selected {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.tint)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

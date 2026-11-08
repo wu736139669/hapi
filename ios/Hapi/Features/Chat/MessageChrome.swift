@@ -151,6 +151,15 @@ struct ChatMessageActionRow: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(copied ? Text("Copied") : Text("Copy"))
             }
+            if let copyText, !copyText.isEmpty {
+                ShareLink(item: copyText) {
+                    Image(systemName: "square.and.arrow.up")
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Share")
+            }
             if let metadata, metadata.hasDetails {
                 Menu {
                     if let duration = metadata.durationLabel {

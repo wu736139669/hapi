@@ -81,4 +81,12 @@ extension APIClient {
     public func machineCodexModels(machineId: String) async throws -> CodexModelsResponse {
         try await request(.get, "/api/machines/\(encodePathComponent(machineId))/codex-models")
     }
+
+    /// `GET /api/machines/:id/claude-models` — the Claude CLI's own model
+    /// list for this machine (RPC envelope — check `success`). The create
+    /// form falls back to its static presets while loading or when a runner
+    /// lacks the RPC.
+    public func machineClaudeModels(machineId: String) async throws -> ClaudeModelsResponse {
+        try await request(.get, "/api/machines/\(encodePathComponent(machineId))/claude-models")
+    }
 }

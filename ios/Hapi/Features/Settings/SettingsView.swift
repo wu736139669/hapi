@@ -94,6 +94,7 @@ struct SettingsView: View {
                     insightsSection
                 }
                 aboutSection
+                signOutSection
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -145,6 +146,11 @@ struct SettingsView: View {
                 dismiss()
                 appModel.showAddHub = true
             }
+        }
+    }
+
+    private var signOutSection: some View {
+        Section {
             Button("Sign Out…", role: .destructive) {
                 confirmSignOut = true
             }

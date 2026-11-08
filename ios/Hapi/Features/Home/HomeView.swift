@@ -9,6 +9,12 @@ import UIKit
 /// iPhone pushes the chat; iPad and foldable iPhones select a stable detail in
 /// a native split that collapses to a stack when the window is compact.
 /// Spawn, notification and row selection share the same opening path.
+private struct NewSessionSeed: Identifiable {
+    let id = UUID()
+    let machineId: String?
+    let directory: String
+}
+
 struct HomeView: View {
     let session: HubSession
 
@@ -16,12 +22,15 @@ struct HomeView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var listModel: SessionListModel
     @State private var showNewSession = false
+    @State private var newSessionSeed: NewSessionSeed?
     @State private var showSettings = false
     @State private var path: [String] = []
     @State private var tabletNavigation = SessionNavigationState()
     /// Transient connection states show only after `connectionRevealDelay`:
     /// a foreground reconnect usually finishes first (Telegram-style).
     @State private var connectionStatusRevealed = false
+    @State private var searchOpen = false
+    @FocusState private var searchFocused: Bool
     private let connectionRevealDelay: Duration = .seconds(2)
 
     private var usesSplitNavigation: Bool {
@@ -49,7 +58,7 @@ struct HomeView: View {
         @Bindable var model = model
         Group {
             if usesSplitNavigation {
-                SessionSplitView(navigation: tabletNavigation, onNewSession: { showNewSession = true }) {
+                SessionSplitView(navigation: tabletNavigation, onNewSession: { presentNewSession() }) {
                     sessionList
                 } detail: { sessionId in
                     chat(sessionId)
@@ -92,8 +101,12 @@ struct HomeView: View {
             PairingFlowView(context: .addHub)
                 .macSheetSizing()
         }
-        .sheet(isPresented: $showNewSession) {
-            NewSessionView(session: session) { sessionId in
+        .sheet(isPresented: $showNewSession, onDismiss: { newSessionSeed = nil }) {
+            NewSessionView(
+                session: session,
+                initialMachineId: newSessionSeed?.machineId,
+                initialDirectory: newSessionSeed?.directory
+            ) { sessionId in
                 // Navigate-replace: drop the sheet, push the fresh chat.
                 showNewSession = false
                 openSession(sessionId)
@@ -105,11 +118,16 @@ struct HomeView: View {
                 .macSheetSizing()
         }
         .focusedSceneValue(\.homeCommands, HomeCommandActions(
-            newSession: { showNewSession = true },
+            newSession: { presentNewSession() },
             openSettings: { showSettings = true },
             toggleSidebar: usesSplitNavigation ? toggleSidebar : nil,
             selectAdjacentSession: usesSplitNavigation ? selectAdjacentSession : nil
         ))
+    }
+
+    private func presentNewSession(_ seed: NewSessionSeed? = nil) {
+        newSessionSeed = seed
+        showNewSession = true
     }
 
     private func toggleSidebar() {
@@ -141,7 +159,12 @@ struct HomeView: View {
                 // Native list deselection (e.g. a filter hides the row) is
                 // not an authoritative removal and must not close the chat.
                 set: { if let id = $0 { openSession(id) } }
-            ) : nil, onOpenSession: openSession)
+            ) : nil,
+                onOpenSession: openSession,
+                onNewSessionInDirectory: { machineId, directory in
+                    presentNewSession(NewSessionSeed(machineId: machineId, directory: directory))
+                }
+            )
         }
         .task(id: session.connectionState == .connected) {
             connectionStatusRevealed = false
@@ -151,9 +174,13 @@ struct HomeView: View {
         }
         .modifier(ConnectionSubtitle(message: subtitleCarriesConnectionStatus
             ? connectionNotice.transientMessage(revealed: connectionStatusRevealed) : nil))
-        .searchable(text: $listModel.searchQuery, prompt: Text("Search sessions"))
         .onChange(of: tabletNavigation.selectedSessionId, initial: true) { _, sessionId in
             listModel.selectedSessionId = sessionId
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if searchOpen {
+                searchOverlay
+            }
         }
         .navigationTitle("Sessions")
         // Inline: it shares the toolbar row, so the list starts right below
@@ -162,6 +189,14 @@ struct HomeView: View {
         .modifier(SidebarTitleRemoval(isSidebar: showsSideBySide || isFoldedOuterScreen))
         .toolbar {
             ToolbarItem(placement: .topBarLeading) { settingsButton }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    searchOpen = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+                .accessibilityLabel("Search sessions")
+            }
             if listModel.showsFilterMenu {
                 // Beside Settings when the system sidebar toggle shares the
                 // trailing edge, so the icons do not bunch up.
@@ -169,11 +204,8 @@ struct HomeView: View {
                     SessionFilterMenu(model: listModel)
                 }
             }
-            if !showsNewSessionBesideSearch {
-                ToolbarItem(placement: .topBarTrailing) { newSessionButton }
-            }
+            ToolbarItem(placement: .topBarTrailing) { newSessionButton }
         }
-        .modifier(NewSessionBesideSearch(isEnabled: showsNewSessionBesideSearch) { newSessionButton })
     }
 
     private var connectionNotice: SessionConnectionNotice {
@@ -193,16 +225,8 @@ struct HomeView: View {
         return !(showsSideBySide || isFoldedOuterScreen)
     }
 
-    /// iOS 26 bottom search bar, as in Messages: New Session sits beside the
-    /// field. A side-by-side sidebar keeps search at its top, and older
-    /// systems keep search under the title.
-    private var showsNewSessionBesideSearch: Bool {
-        guard #available(iOS 26.0, *) else { return false }
-        return !showsSideBySide
-    }
-
     private var newSessionButton: some View {
-        Button { showNewSession = true } label: {
+        Button { presentNewSession() } label: {
             Label("New Session", systemImage: "plus")
                 .modifier(TouchTarget())
         }
@@ -217,7 +241,46 @@ struct HomeView: View {
         .accessibilityIdentifier("home.settings")
     }
 
+    private var searchOverlay: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search sessions", text: $listModel.searchQuery)
+                .focused($searchFocused)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+            if !listModel.searchQuery.isEmpty {
+                Button {
+                    listModel.searchQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            Button("Cancel") { closeSearch() }
+                .font(.footnote)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.regularMaterial, in: Capsule())
+        .shadow(radius: 5, y: 2)
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+        .onAppear { searchFocused = true }
+    }
+
+    private func closeSearch() {
+        searchFocused = false
+        searchOpen = false
+        listModel.searchQuery = ""
+    }
+
     private func openSession(_ sessionId: String) {
+        if searchOpen {
+            closeSearch()
+        }
         if usesSplitNavigation {
             tabletNavigation.open(sessionId)
         } else if path.last != sessionId {
@@ -274,27 +337,6 @@ private struct SidebarTitleRemoval: ViewModifier {
     }
 }
 
-/// Places the system search field in the bottom bar with New Session on its
-/// trailing side. The OS branch is static and the toggle lives inside the
-/// toolbar, so resizing never replaces the session list's identity.
-private struct NewSessionBesideSearch<NewSessionButton: View>: ViewModifier {
-    let isEnabled: Bool
-    @ViewBuilder var newSessionButton: () -> NewSessionButton
-
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.toolbar {
-                if isEnabled {
-                    DefaultToolbarItem(kind: .search, placement: .bottomBar)
-                    ToolbarSpacer(.fixed, placement: .bottomBar)
-                    ToolbarItem(placement: .bottomBar) { newSessionButton() }
-                }
-            }
-        } else {
-            content
-        }
-    }
-}
 
 /// Home connection status. Transient SSE states are quiet: the iOS 26 nav
 /// subtitle, else a gray line with a spinner. Only a failed list refresh

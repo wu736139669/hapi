@@ -69,10 +69,18 @@ struct SessionFilterMenu: View {
                     // Native Menu buttons turn the second Text into a
                     // subtitle; Picker options silently discard it.
                     Text(machine.label)
-                    Text("\(machine.sessionCount, specifier: "%lld") sessions")
+                    if let health = machine.healthLabel {
+                        Text("\(machine.sessionCount, specifier: "%lld") sessions · \(health)")
+                    } else {
+                        Text("\(machine.sessionCount, specifier: "%lld") sessions")
+                    }
                     if model.activeMachineFilter == machine.id { Image(systemName: "checkmark") }
                 }
-                .accessibilityLabel(Text("\(machine.label), \(machine.sessionCount, specifier: "%lld") sessions"))
+                .accessibilityLabel(Text(
+                    machine.healthLabel.map {
+                        "\(machine.label), \(machine.sessionCount, specifier: "%lld") sessions, \($0)"
+                    } ?? "\(machine.label), \(machine.sessionCount, specifier: "%lld") sessions"
+                ))
                 .accessibilityAddTraits(model.activeMachineFilter == machine.id ? .isSelected : [])
             }
         }

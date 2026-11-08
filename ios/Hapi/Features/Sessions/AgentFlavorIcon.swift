@@ -19,7 +19,7 @@ struct AgentFlavorIconView: View {
 
     /// Flavors with a bundled `AgentIcons/<flavor>` image set.
     private static let bundledFlavors: Set<String> = [
-        "agy", "claude", "codex", "copilot", "cursor",
+        "agy", "claude", "codex", "copilot", "cursor", "dsh",
         "gemini", "grok", "kimi", "opencode", "pi",
     ]
 
@@ -70,7 +70,7 @@ struct AgentFlavorIconView: View {
 
 private struct AgentFlavorIconPreviewGrid: View {
     private let flavors: [String?] = [
-        "agy", "claude", "codex", "copilot", "cursor",
+        "agy", "claude", "codex", "copilot", "cursor", "dsh",
         "gemini", "grok", "kimi", "opencode", "pi", "mystery",
     ]
 

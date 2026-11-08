@@ -30,6 +30,18 @@ import HapiProtocol
 /// app-side `ChatModel` is the single caller and awaits each run to
 /// completion, so runs never interleave in practice; the actor makes that a
 /// guarantee rather than a convention.
+public struct ChatPipelineResult: Sendable {
+    public let blocks: [VisibleChatBlock]
+    public let latestUsage: LatestUsage?
+    public let latestGoal: JSONValue?
+
+    public init(blocks: [VisibleChatBlock], latestUsage: LatestUsage?, latestGoal: JSONValue?) {
+        self.blocks = blocks
+        self.latestUsage = latestUsage
+        self.latestGoal = latestGoal
+    }
+}
+
 public actor ChatPipeline {
     private struct NormalizeCacheEntry {
         /// The exact row instance the cached result was computed from.
@@ -51,6 +63,23 @@ public actor ChatPipeline {
         hasMoreMessages: Bool,
         directSendLocalIds: Set<String> = []
     ) -> [VisibleChatBlock] {
+        runResult(
+            messages: messages,
+            agentState: agentState,
+            hasMoreMessages: hasMoreMessages,
+            directSendLocalIds: directSendLocalIds
+        ).blocks
+    }
+
+    /// Same pipeline with the reducer's latest context usage, used by the
+    /// composer's context meter. `run` stays the blocks-only API for tests and
+    /// callers that do not need usage.
+    public func runResult(
+        messages: [WindowMessage],
+        agentState: AgentState?,
+        hasMoreMessages: Bool,
+        directSendLocalIds: Set<String> = []
+    ) -> ChatPipelineResult {
         // Composer-owned rows out, except sends the idle agent is about to
         // consume (`ChatInteractor.directSendLocalIds`); duplicate ids keep
         // the first occurrence (merge output cannot contain duplicates —
@@ -102,7 +131,7 @@ public actor ChatPipeline {
             if case .toolGroup(let group) = block { return group }
             return nil
         }
-        return visible
+        return ChatPipelineResult(blocks: visible, latestUsage: reduced.latestUsage, latestGoal: reduced.latestGoal)
     }
 
     private static func filterEmptyReasoning(_ blocks: [ChatBlock]) -> [ChatBlock] {

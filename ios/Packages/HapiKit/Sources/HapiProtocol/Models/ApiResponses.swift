@@ -487,6 +487,41 @@ public struct CodexModelsResponse: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - Claude model catalog
+
+/// One row of `GET /api/machines/:id/claude-models`. `value` is what
+/// `claude --model` accepts; `effortLevels == []` means the model exposes no
+/// effort control, while `nil` means the CLI did not report support.
+public struct ClaudeModelSummary: Codable, Equatable, Sendable {
+    public var value: String
+    public var displayName: String?
+    public var effortLevels: [String]?
+
+    public init(value: String, displayName: String? = nil, effortLevels: [String]? = nil) {
+        self.value = value
+        self.displayName = displayName
+        self.effortLevels = effortLevels
+    }
+}
+
+/// Body of `GET /api/machines/:id/claude-models` (RPC envelope — check
+/// `success`). A runner without the RPC answers 503 `rpc_target_missing`.
+public struct ClaudeModelsResponse: Codable, Equatable, Sendable {
+    public var success: Bool
+    public var availableModels: [ClaudeModelSummary]?
+    public var error: String?
+
+    public init(
+        success: Bool,
+        availableModels: [ClaudeModelSummary]? = nil,
+        error: String? = nil
+    ) {
+        self.success = success
+        self.availableModels = availableModels
+        self.error = error
+    }
+}
+
 // MARK: - Uploads
 
 /// Body of `POST /api/sessions/:id/upload` (RPC envelope). `path` feeds the

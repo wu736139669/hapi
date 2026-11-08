@@ -32,6 +32,7 @@ struct SessionListView: View {
     let model: SessionListModel
     var selection: Binding<String?>? = nil
     let onOpenSession: (String) -> Void
+    var onNewSessionInDirectory: ((_ machineId: String?, _ directory: String) -> Void)? = nil
 
     @State private var renameTarget: SessionRowUI?
     @State private var renameText = ""
@@ -312,31 +313,51 @@ struct SessionListView: View {
     }
 
     private func sectionHeader(_ section: SessionListSectionUI, collapsed: Bool) -> some View {
-        Button {
-            toggle(section)
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: metrics.headerSize * 0.75, weight: .semibold))
-                    .rotationEffect(.degrees(collapsed ? 0 : 90))
-                    .frame(width: 10)
-                sectionIcon(section)
-                sectionTitle(section)
-                    .font(.system(size: metrics.headerSize, weight: .semibold))
-                    .lineLimit(1)
-                Text("(\(section.totalCount))")
-                    .font(.system(size: metrics.headerSize, weight: .regular))
-                    .monospacedDigit()
-                Spacer(minLength: 0)
+        HStack(spacing: 6) {
+            Button {
+                toggle(section)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: metrics.headerSize * 0.75, weight: .semibold))
+                        .rotationEffect(.degrees(collapsed ? 0 : 90))
+                        .frame(width: 10)
+                    sectionIcon(section)
+                    sectionTitle(section)
+                        .font(.system(size: metrics.headerSize, weight: .semibold))
+                        .lineLimit(1)
+                    Text("(\(section.totalCount))")
+                        .font(.system(size: metrics.headerSize, weight: .regular))
+                        .monospacedDigit()
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(theme.textSecondary)
+                .textCase(nil)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .foregroundStyle(theme.textSecondary)
-            .textCase(nil)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(sectionAccessibilityLabel(section)))
+
+            if let onNewSessionInDirectory,
+               section.kind == .directory,
+               let path = section.projectPath,
+               !path.isEmpty,
+               path != "Other" {
+                Button {
+                    onNewSessionInDirectory(section.machineId, path)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: metrics.headerSize * 0.8, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.textSecondary)
+                .accessibilityLabel(Text("New session in this directory"))
+            }
         }
-        .buttonStyle(.plain)
         .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-        .accessibilityLabel(Text(sectionAccessibilityLabel(section)))
     }
 
     @ViewBuilder

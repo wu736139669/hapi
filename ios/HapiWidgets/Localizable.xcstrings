@@ -120,6 +120,23 @@
         }
       }
     },
+    "No active sessions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нет активных сеансов"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有活跃会话"
+          }
+        }
+      }
+    },
     "No running sessions" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -422,6 +439,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "切换会话"
+          }
+        }
+      }
+    },
+    "Next session" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Следующий сеанс"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下一个会话"
           }
         }
       }

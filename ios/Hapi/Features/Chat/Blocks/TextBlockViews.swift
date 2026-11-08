@@ -20,6 +20,7 @@ struct UserTextBlockView: View {
     @Environment(\.hapiTypography) private var typography
     @Environment(\.hapiTheme) private var theme
     @Environment(\.openChatMessage) private var openMessage
+    @State private var confirmRewind = false
 
     init(block: UserTextBlock) {
         self.block = block
@@ -111,7 +112,38 @@ struct UserTextBlockView: View {
                     metadata: nil,
                     alignment: .trailing
                 )
+                if let interactions, let localId = block.localId {
+                    let actions = interactions.historyActions(forMessageLocalId: localId)
+                    // Forking the whole conversation already lives in the
+                    // toolbar menu; per-message history only needs rewind.
+                    if actions.rewind {
+                        Button {
+                            confirmRewind = true
+                        } label: {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(interactions.historyActionPending)
+                        .accessibilityLabel(Text("Rewind to here"))
+                    }
+                }
             }
+        }
+        .confirmationDialog(
+            "Rewind to this message?",
+            isPresented: $confirmRewind,
+            titleVisibility: .visible
+        ) {
+            Button("Rewind", role: .destructive) {
+                if let localId = block.localId {
+                    interactions?.rewindConversation(toMessageLocalId: localId)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Later messages will be removed from the active conversation.")
         }
     }
 }

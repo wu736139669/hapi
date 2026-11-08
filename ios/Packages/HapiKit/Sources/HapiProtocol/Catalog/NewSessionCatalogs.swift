@@ -4,10 +4,13 @@ import Foundation
 public struct NewSessionOption: Equatable, Hashable, Sendable {
     public let value: String
     public let label: String
+    /// Optional picker section (the web renders these as `<optgroup>`).
+    public let group: String?
 
-    public init(value: String, label: String) {
+    public init(value: String, label: String, group: String? = nil) {
         self.value = value
         self.label = label
+        self.group = group
     }
 }
 
@@ -32,10 +35,86 @@ public enum NewSessionCatalogs {
     /// `'auto'` sentinel row, then the `ClaudeEfforts` levels in ascending
     /// order.
     public static let claudeEfforts: [NewSessionOption] =
-        [NewSessionOption(value: "auto", label: "Auto")]
+        [NewSessionOption(value: "auto", label: "Default")]
             + ClaudeEfforts.levels.map {
                 NewSessionOption(value: $0, label: ClaudeEfforts.label(for: $0) ?? effortLabel($0))
             }
+
+    /// Launch model rows for Claude, mirroring the web
+    /// `getClaudeLaunchModelOptions`: the machine CLI catalog replaces the
+    /// built-in presets when available; earlier family versions go under the
+    /// "Other models" section; a saved model the catalog no longer lists stays
+    /// selectable with a suffix.
+    public static func claudeLaunchModelOptions(
+        catalog: [ClaudeModelSummary]?,
+        selectedModel: String?,
+        notListedSuffix: String,
+        otherModelsLabel: String
+    ) -> [NewSessionOption] {
+        guard let catalog, !catalog.isEmpty else { return claudeModels }
+
+        var familySeen = Set<String>()
+        var main: [NewSessionOption] = []
+        var other: [NewSessionOption] = []
+        for row in catalog where row.value != "default" {
+            let family = claudeFamily(row.value)
+            let isMain = familySeen.insert(family).inserted
+            let option = NewSessionOption(
+                value: row.value,
+                label: row.displayName ?? ClaudeModels.label(for: row.value) ?? row.value,
+                group: isMain ? nil : otherModelsLabel
+            )
+            if isMain { main.append(option) } else { other.append(option) }
+        }
+
+        let listed = Set((main + other).map(\.value))
+        let normalized = (selectedModel?.trimmingCharacters(in: .whitespaces) ?? "")
+        let selected = normalized.isEmpty || normalized == "auto" || normalized == "default"
+            ? nil
+            : normalized
+        var options = [NewSessionOption(value: "auto", label: "Default")]
+        if let selected, !listed.contains(selected) {
+            let base = ClaudeModels.label(for: selected) ?? selected
+            options.append(NewSessionOption(value: selected, label: "\(base) (\(notListedSuffix))"))
+        }
+        options.append(contentsOf: main)
+        options.append(contentsOf: other)
+        return options
+    }
+
+    /// Effort rows for the selected Claude model. Unknown support keeps the
+    /// static levels; an empty catalog row means only Default is offered.
+    public static func claudeEffortOptions(
+        catalog: [ClaudeModelSummary]?,
+        model: String?,
+        currentEffort: String?
+    ) -> [NewSessionOption]? {
+        guard let catalog, !catalog.isEmpty else { return claudeEfforts }
+        let normalizedModel = (model?.trimmingCharacters(in: .whitespaces) ?? "")
+        let lookup = normalizedModel.isEmpty || normalizedModel == "auto" || normalizedModel == "default"
+            ? "default"
+            : normalizedModel
+        guard let levels = catalog.first(where: { $0.value == lookup })?.effortLevels else {
+            return claudeEfforts
+        }
+        let supported = ClaudeEfforts.levels.filter { levels.contains($0) }
+        var options = [NewSessionOption(value: "auto", label: "Default")]
+        let normalizedEffort = (currentEffort?.trimmingCharacters(in: .whitespaces).lowercased() ?? "")
+        if !normalizedEffort.isEmpty,
+           normalizedEffort != "auto", normalizedEffort != "default",
+           !supported.contains(normalizedEffort) {
+            options.append(NewSessionOption(value: normalizedEffort, label: effortLabel(normalizedEffort)))
+        }
+        options.append(contentsOf: supported.map {
+            NewSessionOption(value: $0, label: ClaudeEfforts.label(for: $0) ?? effortLabel($0))
+        })
+        return options
+    }
+
+    private static func claudeFamily(_ value: String) -> String {
+        let trimmed = value.hasPrefix("claude-") ? String(value.dropFirst("claude-".count)) : value
+        return trimmed.split(whereSeparator: { $0 == "-" || $0 == "[" }).first.map(String.init) ?? trimmed
+    }
 
     /// Static codex fallback when the model row advertises no efforts
     /// (the web drops `max` for codex — `EffortField.tsx`).

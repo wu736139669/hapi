@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// Fenced code block: rounded container with a header (language chip + copy
-/// button) and horizontally scrollable monospaced body. Highlighting runs off
-/// the main thread through the injected `SyntaxHighlighting` engine and is
-/// applied when ready; until then (or when the engine declines) the code
-/// renders as plain text.
+/// Fenced code block: rounded container with a header (language chip, wrap
+/// toggle, copy button) and a monospaced body. Long blocks collapse by height
+/// and offer a show-all control; line numbers are shown in the default
+/// no-wrap mode and hidden when wrapping is enabled.
 ///
-/// Unsupported fence languages the web renders specially (mermaid, math)
-/// deliberately fall back to this view per the v1 plan.
+/// Highlighting runs off the main thread through the injected
+/// `SyntaxHighlighting` engine and is applied when ready; until then (or when
+/// the engine declines) the code renders as plain text.
 public struct CodeBlockView: View {
     public let language: String?
     public let code: String
@@ -20,6 +20,8 @@ public struct CodeBlockView: View {
 
     @State private var highlighted: AttributedString?
     @State private var showCopied = false
+    @State private var wrapLines = false
+    @State private var expanded = false
 
     public init(language: String?, code: String) {
         self.language = language
@@ -36,16 +38,30 @@ public struct CodeBlockView: View {
         "\(displayLanguage)|\(theme.isDark ? "d" : "l")|\(code.count)|\(code.hashValue)"
     }
 
+    private var lineCount: Int {
+        max(1, code.split(separator: "\n", omittingEmptySubsequences: false).count)
+    }
+
+    private var isCollapsible: Bool { lineCount > 18 }
+
+    private var isCollapsed: Bool { isCollapsible && !expanded && !wrapLines }
+
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(highlighted ?? AttributedString(code))
-                    .font(typography.codeFont(size: codeFontSize))
-                    .lineSpacing(typography.codeLineSpacing)
-                    .foregroundStyle(theme.textPrimary)
-                    .textSelection(.enabled)
-                    .padding(12)
+            codeBody
+            if isCollapsible && !wrapLines {
+                Button {
+                    expanded.toggle()
+                } label: {
+                    Text(expanded ? "Collapse" : "Show all lines")
+                        .font(typography.captionFont)
+                        .frame(maxWidth: .infinity, minHeight: 34)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.link)
+                .background(theme.codeHeaderBackground)
             }
         }
         .background(theme.codeBackground)
@@ -59,6 +75,44 @@ public struct CodeBlockView: View {
         }
     }
 
+    @ViewBuilder
+    private var codeBody: some View {
+        if wrapLines {
+            Text(highlighted ?? AttributedString(code))
+                .font(typography.codeFont(size: codeFontSize))
+                .lineSpacing(typography.codeLineSpacing)
+                .foregroundStyle(theme.textPrimary)
+                .textSelection(.enabled)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 0) {
+                    Text((1...lineCount).map(String.init).joined(separator: "\n"))
+                        .font(typography.codeFont(size: codeFontSize))
+                        .lineSpacing(typography.codeLineSpacing)
+                        .foregroundStyle(theme.textHint)
+                        .multilineTextAlignment(.trailing)
+                        .padding(.leading, 8)
+                        .padding(.trailing, 7)
+                        .padding(.vertical, 12)
+                    Rectangle()
+                        .fill(theme.divider)
+                        .frame(width: 1)
+                    Text(highlighted ?? AttributedString(code))
+                        .font(typography.codeFont(size: codeFontSize))
+                        .lineSpacing(typography.codeLineSpacing)
+                        .foregroundStyle(theme.textPrimary)
+                        .textSelection(.enabled)
+                        .padding(12)
+                }
+            }
+            .frame(maxHeight: isCollapsed ? 250 : nil, alignment: .top)
+            .clipped()
+        }
+    }
+
     private var header: some View {
         HStack(spacing: 8) {
             Text(displayLanguage)
@@ -66,6 +120,16 @@ public struct CodeBlockView: View {
                 .foregroundStyle(theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 12)
+            Button {
+                wrapLines.toggle()
+            } label: {
+                Image(systemName: wrapLines ? "text.alignleft" : "arrow.left.and.right")
+                    .font(typography.captionFont)
+                    .frame(minWidth: 40, minHeight: 44)
+                    .foregroundStyle(wrapLines ? theme.link : theme.textSecondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(wrapLines ? "Disable line wrap" : "Wrap lines"))
             Button {
                 // Explicit MainActor hop: keeps the @MainActor pasteboard
                 // call valid regardless of the SDK's Button-action isolation.

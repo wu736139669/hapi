@@ -97,7 +97,14 @@ struct ChatView: View {
             reconnectNotice
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            warningBanner
+            VStack(spacing: 0) {
+                if let status = model.statusPanelData {
+                    ChatStatusPanelView(data: status)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
+                }
+                warningBanner
+            }
         }
         // Toast overlays the thread; applying it before the bottom inset
         // anchors it just above the composer instead of on top of it.
@@ -107,9 +114,7 @@ struct ChatView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 QueuedMessagesBarView(interactor: model.interactor)
-                ChatComposerStatusBar(model: model) {
-                    configOpen = true
-                }
+                ChatComposerStatusBar(model: model)
                 ChatComposerView(
                     interactor: model.interactor,
                     dictation: model.dictation,

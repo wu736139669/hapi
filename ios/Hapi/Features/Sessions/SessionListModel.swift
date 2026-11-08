@@ -39,6 +39,8 @@ struct SessionListSectionUI: Identifiable, Equatable {
     let id: String
     let kind: SessionListGroupKind
     let directoryName: String?
+    let projectPath: String?
+    let machineId: String?
     let machineLabel: String?
     let rows: [SessionRowUI]
     let buckets: [SessionListBucketUI]
@@ -125,6 +127,8 @@ struct MachineFilterUI: Identifiable, Equatable {
     let id: String
     let label: String
     let sessionCount: Int
+    /// `CPU 12% · Mem 45%` from the latest health sample, when online.
+    let healthLabel: String?
 }
 
 /// Transient, per-home filters. Add future dimensions here, not to navigation.
@@ -214,12 +218,18 @@ final class SessionListModel {
             counts[id, default: 0] += 1
         }
         var names: [String: String] = [:]
+        var healths: [String: String] = [:]
         for machine in machineStore.machines where counts[machine.id] != nil {
             guard let metadata = machine.metadata else { continue }
             let displayName = metadata.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let host = metadata.host.trimmingCharacters(in: .whitespacesAndNewlines)
             let name = displayName.isEmpty ? host : displayName
             if !name.isEmpty { names[machine.id] = name }
+            let parts: [String] = [
+                machine.health?.cpuPercent.map { "CPU \(Int($0))%" },
+                machine.health?.memoryPercent.map { "Mem \(Int($0))%" },
+            ].compactMap { $0 }
+            if !parts.isEmpty { healths[machine.id] = parts.joined(separator: " · ") }
         }
         let nameCounts = Dictionary(grouping: names.values, by: { $0.lowercased() }).mapValues(\.count)
         return counts
@@ -234,7 +244,12 @@ final class SessionListModel {
                 } else {
                     label = String(format: String(localized: "Machine · %@"), String(id.prefix(8)))
                 }
-                return MachineFilterUI(id: id, label: label, sessionCount: entry.value)
+                return MachineFilterUI(
+                    id: id,
+                    label: label,
+                    sessionCount: entry.value,
+                    healthLabel: healths[id]
+                )
             }
             .sorted { lhs, rhs in
                 func rank(_ id: String) -> Int {
@@ -403,6 +418,8 @@ final class SessionListModel {
                 id: group.id,
                 kind: group.kind,
                 directoryName: group.displayName,
+                projectPath: group.projectPath,
+                machineId: group.machineId,
                 machineLabel: machineLabel,
                 rows: group.sessions.compactMap { rowById[$0.id] },
                 buckets: group.buckets.map { bucket in
