@@ -1202,9 +1202,13 @@ function SessionChatInner(props: SessionChatProps) {
         getClaudeEffortLevelsForModel(props.session.model ?? null, claudeModelsState.availableModels)
             ?.map((level) => ({ value: level }))
     ), [props.session.model, claudeModelsState.availableModels])
-    // Machine catalog first; hub-configured custom Claude models fill in when
-    // the runner has no discovery catalog.
-    const claudeComposerModelOptions = claudeModelOptions ?? claudeCustomModelOptions
+    // Hub-configured custom Claude models describe what the session's endpoint
+    // actually serves; the CLI catalog is Anthropic's own model list and would
+    // offer aliases the endpoint does not have (and repeat resolved ids).
+    // Prefer the custom list when present; otherwise keep the machine catalog.
+    const claudeComposerModelOptions = (claudeCustomModelOptions?.length ?? 0) > 0
+        ? claudeCustomModelOptions
+        : claudeModelOptions
     const piModelsState = usePiModels({
         api: props.api,
         sessionId: props.session.id,

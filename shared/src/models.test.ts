@@ -123,6 +123,19 @@ describe('getClaudeModelChoices', () => {
             { value: 'claude-custom', label: 'claude-custom', section: 'main' },
         ])
     })
+
+    test('lists each value once when a custom endpoint reports duplicate rows', () => {
+        const choices = getClaudeModelChoices([
+            { value: 'deepseek-v4.1-flash[1m]', displayName: 'deepseek-v4.1-flash[1m]' },
+            { value: 'deepseek-v4.1-flash', displayName: 'deepseek-v4.1-flash' },
+            { value: 'deepseek-v4.1-flash[1m]', displayName: 'deepseek-v4.1-flash[1m]' },
+            { value: 'deepseek-v4.1-flash[1m]' },
+        ])
+        expect(choices.map((choice) => choice.value)).toEqual([
+            'deepseek-v4.1-flash[1m]',
+            'deepseek-v4.1-flash',
+        ])
+    })
 })
 
 describe('getClaudeEffortLevelsForModel', () => {

@@ -99,8 +99,17 @@ function getClaudeModelFamily(value: string): string {
  */
 export function getClaudeModelChoices(catalog: readonly ClaudeModelSummary[]): ClaudeModelChoice[] {
     const families = new Set<string>()
+    const seenValues = new Set<string>()
     const choices: ClaudeModelChoice[] = catalog
-        .filter((model) => model.value !== 'default')
+        .filter((model) => {
+            // A custom endpoint can report the same id more than once (aliases
+            // and resolved ids overlap); each value is one row in the picker.
+            if (model.value === 'default' || seenValues.has(model.value)) {
+                return false
+            }
+            seenValues.add(model.value)
+            return true
+        })
         .map((model) => {
             const family = getClaudeModelFamily(model.value)
             const section = families.has(family) ? 'other' : 'main'
