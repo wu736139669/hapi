@@ -404,9 +404,9 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
         }),
       },
       {
-        name: 'spawn_peer',
-        title: 'Spawn Team Peer',
-        description: 'Agent Team: spawn a new teammate session with a role and an initial task. Members inherit your tool/model/thinking level/permission by default. Requires user approval.',
+        name: 'team_spawn',
+        title: 'Spawn Team Member',
+        description: 'Agent Team: spawn a new teammate session with a role and an initial task. Members inherit your tool/model/thinking level/permission by default. Requires the caller to be on a team. Requires user approval.',
         inputSchema: z.object({
           role: z.string().min(1).describe('Role / display name, unique in the team'),
           task: z.string().min(1).optional().describe('Initial task brief delivered to the new member'),

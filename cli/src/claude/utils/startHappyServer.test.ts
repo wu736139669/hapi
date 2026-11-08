@@ -569,10 +569,10 @@ describe('startHappyServer Agent Team tools', () => {
         stopServer?.()
     })
 
-    it('registers spawn_peer once and still serves MCP requests', async () => {
-        // Regression: the peer block and the team block both registered
-        // spawn_peer when teams were enabled, so the MCP SDK threw on every
-        // request and the whole hapi MCP surface answered 500.
+    it('keeps plain spawn_peer separate from team_spawn and serves MCP requests', async () => {
+        // Regression: the team block used to reuse the spawn_peer name, so a
+        // teams-enabled hub hijacked normal peer session creation (and the
+        // duplicate registration made the whole MCP surface answer 500).
         const sessionClient = {
             sessionId: 'team-session-id',
             getMetadata: () => null,
@@ -583,6 +583,7 @@ describe('startHappyServer Agent Team tools', () => {
         const server = await startHappyServer(sessionClient, { teamToolsEnabled: true })
         stopServer = server.stop
         expect(server.toolNames.filter((name) => name === 'spawn_peer')).toHaveLength(1)
+        expect(server.toolNames.filter((name) => name === 'team_spawn')).toHaveLength(1)
 
         client = new Client(
             { name: 'hapi-team-tools-test', version: '1.0.0' },
@@ -593,14 +594,27 @@ describe('startHappyServer Agent Team tools', () => {
         const tools = await client.listTools()
         const names = tools.tools.map((tool) => tool.name)
         expect(names.filter((name) => name === 'spawn_peer')).toHaveLength(1)
+        expect(names.filter((name) => name === 'team_spawn')).toHaveLength(1)
         expect(names).toEqual(expect.arrayContaining([
             'team_status',
             'team_read',
             'team_send',
             'team_task',
             'team_requirement',
+            'team_spawn',
             'spawn_peer',
             'list_peers'
         ]))
+
+        // Plain spawn_peer must keep requiring directory/message; team fields
+        // live on team_spawn only.
+        const spawnPeer = tools.tools.find((tool) => tool.name === 'spawn_peer')!
+        expect((spawnPeer.inputSchema as { required?: string[] }).required).toEqual(
+            expect.arrayContaining(['directory', 'message'])
+        )
+        expect(Object.keys((spawnPeer.inputSchema as { properties?: Record<string, unknown> }).properties ?? {}))
+            .not.toContain('role')
+        const teamSpawn = tools.tools.find((tool) => tool.name === 'team_spawn')!
+        expect((teamSpawn.inputSchema as { required?: string[] }).required).toEqual(['role'])
     })
 })

@@ -26,7 +26,7 @@ describe('teamPrompt', () => {
             expect(block).toContain('functions.hapi__team_status')
             expect(block).toContain('functions.hapi__team_read')
             expect(block).toContain('functions.hapi__team_send')
-            expect(block).toContain('functions.hapi__spawn_peer')
+            expect(block).toContain('functions.hapi__team_spawn')
             expect(block).not.toContain('mcp__hapi__')
         } finally {
             workspace.cleanup()
