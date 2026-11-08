@@ -18,6 +18,8 @@ import { RPC_METHODS } from "@hapi/protocol/rpcMethods";
 import { parseSpecialCommand } from "@/parsers/specialCommands";
 import { ClaudeToolResultImages } from './utils/toolResultImages';
 import { applySessionTitleFallback, readNativeSessionTitle, stripAttachmentReferences } from './utils/sessionTitleFallback';
+import { getProjectPath } from './utils/path';
+import { hasUsageSignal, TranscriptUsageIndex } from './utils/transcriptUsage';
 import {
     RemoteLauncherBase,
     type RemoteLauncherDisplayContext,
@@ -144,8 +146,14 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
         this.permissionHandler = permissionHandler;
 
         const toolResultImages = new ClaudeToolResultImages();
+        // Stream-json assistant messages report all-zero usage for some
+        // gateways; the transcript carries the real sample a beat later.
+        const transcriptUsage = new TranscriptUsageIndex(getProjectPath(session.path), session.sessionId);
         const messageQueue = new OutgoingMessageQueue(
-            (logMessage) => toolResultImages.send(session.client, logMessage)
+            (logMessage) => {
+                transcriptUsage.patch(logMessage);
+                return toolResultImages.send(session.client, logMessage);
+            }
         );
 
         permissionHandler.setOnPermissionRequest((toolCallId: string) => {
@@ -261,6 +269,7 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
 
         const handleSessionFound = (sessionId: string) => {
             sdkToLogConverter.updateSessionId(sessionId);
+            transcriptUsage.updateSessionId(sessionId);
         };
         this.handleSessionFound = handleSessionFound;
         session.addSessionFoundCallback(handleSessionFound);
@@ -399,7 +408,9 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                     }
                 }
 
-                messageQueue.enqueue(logMessage);
+                const needsUsagePatch = logMessage.type === 'assistant'
+                    && !hasUsageSignal((logMessage as { message?: { usage?: Record<string, unknown> } }).message?.usage);
+                messageQueue.enqueue(logMessage, needsUsagePatch ? { delay: 200 } : undefined);
             }
 
             if (message.type === 'assistant') {
