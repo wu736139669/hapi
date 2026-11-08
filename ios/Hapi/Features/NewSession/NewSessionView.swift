@@ -136,8 +136,10 @@ struct NewSessionView: View {
             HStack(spacing: 8) {
                 TextField(
                     "/path/to/project",
-                    text: Binding(get: { model.form.directory }, set: { model.setDirectory($0) })
+                    text: Binding(get: { model.form.directory }, set: { model.setDirectory($0) }),
+                    axis: .vertical
                 )
+                .lineLimit(1...3)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .font(.system(.callout, design: .monospaced))

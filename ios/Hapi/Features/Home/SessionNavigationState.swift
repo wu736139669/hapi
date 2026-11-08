@@ -20,6 +20,12 @@ final class SessionNavigationState {
         preferredCompactColumn = .detail
     }
 
+    func showList() {
+        detailPath = NavigationPath()
+        selectedSessionId = nil
+        preferredCompactColumn = .sidebar
+    }
+
     func supersede(_ sessionId: String, with replacement: String) {
         guard selectedSessionId == sessionId else { return }
         open(replacement)

@@ -487,6 +487,16 @@ public struct CodexModelsResponse: Codable, Equatable, Sendable {
     }
 }
 
+/// Body of `GET /api/claude/custom-models` — names configured in
+/// settings.json (`customClaudeModels`) for a custom Claude endpoint.
+public struct ClaudeCustomModelsResponse: Codable, Equatable, Sendable {
+    public var models: [String]
+
+    public init(models: [String]) {
+        self.models = models
+    }
+}
+
 // MARK: - Claude model catalog
 
 /// One row of `GET /api/machines/:id/claude-models`. `value` is what

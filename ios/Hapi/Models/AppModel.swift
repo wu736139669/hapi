@@ -49,6 +49,8 @@ final class AppModel {
     /// navigation path against the active hub (switched to the owner first,
     /// see ``openNotificationTarget(sessionId:hubUrl:)``).
     var pendingOpenSessionId: String?
+    /// Incremented by `hapicompanion://sessions`; HomeView pops to the list.
+    private(set) var sessionListRequest = 0
 
     // `let` storage is inert under @Observable (no annotation needed).
     let registry: HubRegistry
@@ -222,6 +224,13 @@ final class AppModel {
         let hub = link.hubUrl.flatMap { HubURLNormalization.normalize($0) }
         openNotificationTarget(sessionId: link.sessionId, hubUrl: hub)
         return true
+    }
+
+    /// Blank-area home-widget tap: return to the session list for the active
+    /// hub instead of opening whichever session happened to be first.
+    func openSessionList() {
+        pendingOpenSessionId = nil
+        sessionListRequest += 1
     }
 
     // MARK: - App lifecycle

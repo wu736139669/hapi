@@ -106,15 +106,17 @@ public final class LastSeenStore {
             guard self.namespace == identity else { return }
             let next = transform(self.state)
             guard next != self.state else { return }
+            // Make the local read watermark visible immediately; the disk
+            // write and hub sync can finish afterwards. The list should not
+            // lag behind a read that already happened.
+            self.state = next
+            self.persistenceError = nil
+            self.onChange?()
             do {
                 if let url = Self.file(directory: self.directory, namespace: identity) {
                     let data = try HapiJSON.encoder.encode(next)
                     try await self.writer.write(data, to: url)
                 }
-                guard self.namespace == identity else { return }
-                self.state = next
-                self.persistenceError = nil
-                self.onChange?()
             } catch { self.persistenceError = error.localizedDescription }
         }
         mutationTask = task

@@ -25,6 +25,11 @@ struct ChatComposerStatusBar: View {
     }
 
     private var modelLabel: String? {
+        // The transcript is more truthful than session.model for local Claude
+        // sessions whose provider maps an alias to a different backend model.
+        if let latest = model.latestModel, !latest.isEmpty {
+            return latest
+        }
         if let label = config.modelOptions?.first(where: { $0.value == config.model })?.label {
             return label
         }

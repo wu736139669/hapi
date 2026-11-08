@@ -82,6 +82,27 @@ public enum NewSessionCatalogs {
         return options
     }
 
+    /// Custom model names configured for a non-Anthropic Claude endpoint.
+    /// They replace the built-in aliases because those aliases would name
+    /// models the configured endpoint does not serve.
+    public static func claudeCustomModelOptions(
+        _ models: [String],
+        selectedModel: String?
+    ) -> [NewSessionOption] {
+        let normalized = (selectedModel?.trimmingCharacters(in: .whitespaces) ?? "")
+        let selected = normalized.isEmpty || normalized == "auto" || normalized == "default"
+            ? nil
+            : normalized
+        var options = [NewSessionOption(value: "auto", label: "Default")]
+        if let selected, !models.contains(selected) {
+            options.append(NewSessionOption(value: selected, label: selected))
+        }
+        options.append(contentsOf: models.map {
+            NewSessionOption(value: $0, label: $0)
+        })
+        return options
+    }
+
     /// Effort rows for the selected Claude model. Unknown support keeps the
     /// static levels; an empty catalog row means only Default is offered.
     public static func claudeEffortOptions(

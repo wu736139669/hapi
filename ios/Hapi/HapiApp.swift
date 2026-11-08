@@ -43,6 +43,10 @@ struct HapiApp: App {
             }
             return
         }
+        if SessionListLink.matches(url.absoluteString) {
+            model.openSessionList()
+            return
+        }
         if let link = SessionLink.parse(url.absoluteString) {
             model.handleSessionLink(link)
             return

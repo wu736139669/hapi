@@ -34,11 +34,22 @@ public struct ChatPipelineResult: Sendable {
     public let blocks: [VisibleChatBlock]
     public let latestUsage: LatestUsage?
     public let latestGoal: JSONValue?
+    /// Model of the latest parent-context message. Unlike `session.model`,
+    /// this comes from the transcript itself and reflects aliases resolved by
+    /// a custom Claude provider (e.g. `opus` in session state vs
+    /// `deepseek-v4.1-flash` in the messages).
+    public let latestModel: String?
 
-    public init(blocks: [VisibleChatBlock], latestUsage: LatestUsage?, latestGoal: JSONValue?) {
+    public init(
+        blocks: [VisibleChatBlock],
+        latestUsage: LatestUsage?,
+        latestGoal: JSONValue?,
+        latestModel: String?
+    ) {
         self.blocks = blocks
         self.latestUsage = latestUsage
         self.latestGoal = latestGoal
+        self.latestModel = latestModel
     }
 }
 
@@ -120,6 +131,13 @@ public actor ChatPipeline {
         }
 
         let reduced = reduceChatBlocks(normalized, agentState: agentState)
+        let latestModel = normalized.reversed().first {
+            guard !$0.isSidechain, let model = $0.model, !model.isEmpty else { return false }
+            // `<synthetic>` marks locally generated Claude Code records
+            // (API errors, interrupts); it is not a provider model and must
+            // not replace the last real one in the status bar.
+            return !(model.hasPrefix("<") && model.hasSuffix(">"))
+        }?.model
         let visible = buildVisibleChatBlocks(
             Self.filterEmptyReasoning(reduced.blocks),
             options: ToolGroupingOptions(
@@ -131,7 +149,12 @@ public actor ChatPipeline {
             if case .toolGroup(let group) = block { return group }
             return nil
         }
-        return ChatPipelineResult(blocks: visible, latestUsage: reduced.latestUsage, latestGoal: reduced.latestGoal)
+        return ChatPipelineResult(
+            blocks: visible,
+            latestUsage: reduced.latestUsage,
+            latestGoal: reduced.latestGoal,
+            latestModel: latestModel
+        )
     }
 
     private static func filterEmptyReasoning(_ blocks: [ChatBlock]) -> [ChatBlock] {

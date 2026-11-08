@@ -193,6 +193,7 @@ final class NewSessionModel {
     var suggestions: [String] { directoryInput.suggestions }
     private(set) var codexModels: CodexModelsState = .hidden
     private(set) var claudeModels: ClaudeModelsState = .hidden
+    private(set) var customClaudeModels: [String] = []
     private(set) var agentModels: AgentModelsState = .hidden
     /// OpenCode variants keyed `provider/model`; nil until loaded.
     private(set) var opencodeVariants: [String: [String]]?
@@ -220,6 +221,8 @@ final class NewSessionModel {
     @ObservationIgnored private var claudeModelsTask: Task<Void, Never>?
     @ObservationIgnored private var claudeFetchedForMachine: String?
     @ObservationIgnored private var claudeModelsCache: [String: [ClaudeModelSummary]] = [:]
+    @ObservationIgnored private var customClaudeModelsTask: Task<Void, Never>?
+    @ObservationIgnored private var customClaudeModelsLoaded = false
     @ObservationIgnored private var agentModelsTask: Task<Void, Never>?
     @ObservationIgnored private var agentModelsFetched: AgentModelsRequest??
     @ObservationIgnored private var agentModelsCache: [AgentModelsRequest: CachedAgentModels] = [:]
@@ -289,6 +292,7 @@ final class NewSessionModel {
         refreshAgentAvailability()
         refreshCodexModelsIfNeeded()
         refreshClaudeModelsIfNeeded()
+        refreshCustomClaudeModelsIfNeeded()
         refreshAgentModelsIfNeeded()
         scheduleDirectoryWork()
 
@@ -416,6 +420,12 @@ final class NewSessionModel {
     var modelOptions: [NewSessionOption]? {
         switch (form.agent, codexModels) {
         case (.claude, _):
+            if !customClaudeModels.isEmpty {
+                return NewSessionCatalogs.claudeCustomModelOptions(
+                    customClaudeModels,
+                    selectedModel: form.model
+                )
+            }
             let catalog: [ClaudeModelSummary]? = {
                 if case .loaded(let models) = claudeModels { return models }
                 return nil
@@ -1060,6 +1070,26 @@ final class NewSessionModel {
                 // effort → default; no fast tier → standard.
                 self.form = self.reconcileCodexSelections(self.form)
                 self.persistDraft()
+            }
+        }
+    }
+
+    /// Custom Claude endpoint models are hub-wide, not machine-scoped.
+    private func refreshCustomClaudeModelsIfNeeded() {
+        guard !customClaudeModelsLoaded, customClaudeModelsTask == nil else { return }
+        customClaudeModelsTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                self.customClaudeModelsTask = nil
+                self.customClaudeModelsLoaded = true
+            }
+            do {
+                let response = try await self.session.api.claudeCustomModels()
+                self.customClaudeModels = response.models
+                self.form = self.reconcileClaudeEffort(self.form)
+                self.persistDraft()
+            } catch {
+                // Keep the machine/static catalog as the fallback.
             }
         }
     }

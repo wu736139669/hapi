@@ -304,7 +304,8 @@ public func buildSessionConfigState(
     summary: SessionSummary?,
     codexModels: CodexModelsState,
     agentModels: AgentCatalogLoadState = .idle,
-    agentEfforts: ReasoningEffortOptionsResponse? = nil
+    agentEfforts: ReasoningEffortOptionsResponse? = nil,
+    customClaudeModels: [String] = []
 ) -> SessionConfigState {
     let flavor = detail?.metadata?.flavor ?? summary?.metadata?.flavor
     let active = detail?.active ?? summary?.active ?? false
@@ -319,7 +320,19 @@ public func buildSessionConfigState(
 
     switch flavor {
     case "claude":
-        modelOptions = ModelCatalog.claudeModelOptions(currentModel: model)
+        if !customClaudeModels.isEmpty {
+            var options = [CatalogOption(value: nil, label: "Default")]
+            let normalized = ModelCatalog.normalizeClaudeModel(model)
+            if let normalized, !customClaudeModels.contains(normalized) {
+                options.append(CatalogOption(value: normalized, label: normalized))
+            }
+            options.append(contentsOf: customClaudeModels.map {
+                CatalogOption(value: $0, label: $0)
+            })
+            modelOptions = options
+        } else {
+            modelOptions = ModelCatalog.claudeModelOptions(currentModel: model)
+        }
         effort = detail?.effort
         effortOptions = ModelCatalog.claudeEffortOptions(currentEffort: effort)
     case "codex":

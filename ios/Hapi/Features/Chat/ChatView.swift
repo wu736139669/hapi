@@ -198,6 +198,11 @@ struct ChatView: View {
                     } label: {
                         Label("Rename…", systemImage: "pencil")
                     }
+                    Button {
+                        model.copySessionReference()
+                    } label: {
+                        Label("Copy reference", systemImage: "doc.on.doc")
+                    }
                     // Web `SessionActionMenu`: reopen/delete only for a known
                     // inactive session; a removal closes this chat.
                     if model.sessionIsActive == false {

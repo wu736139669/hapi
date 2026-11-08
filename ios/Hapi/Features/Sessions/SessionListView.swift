@@ -2,6 +2,7 @@ import HapiClient
 import HapiProtocol
 import HapiUI
 import SwiftUI
+import UIKit
 
 /// The session list (A-M2a) — standalone screen: navigation and hub chrome
 /// stay outside; taps surface through `onOpenSession`.
@@ -42,6 +43,7 @@ struct SessionListView: View {
     /// Per-section overrides; nil means use the section's default. Kept
     /// in-memory like the web sidebar.
     @State private var collapseOverrides: [String: Bool] = [:]
+    @State private var hasAppeared = false
 
     private var listScale: CGFloat { CGFloat(displayPrefs.listFontScale) }
 
@@ -167,7 +169,17 @@ struct SessionListView: View {
             list(snapshot)
         }
         .equatable()
-        .onAppear { frozenSnapshot = nil }
+        .onAppear {
+            frozenSnapshot = nil
+            if hasAppeared {
+                // Returning from a chat: the list was frozen for performance;
+                // force a fresh REST reconciliation so read/status changes do
+                // not wait for the next SSE edge.
+                Task { await model.refresh() }
+            } else {
+                hasAppeared = true
+            }
+        }
         .onDisappear { frozenSnapshot = model.snapshot }
     }
 
@@ -506,6 +518,14 @@ struct SessionListView: View {
             renameTarget = row
         } label: {
             Label("Rename…", systemImage: "pencil")
+        }
+        Button {
+            UIPasteboard.general.string = SessionCitation.referenceText(
+                title: row.title,
+                sessionId: row.id
+            )
+        } label: {
+            Label("Copy reference", systemImage: "doc.on.doc")
         }
         if summary.pinned == true || summary.globalPinned == true {
             Button {

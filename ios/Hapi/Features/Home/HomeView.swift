@@ -30,6 +30,7 @@ struct HomeView: View {
     /// a foreground reconnect usually finishes first (Telegram-style).
     @State private var connectionStatusRevealed = false
     @State private var searchOpen = false
+    @State private var newSessionPresentationID = UUID()
     @FocusState private var searchFocused: Bool
     private let connectionRevealDelay: Duration = .seconds(2)
 
@@ -111,6 +112,7 @@ struct HomeView: View {
                 showNewSession = false
                 openSession(sessionId)
             }
+            .id(newSessionPresentationID)
             .macSheetSizing()
         }
         .sheet(isPresented: $showSettings) {
@@ -127,6 +129,7 @@ struct HomeView: View {
 
     private func presentNewSession(_ seed: NewSessionSeed? = nil) {
         newSessionSeed = seed
+        newSessionPresentationID = UUID()
         showNewSession = true
     }
 
@@ -176,6 +179,13 @@ struct HomeView: View {
             ? connectionNotice.transientMessage(revealed: connectionStatusRevealed) : nil))
         .onChange(of: tabletNavigation.selectedSessionId, initial: true) { _, sessionId in
             listModel.selectedSessionId = sessionId
+        }
+        .onChange(of: model.sessionListRequest) { _, _ in
+            if usesSplitNavigation {
+                tabletNavigation.showList()
+            } else {
+                path.removeAll()
+            }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             if searchOpen {

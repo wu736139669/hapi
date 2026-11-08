@@ -796,6 +796,32 @@ func normalizeAgentRecord(
         if data["isCompactSummary"]?.jsTruthy == true { return nil }
         if !isClaudeChatVisibleMessage(type: data["type"], subtype: data["subtype"]) { return nil }
 
+        // Claude Code reports a failed API call ("Prompt is too long", usage
+        // limits, logged out) as a synthetic assistant message with a top-level
+        // `error`. Render it as an error event: it must not leak the
+        // `<synthetic>` model into chat chrome or its all-zero usage into the
+        // context gauge (parity with normalizeAgent.ts).
+        if dataType == "assistant", let error = data["error"]?.stringValue {
+            let text: String = {
+                guard let content = data["message"]?["content"] else { return "" }
+                if let string = content.stringValue { return string }
+                guard let blocks = content.arrayValue else { return "" }
+                return blocks.compactMap { block in
+                    block.objectValue?["text"]?.stringValue
+                }.joined(separator: "\n")
+            }()
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return NormalizedMessage(
+                id: messageId,
+                localId: localId,
+                createdAt: createdAt,
+                content: .event(.error(trimmed.isEmpty ? error : trimmed)),
+                isSidechain: data["isSidechain"]?.jsTruthy ?? false,
+                parentToolUseId: asString(data["parentToolUseId"]),
+                meta: meta
+            )
+        }
+
         if dataType == "assistant" {
             return normalizeAssistantOutput(messageId: messageId, localId: localId, createdAt: createdAt, data: data, meta: meta)
         }

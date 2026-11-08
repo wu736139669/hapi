@@ -73,6 +73,8 @@ public final class ChatInteractor {
     public private(set) var agentModels: AgentCatalogLoadState = .idle
     /// Grok/opencode in-session effort options (feeds ``config``).
     public private(set) var agentEfforts: ReasoningEffortOptionsResponse?
+    /// Model names configured for a custom Claude endpoint (settings.json).
+    public private(set) var customClaudeModels: [String] = []
     /// `GET /slash-commands` result: nil until loaded; a failure retries on
     /// the next `/`.
     private var slashCommandsFetched: [SlashCommand]?
@@ -923,7 +925,8 @@ public final class ChatInteractor {
             summary: sessionStore.sessions.first { $0.id == sessionId },
             codexModels: codexModels,
             agentModels: agentModels,
-            agentEfforts: agentEfforts
+            agentEfforts: agentEfforts,
+            customClaudeModels: customClaudeModels
         )
     }
 
@@ -1015,6 +1018,10 @@ public final class ChatInteractor {
     /// effort options. Live sessions only for discovered agents; grok and
     /// copilot also skip terminal-controlled ones (web query gates).
     public func loadModelOptions() {
+        if currentFlavor() == "claude" {
+            loadCustomClaudeModels()
+            return
+        }
         if let flavor = currentFlavor(), flavor != "codex" {
             loadAgentModels(AgentFlavor(rawValue: flavor))
             return
@@ -1040,6 +1047,24 @@ public final class ChatInteractor {
             } catch {
                 self.emit(.notice(Self.errorMessage(error, fallback: "Failed to load models")))
                 self.codexModels = .failed
+            }
+        }
+    }
+
+    private func loadCustomClaudeModels() {
+        guard !customClaudeModelsLoaded, customClaudeModelsTask == nil else { return }
+        customClaudeModelsTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                self.customClaudeModelsTask = nil
+                self.customClaudeModelsLoaded = true
+            }
+            do {
+                let response = try await self.api.claudeCustomModels()
+                self.customClaudeModels = response.models
+            } catch {
+                // Keep the static Claude presets; opening settings must not
+                // surface a model-catalog toast for an optional custom list.
             }
         }
     }
@@ -1388,6 +1413,8 @@ public final class ChatInteractor {
     /// (badge 0, park no-op). Injected by `HubSession` after construction —
     /// a settable property rather than an init parameter keeps this addition
     /// purely additive. Tests substitute fakes.
+    @ObservationIgnored private var customClaudeModelsTask: Task<Void, Never>?
+    @ObservationIgnored private var customClaudeModelsLoaded = false
     @ObservationIgnored public var scratchlist: (any SessionScratchlistStoring)?
 
     /// Entry count for the chat toolbar's scratchlist badge — observable

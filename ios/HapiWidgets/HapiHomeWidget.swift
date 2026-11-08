@@ -65,7 +65,7 @@ private struct HapiWidgetView: View {
     var body: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .widgetURL(topSessionURL)
+            .widgetURL(SessionListLink.url)
             .containerBackground(for: .widget) {
                 if isAccessory {
                     AccessoryWidgetBackground()
@@ -73,17 +73,6 @@ private struct HapiWidgetView: View {
                     HapiWidgetBackground()
                 }
             }
-    }
-
-    /// Accessories have no room for row-level links; open the most relevant
-    /// session when the whole widget is tapped. Medium/large rows override
-    /// this with their own `Link`.
-    private var topSessionURL: URL? {
-        guard let top = entry.snapshot.sessions.first else { return nil }
-        return SessionLink.url(
-            sessionId: top.id,
-            hubUrl: entry.snapshot.hubUrl.isEmpty ? nil : entry.snapshot.hubUrl
-        )
     }
 
     @ViewBuilder
@@ -782,14 +771,6 @@ private struct HapiModeWidgetView: View {
         mode == .running ? .task : .result
     }
 
-    private var topURL: URL? {
-        guard let top = rows.first else { return nil }
-        return SessionLink.url(
-            sessionId: top.id,
-            hubUrl: entry.snapshot.hubUrl.isEmpty ? nil : entry.snapshot.hubUrl
-        )
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             WidgetHeader(snapshot: entry.snapshot)
@@ -820,7 +801,7 @@ private struct HapiModeWidgetView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .widgetURL(topURL)
+        .widgetURL(SessionListLink.url)
         .containerBackground(for: .widget) {
             HapiWidgetBackground()
         }
@@ -954,10 +935,7 @@ private struct HapiFocusWidgetView: View {
                         content(session)
                     }
                 }
-                .widgetURL(SessionLink.url(
-                    sessionId: session.id,
-                    hubUrl: entry.snapshot.hubUrl.isEmpty ? nil : entry.snapshot.hubUrl
-                ))
+                .widgetURL(SessionListLink.url)
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     WidgetHeader(snapshot: entry.snapshot)

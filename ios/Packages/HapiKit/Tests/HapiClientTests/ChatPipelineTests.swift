@@ -167,6 +167,98 @@ struct ChatPipelineTests {
         #expect(Self.blockIds(visible).contains { $0.contains("local-direct-1") })
     }
 
+    // MARK: - latestModel skips synthetic records
+
+    /// Claude Code reports API failures as assistant records whose `model` is
+    /// `<synthetic>`; the status bar must keep showing the last real provider
+    /// model instead of that marker.
+    private static func assistantRow(
+        id: String,
+        model: String,
+        text: String,
+        error: String? = nil,
+        createdAt: Int
+    ) -> WindowMessage {
+        var data: [String: JSONValue] = [
+            "type": .string("assistant"),
+            "uuid": .string(id),
+            "isSidechain": .bool(false),
+            "message": .object([
+                "model": .string(model),
+                "role": .string("assistant"),
+                "content": .array([
+                    .object([
+                        "type": .string("text"),
+                        "text": .string(text),
+                    ]),
+                ]),
+                "usage": .object([
+                    "input_tokens": .number(0),
+                    "output_tokens": .number(0),
+                ]),
+            ]),
+        ]
+        if let error {
+            data["error"] = .string(error)
+        }
+        return WindowMessage(
+            id: id,
+            content: .object([
+                "role": .string("agent"),
+                "content": .object([
+                    "type": .string("output"),
+                    "data": .object(data),
+                ]),
+            ]),
+            createdAt: createdAt
+        )
+    }
+
+    @Test func syntheticApiErrorDoesNotReplaceLatestModel() async throws {
+        let pipeline = ChatPipeline()
+        let result = await pipeline.runResult(
+            messages: [
+                Self.assistantRow(
+                    id: "real-1",
+                    model: "deepseek-v4.1-flash[1m]",
+                    text: "working",
+                    createdAt: 1_755_000_000_000
+                ),
+                Self.assistantRow(
+                    id: "error-1",
+                    model: "<synthetic>",
+                    text: "Prompt is too long",
+                    error: "invalid_request",
+                    createdAt: 1_755_000_001_000
+                ),
+            ],
+            agentState: nil,
+            hasMoreMessages: false
+        )
+
+        #expect(result.latestModel == "deepseek-v4.1-flash[1m]")
+    }
+
+    @Test func syntheticOnlyTranscriptHasNoModel() async throws {
+        let pipeline = ChatPipeline()
+        let result = await pipeline.runResult(
+            messages: [
+                Self.assistantRow(
+                    id: "error-1",
+                    model: "<synthetic>",
+                    text: "Prompt is too long",
+                    error: "invalid_request",
+                    createdAt: 1_755_000_001_000
+                ),
+            ],
+            agentState: nil,
+            hasMoreMessages: false
+        )
+
+        #expect(result.latestModel == nil)
+        #expect(!result.blocks.isEmpty)
+    }
+
     // MARK: - Group-id stability via previousGroups
 
     @Test func groupIdSurvivesOlderHistoryArrival() async throws {

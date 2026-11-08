@@ -4,6 +4,7 @@ import HapiProtocol
 import HapiUI
 import Observation
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 /// Chat top-bar state: title cascade + status dot + meta line.
@@ -52,6 +53,7 @@ final class ChatModel {
     /// appears in the current window.
     private(set) var latestUsage: LatestUsage?
     private(set) var latestGoal: JSONValue?
+    private(set) var latestModel: String?
     private(set) var header: ChatHeaderUI
     /// Workspace root, for path display in tool cards.
     private(set) var basePath: String?
@@ -154,6 +156,18 @@ final class ChatModel {
         case .failure:
             showNotice(String(localized: "Failed to export conversation"))
         }
+    }
+
+    // MARK: Reference
+
+    /// Clipboard text for citing this session in another HAPI chat (web
+    /// `SessionActionMenu` → Copy reference): title, hub path, agent steer.
+    func copySessionReference() {
+        UIPasteboard.general.string = SessionCitation.referenceText(
+            title: header.title,
+            sessionId: sessionId
+        )
+        showNotice(String(localized: "Reference copied"))
     }
 
     /// Loaded user messages with a native fork/rewind point, newest first.
@@ -610,6 +624,7 @@ final class ChatModel {
                 let visible = output.blocks
                 latestUsage = output.latestUsage
                 latestGoal = output.latestGoal
+                latestModel = output.latestModel
                 let sources = Set(visible.flatMap { block -> [String] in
                     guard case .block(let value) = block else { return [] }
                     switch value {
@@ -677,7 +692,8 @@ final class ChatModel {
             sessionId: sessionId,
             detail: detail,
             summary: summary,
-            machines: machines
+            machines: machines,
+            modelOverride: latestModel
         )
         basePath = detail?.metadata?.path ?? summary?.metadata?.path
         hasMore = window.hasMore
@@ -707,7 +723,8 @@ final class ChatModel {
         sessionId: String,
         detail: Session?,
         summary: SessionSummary?,
-        machines: [Machine]
+        machines: [Machine],
+        modelOverride: String? = nil
     ) -> ChatHeaderUI {
         // Detail first — the fresher source once loaded (this pipe patches
         // it live); a detail without usable metadata falls through to the
@@ -733,7 +750,7 @@ final class ChatModel {
         }
         let project = (detail?.metadata?.path ?? summary?.metadata?.path)
             .flatMap { $0.split(separator: "/").last.map(String.init) }
-        let model = detail?.model
+        let model = modelOverride ?? detail?.model
         let effort = detail?.effort ?? detail?.modelReasoningEffort
         let parts: [String] = [
             flavor.map { flavorLabel(forFlavor: $0) },

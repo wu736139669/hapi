@@ -89,4 +89,11 @@ extension APIClient {
     public func machineClaudeModels(machineId: String) async throws -> ClaudeModelsResponse {
         try await request(.get, "/api/machines/\(encodePathComponent(machineId))/claude-models")
     }
+
+    /// `GET /api/claude/custom-models` — model names configured for a custom
+    /// Anthropic-compatible endpoint. These must be offered explicitly because
+    /// Claude Code's model picker only knows Claude aliases.
+    public func claudeCustomModels() async throws -> ClaudeCustomModelsResponse {
+        try await request(.get, "/api/claude/custom-models")
+    }
 }
