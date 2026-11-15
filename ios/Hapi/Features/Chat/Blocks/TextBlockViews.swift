@@ -40,7 +40,7 @@ struct UserTextBlockView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
                         if preview.end < block.text.endIndex {
-                            Button { openMessage?(block) } label: {
+                            Button { openMessage?(block.id, block.text) } label: {
                                 Label("View full message", systemImage: "doc.text")
                                     .font(.footnote)
                                     .frame(minHeight: 44)
@@ -110,6 +110,7 @@ struct UserTextBlockView: View {
                     timestamp: block.createdAt,
                     copyText: block.text,
                     metadata: nil,
+                    onSelectText: openMessage.map { open in { open(block.id, block.text) } },
                     alignment: .trailing
                 )
                 if let interactions, let localId = block.localId {
@@ -153,6 +154,7 @@ struct UserTextBlockView: View {
 /// Assistant prose: full-width markdown through the shared M2e renderer.
 struct AgentTextBlockView: View {
     let block: AgentTextBlock
+    @Environment(\.openChatMessage) private var openMessage
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -165,7 +167,8 @@ struct AgentTextBlockView: View {
                     durationMs: block.durationMs,
                     model: block.model,
                     usage: block.usage
-                )
+                ),
+                onSelectText: openMessage.map { open in { open(block.id, block.text) } }
             )
         }
     }

@@ -63,6 +63,7 @@ public func isRenderIrrelevantSessionPatch(session: Session, patch: SessionPatch
     if let value = patch.collaborationMode, value != session.collaborationMode { return false }
     if let value = patch.copilotAgentMode, value != session.copilotAgentMode { return false }
     if let value = patch.backgroundTaskCount, value != session.backgroundTaskCount { return false }
+    if let tasks = patch.backgroundTasks, tasks != session.backgroundTasks { return false }
     // `Session` carries no scratchlistUpdatedAt, so its presence is always
     // "new information" in the TS reference (undefined !== number).
     if patch.scratchlistUpdatedAt != nil { return false }
@@ -108,6 +109,7 @@ public func applySessionDetailPatch(session: Session, patch: SessionPatch) -> Se
     if let value = patch.collaborationMode { assign(\.collaborationMode, value as CodexCollaborationMode?) }
     if let value = patch.copilotAgentMode { assign(\.copilotAgentMode, value as CopilotAgentMode?) }
     if let value = patch.backgroundTaskCount { assign(\.backgroundTaskCount, value as Int?) }
+    if let tasks = patch.backgroundTasks { assign(\.backgroundTasks, Optional(tasks)) }
 
     // Version gates: dual SSE can deliver duplicates out of order. Only mark
     // changed when a strictly newer version lands.

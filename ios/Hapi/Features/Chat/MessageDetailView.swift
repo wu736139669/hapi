@@ -4,11 +4,12 @@ import SwiftUI
 import UIKit
 
 private struct OpenMessageKey: EnvironmentKey {
-    static let defaultValue: ((UserTextBlock) -> Void)? = nil
+    /// `(message id, full plain text)` — opens the selectable text sheet.
+    static let defaultValue: ((String, String) -> Void)? = nil
 }
 
 extension EnvironmentValues {
-    var openChatMessage: ((UserTextBlock) -> Void)? {
+    var openChatMessage: ((String, String) -> Void)? {
         get { self[OpenMessageKey.self] }
         set { self[OpenMessageKey.self] = newValue }
     }
@@ -28,11 +29,11 @@ struct MessagePresentationHost: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .environment(\.openChatMessage, { block in
+            .environment(\.openChatMessage, { id, text in
                 model.beginContentInspection()
                 model.retainSurface("message:\(owner)")
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                selection = MessageSelection(id: block.id, text: block.text)
+                selection = MessageSelection(id: id, text: text)
             })
             .sheet(item: $selection, onDismiss: {
                 model.releaseSurface("message:\(owner)")
@@ -50,6 +51,7 @@ struct MessageDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.hapiPasteboard) private var pasteboard
     @Environment(\.hapiTypography) private var typography
+    @Environment(\.hapiTheme) private var theme
 
     init(text: String) {
         _pager = State(initialValue: MessageTextPager(source: text))
@@ -57,19 +59,20 @@ struct MessageDetailView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                // Plain text, like the user bubble. No markdown parsing,
-                // highlighting or single infinitely tall Text layout.
-                Text(verbatim: pager.page.text)
-                    .font(typography.bodyFont)
-                    .lineSpacing(typography.bodyLineSpacing)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .hapiReadingColumn()
-                    .padding(.vertical, 16)
-                    .accessibilityIdentifier("message-detail-text")
-            }
+            // UIKit owns selection here: SwiftUI `Text` only produced the
+            // generic Copy/Share menu (no selection handles) inside a sheet.
+            SelectableMessageText(
+                text: pager.page.text,
+                font: .systemFont(ofSize: typography.bodySize,
+                                  weight: typography.boldText ? .semibold : .regular),
+                textColor: UIColor(theme.textPrimary),
+                accentColor: UIColor(theme.accent),
+                lineSpacing: typography.bodyLineSpacing
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .hapiReadingColumn()
             .id(pager.number)
+            .accessibilityIdentifier("message-detail-text")
             .navigationTitle("Full message")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -107,5 +110,43 @@ struct MessageDetailView: View {
         .hapiTypography()
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+    }
+}
+
+/// Read-only `UITextView` bridge: native text selection (word highlight,
+/// draggable handles, cross-paragraph ranges, system Copy/Share menu).
+/// SwiftUI `Text.textSelection` did not engage inside this sheet.
+private struct SelectableMessageText: UIViewRepresentable {
+    let text: String
+    let font: UIFont
+    let textColor: UIColor
+    let accentColor: UIColor
+    let lineSpacing: CGFloat
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.isEditable = false
+        view.isSelectable = true
+        view.isScrollEnabled = true
+        view.alwaysBounceVertical = true
+        view.backgroundColor = .clear
+        view.dataDetectorTypes = []
+        view.textContainerInset = UIEdgeInsets(top: 16, left: 0, bottom: 16, right: 0)
+        view.textContainer.lineFragmentPadding = 0
+        view.tintColor = accentColor
+        view.adjustsFontForContentSizeCategory = false
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = lineSpacing
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: textColor,
+            .paragraphStyle: paragraph,
+        ]
+        view.attributedText = NSAttributedString(string: text, attributes: attributes)
+        view.tintColor = accentColor
     }
 }

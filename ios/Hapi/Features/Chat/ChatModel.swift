@@ -17,9 +17,14 @@ struct ChatHeaderUI: Equatable {
     var active: Bool
     var thinking: Bool
     var project: String? = nil
+    /// Full session directory (shown in the session-info sheet).
+    var projectPath: String? = nil
+    var machine: String? = nil
+    var worktree: String? = nil
     var model: String? = nil
     var effort: String? = nil
     var backgroundTaskCount: Int = 0
+    var backgroundTasks: [HapiProtocol.BackgroundTask]? = nil
     var serviceTier: String? = nil
     var collaborationMode: CodexCollaborationMode? = nil
     var isCompacting: Bool = false
@@ -748,18 +753,16 @@ final class ChatModel {
         let worktree = (detail?.metadata?.worktree ?? summary?.metadata?.worktree).map { tree in
             tree.name.trimmingCharacters(in: .whitespaces).isEmpty ? tree.branch : tree.name
         }
-        let project = (detail?.metadata?.path ?? summary?.metadata?.path)
+        let projectPath = detail?.metadata?.path ?? summary?.metadata?.path
+        let project = projectPath
             .flatMap { $0.split(separator: "/").last.map(String.init) }
         let model = modelOverride ?? detail?.model
         let effort = detail?.effort ?? detail?.modelReasoningEffort
-        let parts: [String] = [
-            flavor.map { flavorLabel(forFlavor: $0) },
-            project,
-            machineLabel,
-            worktree,
-            model,
-            effort,
-        ].compactMap { $0 }
+        // Model/effort live in the composer status strip (and the session
+        // info sheet); keeping them here squeezed every other field out of
+        // the one-line nav subtitle, so the header only carries what the
+        // composer does not: which repo and which machine.
+        let parts: [String] = [project, machineLabel].compactMap { $0 }
 
         return ChatHeaderUI(
             title: title,
@@ -768,9 +771,13 @@ final class ChatModel {
             active: detail?.active ?? summary?.active ?? false,
             thinking: detail?.thinking ?? summary?.thinking ?? false,
             project: project,
+            projectPath: projectPath,
+            machine: machineLabel,
+            worktree: worktree,
             model: model,
             effort: effort,
             backgroundTaskCount: detail?.backgroundTaskCount ?? summary?.backgroundTaskCount ?? 0,
+            backgroundTasks: detail?.backgroundTasks,
             serviceTier: detail?.serviceTier,
             collaborationMode: detail?.collaborationMode,
             isCompacting: detail?.agentState?.contextCompactionStartedAt != nil

@@ -26,6 +26,8 @@ public enum PermissionMode: String, Codable, CaseIterable, Sendable {
     case debug
     case autoReview
     case readOnly = "read-only"
+    case workspaceWrite = "workspace-write"
+    case dangerFullAccess = "danger-full-access"
     case safeYolo = "safe-yolo"
     case yolo
     case requestReview = "request-review"
@@ -42,6 +44,8 @@ public enum PermissionMode: String, Codable, CaseIterable, Sendable {
         case .debug: return "Debug Mode"
         case .autoReview: return "Auto"
         case .readOnly: return "Read Only"
+        case .workspaceWrite: return "Workspace Write"
+        case .dangerFullAccess: return "Full Access"
         case .safeYolo: return "Safe Yolo"
         case .yolo: return "Yolo"
         case .requestReview: return "Request Review"
@@ -60,6 +64,8 @@ public enum PermissionMode: String, Codable, CaseIterable, Sendable {
         case .debug: return .info
         case .autoReview: return .warning
         case .readOnly: return .warning
+        case .workspaceWrite: return .warning
+        case .dangerFullAccess: return .danger
         case .safeYolo: return .warning
         case .yolo: return .danger
         case .requestReview: return .neutral
@@ -98,7 +104,7 @@ extension AgentFlavor {
         case .opencode:
             return [.default, .plan, .yolo]
         case .dsh:
-            return []
+            return [.default, .readOnly, .workspaceWrite, .dangerFullAccess]
         case .agy:
             return [.requestReview, .alwaysProceed]
         case .cursor:

@@ -120,6 +120,10 @@ struct ChatMessageActionRow: View {
     let timestamp: Int?
     let copyText: String?
     let metadata: ChatMessageMeta?
+    /// Opens the plain-text selection sheet. Inline SwiftUI selection inside
+    /// the collection view only covers one paragraph per Text; the sheet lets
+    /// the user select any range and copy it.
+    var onSelectText: (() -> Void)? = nil
     var alignment: Alignment = .leading
 
     @Environment(\.hapiTheme) private var theme
@@ -134,6 +138,15 @@ struct ChatMessageActionRow: View {
             if let timestamp, timestamp > 0 {
                 Text(ChatTimeLabel.text(for: timestamp))
                     .monospacedDigit()
+            }
+            if let onSelectText {
+                Button(action: onSelectText) {
+                    Image(systemName: "text.cursor")
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Select text")
             }
             if let copyText, !copyText.isEmpty {
                 Button {

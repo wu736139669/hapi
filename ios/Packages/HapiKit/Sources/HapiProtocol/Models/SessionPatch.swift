@@ -68,6 +68,9 @@ public struct SessionPatch: Equatable, Sendable {
     public var collaborationMode: CodexCollaborationMode?
     public var copilotAgentMode: CopilotAgentMode?
     public var backgroundTaskCount: Int?
+    /// Full running-task snapshot from Claude; count is the badge, this list
+    /// backs the composer chip's detail menu.
+    public var backgroundTasks: [BackgroundTask]?
     /// Bare refetch trigger for `GET /api/sessions/:id/scratchlist`; never
     /// applied onto the `Session` (which carries no such field).
     public var scratchlistUpdatedAt: Int?
@@ -93,6 +96,7 @@ public struct SessionPatch: Equatable, Sendable {
         collaborationMode: CodexCollaborationMode? = nil,
         copilotAgentMode: CopilotAgentMode? = nil,
         backgroundTaskCount: Int? = nil,
+        backgroundTasks: [BackgroundTask]? = nil,
         scratchlistUpdatedAt: Int? = nil
     ) {
         self.contentRevision = contentRevision
@@ -115,6 +119,7 @@ public struct SessionPatch: Equatable, Sendable {
         self.collaborationMode = collaborationMode
         self.copilotAgentMode = copilotAgentMode
         self.backgroundTaskCount = backgroundTaskCount
+        self.backgroundTasks = backgroundTasks
         self.scratchlistUpdatedAt = scratchlistUpdatedAt
     }
 }
@@ -173,6 +178,7 @@ extension SessionPatch: Codable {
         collaborationMode = try container.decodeIfPresent(CodexCollaborationMode.self, forKey: .collaborationMode)
         copilotAgentMode = try container.decodeIfPresent(CopilotAgentMode.self, forKey: .copilotAgentMode)
         backgroundTaskCount = try container.decodeIfPresent(Int.self, forKey: .backgroundTaskCount)
+        backgroundTasks = try container.decodeIfPresent([BackgroundTask].self, forKey: .backgroundTasks)
         scratchlistUpdatedAt = try container.decodeIfPresent(Int.self, forKey: .scratchlistUpdatedAt)
     }
 
@@ -198,6 +204,7 @@ extension SessionPatch: Codable {
         try container.encodeIfPresent(collaborationMode, forKey: .collaborationMode)
         try container.encodeIfPresent(copilotAgentMode, forKey: .copilotAgentMode)
         try container.encodeIfPresent(backgroundTaskCount, forKey: .backgroundTaskCount)
+        try container.encodeIfPresent(backgroundTasks, forKey: .backgroundTasks)
         try container.encodeIfPresent(scratchlistUpdatedAt, forKey: .scratchlistUpdatedAt)
     }
 

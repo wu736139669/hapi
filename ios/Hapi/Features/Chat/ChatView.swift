@@ -30,6 +30,8 @@ struct ChatView: View {
     @State private var deleteOpen = false
     @State private var forkConfirmOpen = false
     @State private var historyOpen = false
+    /// Full session metadata behind the truncated nav subtitle.
+    @State private var sessionInfoOpen = false
 
     /// Resume/reopen handed back a superseding session id — the host swaps
     /// its navigation entry (HomeView replaces the path element).
@@ -203,6 +205,11 @@ struct ChatView: View {
                     } label: {
                         Label("Copy reference", systemImage: "doc.on.doc")
                     }
+                    Button {
+                        sessionInfoOpen = true
+                    } label: {
+                        Label("Session info", systemImage: "info.circle")
+                    }
                     // Web `SessionActionMenu`: reopen/delete only for a known
                     // inactive session; a removal closes this chat.
                     if model.sessionIsActive == false {
@@ -255,6 +262,14 @@ struct ChatView: View {
                 mode: .file,
                 line: link.line
             )
+        }
+        .sheet(isPresented: $sessionInfoOpen) {
+            SessionInfoView(
+                header: model.header,
+                sessionId: sessionId,
+                status: headerStatus.label
+            )
+            .macSheetSizing()
         }
         .sheet(isPresented: $scratchlistOpen) {
             ScratchlistView(
@@ -412,12 +427,11 @@ struct ChatView: View {
                 Text(model.header.title)
                     .font(.headline)
                     .lineLimit(1)
-                Text(headerStatus.label)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(headerStatus.color)
-                    .lineLimit(1)
             }
-            if let subtitle = model.header.subtitle {
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text(verbatim: "\(model.header.title), \(headerStatus.label)"))
+
+            if model.header.subtitle != nil {
                 HStack(spacing: 4) {
                     if model.header.flavor != nil {
                         // Inherits .secondary like the meta text (web:
@@ -425,13 +439,32 @@ struct ChatView: View {
                         // ignore the tint.
                         AgentFlavorIconView(flavor: model.header.flavor, size: 12)
                     }
-                    Text(subtitle)
-                        .font(.caption2)
-                        .lineLimit(1)
+                    // The subtitle only carries project + machine now, so
+                    // keep both ends readable: the machine stays put while a
+                    // long project name truncates in the middle.
+                    if let project = model.header.project {
+                        Text(project)
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    if model.header.project != nil, model.header.machine != nil {
+                        Text(verbatim: "·")
+                            .font(.caption2)
+                    }
+                    if let machine = model.header.machine {
+                        Text(machine)
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                    }
                 }
                 .foregroundStyle(.secondary)
             }
         }
+        .contentShape(Rectangle())
+        .onTapGesture { sessionInfoOpen = true }
+        .accessibilityHint("Shows full session information")
     }
 
     private var headerStatus: (label: String, color: Color) {

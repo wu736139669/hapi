@@ -65,7 +65,14 @@ struct ChatComposerStatusBar: View {
                 statusChip("Compacting", icon: "archivebox.fill", tint: theme.warning)
             }
             if model.header.backgroundTaskCount > 0 {
-                statusChip("\(model.header.backgroundTaskCount)", icon: "gearshape.2.fill")
+                // Not a settings button: Claude Code's background tasks
+                // (long-running commands/subagents) still running. A terminal
+                // reads as work; the old gear read as settings. Tapping lists
+                // the task descriptions the hub forwarded.
+                backgroundTasksChip(
+                    count: model.header.backgroundTaskCount,
+                    tasks: model.header.backgroundTasks
+                )
             }
             if model.header.serviceTier == "fast" {
                 statusChip("Fast", icon: "bolt.fill", tint: theme.success)
@@ -97,6 +104,24 @@ struct ChatComposerStatusBar: View {
         .padding(.vertical, 2)
         .hapiReadingColumn()
         .accessibilityElement(children: .combine)
+    }
+
+    /// Background-task count chip; tap opens the running task list instead of
+    /// leaving a number with no explanation.
+    private func backgroundTasksChip(count: Int, tasks: [HapiProtocol.BackgroundTask]?) -> some View {
+        Menu {
+            Text("Background tasks: \(count)")
+            Divider()
+            if let tasks, !tasks.isEmpty {
+                ForEach(tasks) { task in
+                    Text(verbatim: task.description.isEmpty ? task.type : task.description)
+                }
+            }
+        } label: {
+            statusChip("\(count)", icon: "terminal.fill")
+        }
+        .menuStyle(.borderlessButton)
+        .accessibilityLabel(Text("Background tasks: \(count)"))
     }
 
     private func statusChip(_ label: String, icon: String, tint: Color? = nil) -> some View {

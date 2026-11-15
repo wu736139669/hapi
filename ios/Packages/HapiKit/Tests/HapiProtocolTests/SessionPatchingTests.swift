@@ -333,4 +333,27 @@ struct SessionPatchingTests {
             scratchlistUpdatedAt: 5_000
         )) == nil)
     }
+
+    @Test func backgroundTasksSnapshotIsApplied() throws {
+        let session = makeSession()
+        let tasks = [
+            BackgroundTask(id: "task-1", type: "bash", description: "sleep 60"),
+            BackgroundTask(id: "task-2", type: "agent", description: "explore"),
+        ]
+        #expect(!isRenderIrrelevantSessionPatch(session: session, patch: SessionPatch(
+            backgroundTasks: tasks
+        )))
+        let next = try #require(applySessionDetailPatch(session: session, patch: SessionPatch(
+            backgroundTaskCount: 2,
+            backgroundTasks: tasks
+        )))
+        #expect(next.backgroundTaskCount == 2)
+        #expect(next.backgroundTasks == tasks)
+
+        // Replaying the same snapshot is not a render-relevant change.
+        #expect(isRenderIrrelevantSessionPatch(session: next, patch: SessionPatch(
+            backgroundTaskCount: 2,
+            backgroundTasks: tasks
+        )))
+    }
 }

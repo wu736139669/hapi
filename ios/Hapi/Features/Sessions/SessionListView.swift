@@ -717,7 +717,7 @@ struct SessionRowView: View {
         // Separators start under the text column, as in Mail and Messages.
         .alignmentGuide(.listRowSeparatorLeading) { _ in metrics.iconSize + metrics.iconSpacing }
         .accessibilityElement(children: .combine)
-        .accessibilityValue(row.unread ? Text("Unread") : Text(verbatim: ""))
+        .accessibilityValue(accessibilityState)
         .accessibilityIdentifier("home.session.\(row.id)")
     }
 
@@ -730,6 +730,10 @@ struct SessionRowView: View {
             AgentFlavorIconView(flavor: row.flavor, size: metrics.iconSize * 0.72)
         }
         .frame(width: metrics.iconSize, height: metrics.iconSize)
+        // Archived rows read as clearly inactive: desaturated icon and a
+        // quieter title/detail, like the web sidebar's archived treatment.
+        .saturation(isArchived ? 0 : 1)
+        .opacity(isArchived ? 0.55 : 1)
         .overlay(alignment: .bottomTrailing) {
             if row.summary.active {
                 presenceBadge
@@ -752,8 +756,8 @@ struct SessionRowView: View {
     private var titleLine: some View {
         HStack(spacing: 8) {
             Text(verbatim: row.title)
-                .font(.system(size: metrics.titleSize, weight: row.unread ? .semibold : .regular))
-                .foregroundStyle(theme.textPrimary)
+                .font(.system(size: metrics.titleSize, weight: row.unread && !isArchived ? .semibold : .regular))
+                .foregroundStyle(isArchived ? theme.textSecondary : theme.textPrimary)
                 .lineLimit(1)
             Spacer(minLength: 4)
             // Unread is a semibold title plus an accent timestamp, not a
@@ -762,8 +766,8 @@ struct SessionRowView: View {
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 Text(verbatim: formatRelativeAge(now: context.date, thenEpochMs: row.summary.updatedAt))
             }
-            .font(.system(size: metrics.detailSize, weight: row.unread ? .semibold : .regular))
-            .foregroundStyle(row.unread ? theme.accent : theme.textSecondary)
+            .font(.system(size: metrics.detailSize, weight: row.unread && !isArchived ? .semibold : .regular))
+            .foregroundStyle(isArchived ? theme.textHint : (row.unread ? theme.accent : theme.textSecondary))
             .monospacedDigit()
             .fixedSize()
         }
@@ -799,10 +803,16 @@ struct SessionRowView: View {
                     .fixedSize()
                     .layoutPriority(1)
                     .accessibilityLabel(statusAccessibilityText(status))
+            } else if isArchived {
+                Image(systemName: "archivebox")
+                    .frame(width: metrics.statusSlotSize, height: metrics.statusSlotSize)
+                    .fixedSize()
+                    .layoutPriority(1)
+                    .accessibilityLabel(Text("Archived"))
             }
         }
         .font(.system(size: metrics.detailSize))
-        .foregroundStyle(theme.textSecondary)
+        .foregroundStyle(isArchived ? theme.textHint : theme.textSecondary)
     }
 
     /// Thinking rows get the green spinner; background-only work gets the
@@ -812,6 +822,18 @@ struct SessionRowView: View {
         return row.status == nil
             && row.summary.active
             && row.summary.backgroundTaskCount > 0
+    }
+
+    /// Archived sessions stay in their directory section (so history remains
+    /// reachable) but must not read as live. Web parity: desaturated icon,
+    /// secondary title, hint-coloured detail/timestamp.
+    private var isArchived: Bool {
+        row.summary.metadata?.lifecycleState == "archived"
+    }
+
+    private var accessibilityState: Text {
+        if isArchived { return Text("Archived") }
+        return row.unread ? Text("Unread") : Text(verbatim: "")
     }
 
     private var spinnerColor: Color {

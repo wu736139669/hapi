@@ -88,14 +88,17 @@ struct LastSeenStoreTests {
         cold.shutdown()
     }
 
-    @Test func persistenceFailureDoesNotClaimRead() async throws {
+    @Test func persistenceFailureKeepsOptimisticReadAndReportsError() async throws {
         let file = makeTempDirectory().appendingPathComponent("file")
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data().write(to: file)
         let store = LastSeenStore(snapshotDirectory: file)
         await store.markSeen(sessionId: "s1", revision: 3)
-        #expect(store.lastSeenAt("s1") == 0)
-        #expect(store.state.pending.isEmpty)
+        // Reads are optimistic: the list must reflect them even when the disk
+        // write fails. The unsynced pending request and surfaced error are the
+        // recovery signals.
+        #expect(store.lastSeenAt("s1") == 3)
+        #expect(!store.state.pending.isEmpty)
         #expect(store.persistenceError != nil)
     }
 }

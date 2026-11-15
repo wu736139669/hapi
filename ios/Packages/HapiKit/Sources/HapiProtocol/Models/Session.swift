@@ -31,6 +31,9 @@ public struct Session: Codable, Equatable, Sendable {
     public var thinkingAt: Int
     public var activeTurnStartedAt: Int?
     public var backgroundTaskCount: Int?
+    /// Running background tasks from Claude's snapshot; nil when the wire
+    /// omitted the list (older hub or a count-only summary patch).
+    public var backgroundTasks: [BackgroundTask]?
     public var todos: [TodoItem]?
     /// Team-mode state, kept wire-verbatim (no v1 UI consumes its internals).
     public var teamState: JSONValue?
@@ -68,6 +71,7 @@ public struct Session: Codable, Equatable, Sendable {
         thinkingAt: Int,
         activeTurnStartedAt: Int? = nil,
         backgroundTaskCount: Int? = nil,
+        backgroundTasks: [BackgroundTask]? = nil,
         todos: [TodoItem]? = nil,
         teamState: JSONValue? = nil,
         todosUpdatedAt: Int? = nil,
@@ -101,6 +105,7 @@ public struct Session: Codable, Equatable, Sendable {
         self.thinkingAt = thinkingAt
         self.activeTurnStartedAt = activeTurnStartedAt
         self.backgroundTaskCount = backgroundTaskCount
+        self.backgroundTasks = backgroundTasks
         self.todos = todos
         self.teamState = teamState
         self.todosUpdatedAt = todosUpdatedAt
@@ -138,6 +143,7 @@ public struct Session: Codable, Equatable, Sendable {
         thinkingAt = try container.decode(Int.self, forKey: .thinkingAt)
         activeTurnStartedAt = try container.decodeIfPresent(Int.self, forKey: .activeTurnStartedAt)
         backgroundTaskCount = try container.decodeIfPresent(Int.self, forKey: .backgroundTaskCount)
+        backgroundTasks = try container.decodeIfPresent([BackgroundTask].self, forKey: .backgroundTasks)
         todos = try container.decodeIfPresent([TodoItem].self, forKey: .todos)
         teamState = try container.decodeIfPresent(JSONValue.self, forKey: .teamState)
         todosUpdatedAt = try container.decodeIfPresent(Int.self, forKey: .todosUpdatedAt)

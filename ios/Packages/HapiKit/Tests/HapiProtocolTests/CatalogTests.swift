@@ -94,6 +94,7 @@ struct CatalogTests {
     @Test func remainingFlavorsMatchTheirDeclaredSets() {
         #expect(permissionModes(forFlavor: "grok") == [.default, .auto, .plan, .bypassPermissions])
         #expect(permissionModes(forFlavor: "opencode") == [.default, .plan, .yolo])
+        #expect(permissionModes(forFlavor: "dsh") == [.default, .readOnly, .workspaceWrite, .dangerFullAccess])
         #expect(permissionModes(forFlavor: "agy") == [.requestReview, .alwaysProceed])
         #expect(permissionModes(forFlavor: "cursor") == [.default, .plan, .ask, .debug, .autoReview, .yolo])
         // Pi has no runtime permission switching (always auto-approve).
@@ -109,8 +110,8 @@ struct CatalogTests {
 
     // MARK: - Labels, tones, raw values (modes.ts data tables)
 
-    @Test func permissionModeCatalogHasThirteenEntries() {
-        #expect(PermissionMode.allCases.count == 13)
+    @Test func permissionModeCatalogHasFifteenEntries() {
+        #expect(PermissionMode.allCases.count == 15)
     }
 
     @Test func labelsMatchModesTs() {
@@ -119,6 +120,8 @@ struct CatalogTests {
         #expect(PermissionMode.bypassPermissions.label == "Yolo")
         #expect(PermissionMode.autoReview.label == "Auto")
         #expect(PermissionMode.readOnly.label == "Read Only")
+        #expect(PermissionMode.workspaceWrite.label == "Workspace Write")
+        #expect(PermissionMode.dangerFullAccess.label == "Full Access")
         #expect(PermissionMode.plan.label == "Plan Mode")
         #expect(PermissionMode.alwaysProceed.label == "Always Proceed")
     }
@@ -127,6 +130,8 @@ struct CatalogTests {
         #expect(PermissionMode.default.tone == .neutral)
         #expect(PermissionMode.plan.tone == .info)
         #expect(PermissionMode.safeYolo.tone == .warning)
+        #expect(PermissionMode.workspaceWrite.tone == .warning)
+        #expect(PermissionMode.dangerFullAccess.tone == .danger)
         #expect(PermissionMode.yolo.tone == .danger)
         #expect(PermissionMode.bypassPermissions.tone == .danger)
         #expect(PermissionMode.alwaysProceed.tone == .danger)
@@ -135,11 +140,15 @@ struct CatalogTests {
 
     @Test func kebabCaseWireValuesRoundTrip() throws {
         #expect(PermissionMode.readOnly.rawValue == "read-only")
+        #expect(PermissionMode.workspaceWrite.rawValue == "workspace-write")
+        #expect(PermissionMode.dangerFullAccess.rawValue == "danger-full-access")
         #expect(PermissionMode.safeYolo.rawValue == "safe-yolo")
         #expect(PermissionMode.requestReview.rawValue == "request-review")
         #expect(PermissionMode.alwaysProceed.rawValue == "always-proceed")
         let decoded = try JSONDecoder().decode(PermissionMode.self, from: Data("\"read-only\"".utf8))
         #expect(decoded == .readOnly)
+        let dsh = try JSONDecoder().decode(PermissionMode.self, from: Data("\"danger-full-access\"".utf8))
+        #expect(dsh == .dangerFullAccess)
     }
 
     @Test func optionListsCarryLabelAndTone() {
