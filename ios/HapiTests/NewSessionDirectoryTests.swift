@@ -19,13 +19,16 @@ final class NewSessionDirectoryTests: XCTestCase {
         XCTAssertFalse(harness.model.canCreate)
     }
 
-    func testRestoredEmptyDirectoryIsNotReseeded() async throws {
+    func testRestoredDraftSeedsMachineDefaultDirectory() async throws {
         let harness = try NewSessionDirectoryHarness()
         defer { harness.model.stopDirectoryWork() }
         harness.prefs.writeDraft(NewSessionForm(machineId: "m1", directory: "", model: "opus"))
         await harness.model.start()
-        XCTAssertEqual(harness.model.form.directory, "")
+        // Drafts deliberately never carry a directory (web parity); the saved
+        // machine's default is seeded instead.
+        XCTAssertEqual(harness.model.form.directory, "/home/m1")
         XCTAssertEqual(harness.model.form.model, "opus")
+        XCTAssertEqual(harness.prefs.readDraft()?.directory, "")
     }
 
     func testExplicitPickOfFallbackSurvivesLateRecentDirectoryResponse() async throws {
@@ -40,7 +43,8 @@ final class NewSessionDirectoryTests: XCTestCase {
         await harness.http.releasePaths()
         try await newSessionEventually { await harness.http.completedPaths.contains("/recent") }
         XCTAssertEqual(harness.model.form.directory, "/home/m1")
-        XCTAssertEqual(harness.prefs.readDraft()?.directory, "/home/m1")
+        // The browser pick is live form state, not draft state.
+        XCTAssertEqual(harness.prefs.readDraft()?.directory, "")
     }
 
     func testOfflineSelectionRetainsItsPathAndExplicitSwitchUsesTheNewMachineDefault() async throws {
@@ -188,6 +192,12 @@ private actor NewSessionDirectoryHTTP: HTTPPerforming {
             data = try HapiJSON.encoder.encode(Roster(machines: machines))
         } else if url.path.hasSuffix("/agent-availability") {
             data = Data(#"{"agents":[{"agent":"claude","available":true}]}"#.utf8)
+        } else if url.path == "/api/claude/custom-models" {
+            // Hub-wide custom Claude endpoint catalog (empty in this harness).
+            data = Data(#"{"models":[]}"#.utf8)
+        } else if url.path.hasSuffix("/claude-models") {
+            // Machine Claude catalog; keep the static presets.
+            data = Data(#"{"success":true,"availableModels":[]}"#.utf8)
         } else if url.path.hasSuffix("/list-directory") {
             data = Data(#"{"success":true,"entries":[]}"#.utf8)
         } else if url.path.hasSuffix("/paths/exists") {

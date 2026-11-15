@@ -12,7 +12,7 @@ final class LongMessageLayoutTests: XCTestCase {
     @Observable @MainActor
     final class Driver {
         var showBubble = true
-        @ObservationIgnored var open: ((UserTextBlock) -> Void)?
+        @ObservationIgnored var open: ((String, String) -> Void)?
     }
 
     private struct ActionProbe: UIViewRepresentable {
@@ -88,7 +88,7 @@ final class LongMessageLayoutTests: XCTestCase {
         defer { window.isHidden = true }
         host.view.layoutIfNeeded()
         try await Task.sleep(for: .milliseconds(100))
-        try XCTUnwrap(driver.open)(source)
+        try XCTUnwrap(driver.open)(source.id, source.text)
         try await Task.sleep(for: .milliseconds(600))
         let sheet = try XCTUnwrap(host.presentedViewController)
         XCTAssertTrue(sheet.presentationController is UISheetPresentationController)

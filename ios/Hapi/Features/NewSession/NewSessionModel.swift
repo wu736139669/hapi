@@ -122,13 +122,19 @@ struct NewSessionPrefsStore {
         encode(data, key: prefsKey)
     }
 
-    /// Nil when no draft is stored (or it fails to decode).
+    /// Nil when no draft is stored (or it fails to decode). Drafts never
+    /// carry the directory: web parity (`newSessionFormDraft.ts` omits it),
+    /// so reopening New Session cannot resurrect the last browsed path.
     func readDraft() -> NewSessionForm? {
-        decode(draftKey)
+        guard var draft: NewSessionForm = decode(draftKey) else { return nil }
+        draft.directory = ""
+        return draft
     }
 
     func writeDraft(_ draft: NewSessionForm) {
-        encode(draft, key: draftKey)
+        var persisted = draft
+        persisted.directory = ""
+        encode(persisted, key: draftKey)
     }
 
     func clearDraft() {
@@ -277,7 +283,9 @@ final class NewSessionModel {
             } else {
                 loadedDraft = draft != nil
                 form = draft ?? NewSessionForm()
-                directoryEdited = draft != nil
+                // A restored draft has no directory (web parity); let the
+                // machine/recent-path default fill it below.
+                directoryEdited = false
             }
             if !loadedDraft, let raw = prefsData.lastAgent,
                AgentFlavor.creatableFlavors.contains(AgentFlavor(rawValue: raw)) {
@@ -899,11 +907,25 @@ final class NewSessionModel {
     }
 
     private func reconcileMachineSelection() {
-        guard form.machineId == nil else { return }
         let machines = session.machineStore.machines.filter(\.active)
         guard !machines.isEmpty else { return }
+        // A restored draft keeps its machine but deliberately has no
+        // directory; seed that machine's default/recent path unless the user
+        // has already edited the field in this presentation.
+        if let currentId = form.machineId {
+            guard let machine = machines.first(where: { $0.id == currentId }) else { return }
+            seedDirectoryIfNeeded(for: machine)
+            return
+        }
         let target = machines.first { $0.id == prefsData.lastMachineId } ?? machines[0]
         applyMachineSelection(target.id, resetDirectory: !directoryEdited && form.trimmedDirectory.isEmpty)
+    }
+
+    private func seedDirectoryIfNeeded(for machine: Machine) {
+        guard form.trimmedDirectory.isEmpty, !directoryEdited else { return }
+        form.directory = RemoteDirectoryPath.defaultDirectory(for: machine)
+        resolveDefaultDirectory(machineId: machine.id, fallback: form.directory)
+        scheduleDirectoryWork()
     }
 
     private func applyMachineSelection(_ machineId: String, resetDirectory: Bool) {
