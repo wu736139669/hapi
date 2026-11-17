@@ -8,6 +8,7 @@ import { opencodeRemoteLauncher } from './opencodeRemoteLauncher';
 import { ApiClient, ApiSessionClient } from '@/lib';
 import type { OpencodeMode, PermissionMode } from './types';
 import type { OpencodeHookServer } from './utils/startOpencodeHookServer';
+import type { OpencodeGoalState } from './utils/opencodeGoal';
 
 interface OpencodeLoopOptions {
     path: string;
@@ -28,6 +29,8 @@ interface OpencodeLoopOptions {
     onReasoningEffortRollback?: (effort: string | null) => void;
     onSteerCancelHandlerChange?: (handler: OpencodeSteerCancelHandler | null) => void;
     onCompactAvailabilityChange?: (available: boolean) => void;
+    /** Latest OpenCode goal state, used by the goal RPC handler. */
+    onOpencodeGoalStateChange?: (goal: OpencodeGoalState | null) => void;
     onClearRequested?: () => Promise<void>;
     onClearCleanupComplete?: () => Promise<void>;
     onClearCleanupFailed?: () => Promise<void>;
@@ -87,6 +90,7 @@ export async function opencodeLoop(opts: OpencodeLoopOptions): Promise<void> {
             onModelRollback: opts.onModelRollback,
             onReasoningEffortRollback: opts.onReasoningEffortRollback,
             onCompactAvailabilityChange: opts.onCompactAvailabilityChange,
+            onOpencodeGoalStateChange: opts.onOpencodeGoalStateChange,
             onSteerCancelHandlerChange: opts.onSteerCancelHandlerChange,
             isLocalIdCancelled: opts.isLocalIdCancelled,
             onClearRequested: opts.onClearRequested,

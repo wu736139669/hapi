@@ -1,6 +1,7 @@
 import { compareSessionSummaries } from '@hapi/protocol'
 import {
     CodexGoalRequestSchema,
+    OpencodeGoalRequestSchema,
     SessionReadStateRequestSchema,
     CursorMigrateToAcpRequestSchema,
     DeleteUploadRequestSchema,
@@ -814,6 +815,25 @@ export function createSessionsRoutes(
         if (!parsed.success) return c.json({ error: 'Invalid Goal action' }, 400)
         try {
             return c.json(await engine.codexGoal(access.sessionId, c.get('namespace'), parsed.data))
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Goal action failed' }, 502)
+        }
+    })
+
+    app.on(['GET', 'POST'], '/sessions/:id/opencode/goal', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+        const access = requireSessionFromParam(c, engine, { requireActive: true })
+        if (access instanceof Response) return access
+        if (c.get('role') === 'session-guest') return c.json({ error: 'Goal controls require session owner access' }, 403)
+        if (access.session.metadata?.flavor !== 'opencode' || !access.session.metadata.capabilities?.opencodeGoal) {
+            return c.json({ error: 'Goal controls require an updated OpenCode session', code: 'goal_unavailable' }, 409)
+        }
+        const parsed = OpencodeGoalRequestSchema.safeParse(c.req.method === 'GET'
+            ? { action: 'get' } : await c.req.json().catch(() => null))
+        if (!parsed.success) return c.json({ error: 'Invalid Goal action' }, 400)
+        try {
+            return c.json(await engine.opencodeGoal(access.sessionId, c.get('namespace'), parsed.data))
         } catch (error) {
             return c.json({ error: error instanceof Error ? error.message : 'Goal action failed' }, 502)
         }

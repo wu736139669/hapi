@@ -49,6 +49,21 @@ export async function fetchOpencodeGoal(opts: {
     return asOpencodeGoalState(output ?? null);
 }
 
+/** Project OpenCode's goal state into the shared ThreadGoal shape. */
+export function toThreadGoal(goal: OpencodeGoalState, threadId: string) {
+    return {
+        source: 'opencode' as const,
+        threadId,
+        objective: goal.objective,
+        status: goal.status,
+        rounds: goal.rounds,
+        maxRounds: goal.maxRounds,
+        createdAt: goal.updatedAt,
+        updatedAt: goal.updatedAt,
+        timeUsedSeconds: 0
+    }
+}
+
 /**
  * Pull `{ sessionID, goal }` out of an `rpc.opencode.goal.changed` event.
  * v2 event frames wrap the body twice (`{ type, data: { type, data, location } }`

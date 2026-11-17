@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildCliArgs } from '@/runner/run';
 import { parseRemoteAgentCommandOptions } from '@/commands/agentCommandOptions';
 import { OPENCODE_PERMISSION_MODES } from '@hapi/protocol/modes';
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import type { MessageQueue2 } from '@/utils/MessageQueue2';
 import type { OpencodeMode } from './types';
 
@@ -47,6 +48,7 @@ const harness = vi.hoisted(() => ({
         // run without throwing when a test invokes the real onModeChange
         // wrapper passed to opencodeLoop.
         updateAgentState: vi.fn(),
+        updateMetadata: vi.fn(),
         rpcHandlerManager: {
             registerHandler: vi.fn()
         }
@@ -165,6 +167,7 @@ describe('runOpencode set-session-config handler', () => {
         harness.session.sendSessionEvent.mockReset();
         harness.session.emitMessagesConsumed.mockReset();
         harness.session.updateAgentState.mockReset();
+        harness.session.updateMetadata.mockReset();
         harness.session.rpcHandlerManager.registerHandler.mockReset();
         harness.listSlashCommands.mockReset();
         harness.listSlashCommands.mockResolvedValue([]);
@@ -413,6 +416,35 @@ describe('runOpencode set-session-config handler', () => {
         ]);
         expect(harness.session.sendSessionEvent).not.toHaveBeenCalled();
         expect(harness.session.sendAgentMessage).not.toHaveBeenCalled();
+    });
+
+    it('serves the OpenCode goal over RPC and queues controls as native commands', async () => {
+        await runOpencode({});
+
+        const handler = harness.session.rpcHandlerManager.registerHandler.mock.calls
+            .find(call => call[0] === RPC_METHODS.OpencodeGoal)?.[1] as
+            | ((request: Record<string, unknown>) => Promise<{ goal: Record<string, unknown> | null }>)
+            | undefined;
+        expect(handler).toBeDefined();
+
+        await expect(handler!({ action: 'get' })).resolves.toEqual({ goal: null });
+
+        const loopArgs = harness.opencodeLoopArgs[0];
+        const onGoalStateChange = loopArgs.onOpencodeGoalStateChange as
+            | ((goal: Record<string, unknown> | null) => void) | undefined;
+        onGoalStateChange!({ id: 'g', objective: 'x', status: 'active', rounds: 2, maxRounds: 50, updatedAt: 1 });
+
+        await expect(handler!({ action: 'get' })).resolves.toMatchObject({
+            goal: { status: 'active', rounds: 2, source: 'opencode' }
+        });
+
+        await handler!({ action: 'pause' });
+        const messageQueue = loopArgs.messageQueue as
+            { queue: Array<{ message: string; mode: { operation?: string } }> };
+        expect(messageQueue.queue[0]).toMatchObject({
+            message: '/goal pause',
+            mode: { operation: 'goal' }
+        });
     });
 
     it('queues /goal verbatim as its own isolated operation', async () => {

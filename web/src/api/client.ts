@@ -53,6 +53,8 @@ import type { TeamOverviewResponse } from '@hapi/protocol/apiTypes'
 import type {
     CodexGoalRequest,
     CodexGoalResponse,
+    OpencodeGoalRequest,
+    OpencodeGoalResponse,
     AgentAvailabilityResponse,
     AgyModelsResponse,
     CodexModelsResponse,
@@ -1083,6 +1085,16 @@ export class ApiClient {
 
     async manageCodexGoal(sessionId: string, action: CodexGoalRequest): Promise<CodexGoalResponse> {
         return await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/codex/goal`, {
+            method: 'POST', body: JSON.stringify(action)
+        })
+    }
+
+    async getOpencodeGoal(sessionId: string): Promise<OpencodeGoalResponse> {
+        return await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/opencode/goal`)
+    }
+
+    async manageOpencodeGoal(sessionId: string, action: OpencodeGoalRequest): Promise<OpencodeGoalResponse> {
+        return await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/opencode/goal`, {
             method: 'POST', body: JSON.stringify(action)
         })
     }

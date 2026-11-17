@@ -19,6 +19,9 @@ import { listSlashCommands } from '@/modules/common/slashCommands';
 import { resolveOpencodeSlashCommand } from './utils/slashCommands';
 import { isRetryableConnectionError } from '@/utils/errorUtils';
 import { withRetry } from '@/utils/time';
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
+import { OpencodeGoalRequestSchema } from '@hapi/protocol/apiTypes';
+import { toThreadGoal, type OpencodeGoalState } from './utils/opencodeGoal';
 
 export async function runOpencode(opts: {
     startedBy?: 'runner' | 'terminal';
@@ -133,6 +136,31 @@ export async function runOpencode(opts: {
     let currentPermissionMode: PermissionMode = opts.permissionMode ?? 'default';
     let sessionModel: string | null = initialModel;
     let sessionModelReasoningEffort: string | null = initialModelReasoningEffort;
+    let opencodeGoalState: OpencodeGoalState | null = null;
+
+    // Same control surface Codex exposes over `codex-goal`: the web queries
+    // the live goal instead of inferring it from chat messages, and controls
+    // are queued as the native `/goal` commands OpenCode owns.
+    session.rpcHandlerManager.registerHandler(RPC_METHODS.OpencodeGoal, async raw => {
+        const request = OpencodeGoalRequestSchema.parse(raw);
+        if (request.action !== 'get') {
+            const text = request.action === 'update' ? `/goal ${request.objective}` : `/goal ${request.action}`;
+            messageQueue.pushIsolated(text, {
+                permissionMode: currentPermissionMode,
+                model: sessionModel,
+                modelReasoningEffort: sessionModelReasoningEffort,
+                operation: 'goal'
+            });
+        }
+        return {
+            goal: opencodeGoalState ? toThreadGoal(opencodeGoalState, session.sessionId) : null
+        };
+    });
+    session.updateMetadata(metadata => ({
+        ...metadata,
+        capabilities: { ...metadata.capabilities, opencodeGoal: true }
+    }));
+
     const hookServer = await startOpencodeHookServer({
         onEvent: (event) => {
             const currentSession = sessionWrapperRef.current;
@@ -537,6 +565,7 @@ export async function runOpencode(opts: {
             resumeSessionId: opts.resumeSessionId,
             hookServer,
             hookUrl,
+            onOpencodeGoalStateChange: (goal) => { opencodeGoalState = goal; },
             onModeChange: (mode) => {
                 if (mode === 'remote') {
                     // A fresh remote entry is beginning (first-ever, or a

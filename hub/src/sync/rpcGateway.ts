@@ -3,6 +3,7 @@ import { PERMISSION_REQUEST_NOT_FOUND_MESSAGE, RPC_METHODS } from '@hapi/protoco
 import { sessionStartupTimeoutMs } from '@hapi/protocol'
 import {
     CodexGoalResponseSchema,
+    OpencodeGoalResponseSchema,
     ArchiveCodexSessionRpcResponseSchema,
     AgentAvailabilityResponseSchema,
     CursorChatStoreStatusSchema,
@@ -15,6 +16,8 @@ import {
 import type {
     CodexGoalRequest,
     CodexGoalResponse,
+    OpencodeGoalRequest,
+    OpencodeGoalResponse,
     AgyModelsResponse,
     ClaudeModelsResponse,
     AgentAvailabilityResponse,
@@ -730,6 +733,10 @@ export class RpcGateway {
 
     async codexGoal(sessionId: string, request: CodexGoalRequest): Promise<CodexGoalResponse> {
         return CodexGoalResponseSchema.parse(await this.sessionRpc(sessionId, RPC_METHODS.CodexGoal, request))
+    }
+
+    async opencodeGoal(sessionId: string, request: OpencodeGoalRequest): Promise<OpencodeGoalResponse> {
+        return OpencodeGoalResponseSchema.parse(await this.sessionRpc(sessionId, RPC_METHODS.OpencodeGoal, request))
     }
 
     async rewindConversation(

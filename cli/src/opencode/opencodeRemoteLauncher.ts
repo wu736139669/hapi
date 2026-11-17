@@ -40,7 +40,7 @@ import {
 } from './utils/opencodeCompactBridge';
 import { OpencodeNativeTranscript } from './utils/opencodeNativeTranscript';
 import { opencodeCompactionEventId } from './utils/opencodeCompactionProjector';
-import { asOpencodeGoalState, fetchOpencodeGoal, type OpencodeGoalState } from './utils/opencodeGoal';
+import { asOpencodeGoalState, fetchOpencodeGoal, toThreadGoal, type OpencodeGoalState } from './utils/opencodeGoal';
 import { formatOpencodePromptError } from './utils/opencodeErrorText';
 import {
     formatOpencodeRetryStatus,
@@ -65,6 +65,7 @@ type OpencodeRemoteLauncherOptions = {
     // a `/compact` message should be queued or immediately answered with a
     // "not yet supported" reply — see its `slash.kind === 'compact'` branch.
     onCompactAvailabilityChange?: (available: boolean) => void;
+    onOpencodeGoalStateChange?: (goal: OpencodeGoalState | null) => void;
     // Consumes (delete-and-return) whether the queued item with this localId
     // was cancelled via runOpencode.ts's `onCancelQueuedMessage` fallback
     // branch (see the comment on `cancelledDequeuedLocalIds` there for what
@@ -1345,6 +1346,7 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
         if (key === this.goalProjectionKey) return;
         this.goalProjectionKey = key;
         this.goalState = goal;
+        this.options.onOpencodeGoalStateChange?.(goal);
         // A goal loop runs outside ACP turns, so nothing else marks the
         // session as working. Without this the session list shows it idle
         // while the agent is actively working through rounds.
@@ -1353,20 +1355,11 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
             session.client.sendAgentMessage({ type: 'thread_goal_cleared', thread_id: acpSessionId });
             return;
         }
-        const webGoal = {
-            source: 'opencode' as const,
-            threadId: acpSessionId,
-            objective: goal.objective,
-            status: goal.status,
-            // OpenCode counts continuation rounds, not tokens. Keep them in
-            // their own fields so the UI never labels them as tokens.
-            rounds: goal.rounds,
-            maxRounds: goal.maxRounds,
-            createdAt: goal.updatedAt,
-            updatedAt: goal.updatedAt,
-            timeUsedSeconds: 0
-        };
-        session.client.sendAgentMessage({ type: 'thread_goal_updated', thread_id: acpSessionId, goal: webGoal });
+        session.client.sendAgentMessage({
+            type: 'thread_goal_updated',
+            thread_id: acpSessionId,
+            goal: toThreadGoal(goal, acpSessionId)
+        });
     }
 
     private handleV2SteerEvent(type: string, properties: Record<string, unknown>): void {

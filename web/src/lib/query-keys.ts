@@ -13,6 +13,7 @@ export const queryKeys = {
     machineAgentAvailability: (machineId: string) => ['machine-agent-availability', machineId] as const,
     sessionCodexModels: (sessionId: string) => ['session-codex-models', sessionId] as const,
     codexGoal: (sessionId: string) => ['codex-goal', sessionId] as const,
+    opencodeGoal: (sessionId: string) => ['opencode-goal', sessionId] as const,
     machineDshModels: (machineId: string) => ['machine-dsh-models', machineId] as const,
     sessionDshModels: (sessionId: string) => ['session-dsh-models', sessionId] as const,
     gitStatus: (sessionId: string) => ['git-status', sessionId] as const,

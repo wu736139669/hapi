@@ -98,6 +98,7 @@ import { TeamPanel } from '@/components/TeamPanel'
 import { SessionStatusPanel } from '@/components/SessionStatusPanel'
 import { buildSessionStatusData } from '@/chat/sessionStatus'
 import { useCodexGoal } from '@/hooks/useCodexGoal'
+import { useOpencodeGoal } from '@/hooks/useOpencodeGoal'
 import { usePlatform } from '@/hooks/usePlatform'
 import { getToolCardDisplayPresentation, useToolCardDisplayMode } from '@/hooks/useToolCardDisplayMode'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
@@ -1539,10 +1540,8 @@ function SessionChatInner(props: SessionChatProps) {
     // OpenCode's goal lives in a core plugin; its controls are the same `/goal`
     // slash commands the user can type. Drive them through the composer so the
     // H5 status panel gets Codex-style pause/resume/clear buttons too.
-    // Tie the controls directly to the card the user can see. Requiring the
-    // session's active/guest/controlled flags here previously hid the buttons
-    // even when the goal card was right in front of the user.
-    const canManageOpencodeGoal = reduced.latestGoal?.source === 'opencode'
+    const canManageOpencodeGoal = !isSessionGuest && agentFlavor === 'opencode' && props.session.active
+        && Boolean(props.session.metadata?.capabilities?.opencodeGoal) && !controlledByUser
     const goalEventId = useMemo(() => {
         for (let i = normalizedGoalStateMessages.length - 1; i >= 0; i--) {
             const message = normalizedGoalStateMessages[i]
@@ -1553,9 +1552,12 @@ function SessionChatInner(props: SessionChatProps) {
         return null
     }, [normalizedGoalStateMessages])
     const codexGoal = useCodexGoal(props.api, props.session.id, canManageGoal, goalEventId)
+    const opencodeGoal = useOpencodeGoal(props.api, props.session.id, canManageOpencodeGoal, goalEventId)
     const sessionStatus = useMemo(
         () => buildSessionStatusData({
-            goal: codexGoal.goal === undefined ? reduced.latestGoal : codexGoal.goal,
+            goal: opencodeGoal.goal !== undefined
+                ? opencodeGoal.goal
+                : codexGoal.goal === undefined ? reduced.latestGoal : codexGoal.goal,
             tasks: props.session.todos,
             blocks: reconciled.blocks,
             backgroundTasks: props.session.backgroundTasks
@@ -1563,6 +1565,7 @@ function SessionChatInner(props: SessionChatProps) {
         [
             reduced.latestGoal,
             codexGoal.goal,
+            opencodeGoal.goal,
             props.session.todos,
             props.session.backgroundTasks,
             reconciled.blocks
@@ -2058,14 +2061,7 @@ function SessionChatInner(props: SessionChatProps) {
             {sessionStatus ? (
                 <SessionStatusPanel
                     data={sessionStatus}
-                    onGoalAction={canManageOpencodeGoal
-                        ? async (action) => {
-                            const text = action.action === 'update'
-                                ? `/goal ${action.objective}`
-                                : `/goal ${action.action}`;
-                            await props.onSend(text);
-                        }
-                        : canManageGoal ? codexGoal.act : undefined}
+                    onGoalAction={canManageOpencodeGoal ? opencodeGoal.act : canManageGoal ? codexGoal.act : undefined}
                 />
             ) : null}
 
