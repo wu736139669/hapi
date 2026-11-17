@@ -105,8 +105,11 @@ export default defineConfig({
         spaFallback(),
         copyKaTeXFonts(),
         VitePWA({
-            // User-controlled reload avoids mid-session surprise reloads (autoUpdate reloads all tabs).
-            registerType: 'prompt',
+            // Auto-activate the new service worker so a deploy cannot leave
+            // stale JS pinned in an open tab. HAPI deploys frequently and goal
+            // controls/status changes would otherwise stay invisible until the
+            // user found and accepted the update banner manually.
+            registerType: 'autoUpdate',
             includeAssets: ['favicon.ico', 'apple-touch-icon-180x180.png', 'mask-icon.svg'],
             strategies: 'injectManifest',
             srcDir: 'src',

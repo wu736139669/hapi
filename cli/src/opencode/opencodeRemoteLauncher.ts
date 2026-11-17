@@ -928,7 +928,7 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                     // Plain Stop before summarize already emitted this
                     // keepalive in handleAbort(); localId cancellation did not.
                     if (!this.compactResultSuppressed) {
-                        session.onThinkingChange(false);
+                        session.onThinkingChange(this.goalState?.status === 'active');
                     }
                     if (session.queue.size() === 0 && !this.shouldExit) {
                         sendReady();
@@ -940,7 +940,7 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                 try {
                     await this.runCompactOperation(acpSessionId, compactAbortController, compactLocalId);
                 } finally {
-                    session.onThinkingChange(false);
+                    session.onThinkingChange(this.goalState?.status === 'active');
                     if (session.queue.size() === 0 && !this.shouldExit) {
                         sendReady();
                     }
@@ -1028,7 +1028,10 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                 // steer that settled (or is still restoring) cannot cross the
                 // turn boundary into the next prompt or a /compact.
                 await this.drainSteerOperations();
-                session.onThinkingChange(false);
+                // A goal loop runs in the background after the ACP turn
+                // settles. Keep the session marked as working while it is
+                // active, otherwise the list shows it idle mid-task.
+                session.onThinkingChange(this.goalState?.status === 'active');
                 await this.permissionHandler?.cancelAll('Prompt finished');
                 if (session.queue.size() === 0 && !this.shouldExit) {
                     sendReady();
