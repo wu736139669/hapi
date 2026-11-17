@@ -109,15 +109,25 @@ function normalizeThreadGoal(value: unknown) {
         && status !== 'blocked'
         && status !== 'complete'
     ) return null
+    const explicitSource = value.source === 'opencode' || value.source === 'codex' ? value.source : undefined
+    // Older OpenCode goal events were projected before `source`/`rounds`
+    // existed and put the round count in the token fields. OpenCode session
+    // ids start with `ses_`, so recover that here instead of asking the user
+    // to reopen the session just to see "第 N / 50 轮" rather than "1 / 50".
+    const source = explicitSource ?? (threadId.startsWith('ses_') ? 'opencode' : undefined)
+    const rawBudget = asNumber(value.tokenBudget ?? value.token_budget)
+    const rawUsed = asNumber(value.tokensUsed ?? value.tokens_used) ?? 0
+    const rounds = asNumber(value.rounds) ?? (source === 'opencode' ? rawUsed : undefined)
+    const maxRounds = asNumber(value.maxRounds) ?? (source === 'opencode' ? rawBudget : undefined)
     return {
-        source: value.source === 'opencode' || value.source === 'codex' ? value.source : undefined,
+        source,
         threadId,
         objective,
         status,
-        tokenBudget: asNumber(value.tokenBudget ?? value.token_budget),
-        tokensUsed: asNumber(value.tokensUsed ?? value.tokens_used) ?? 0,
-        rounds: asNumber(value.rounds),
-        maxRounds: asNumber(value.maxRounds),
+        tokenBudget: source === 'opencode' ? undefined : rawBudget,
+        tokensUsed: source === 'opencode' ? 0 : rawUsed,
+        rounds,
+        maxRounds,
         timeUsedSeconds: asNumber(value.timeUsedSeconds ?? value.time_used_seconds) ?? 0,
         createdAt: asNumber(value.createdAt ?? value.created_at) ?? 0,
         updatedAt: asNumber(value.updatedAt ?? value.updated_at) ?? 0
