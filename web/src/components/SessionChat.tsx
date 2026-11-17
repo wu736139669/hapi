@@ -1536,6 +1536,13 @@ function SessionChatInner(props: SessionChatProps) {
     )
     const canManageGoal = !isSessionGuest && agentFlavor === 'codex' && props.session.active
         && Boolean(props.session.metadata?.capabilities?.codexGoal) && !controlledByUser
+    // OpenCode's goal lives in a core plugin; its controls are the same `/goal`
+    // slash commands the user can type. Drive them through the composer so the
+    // H5 status panel gets Codex-style pause/resume/clear buttons too.
+    // Tie the controls directly to the card the user can see. Requiring the
+    // session's active/guest/controlled flags here previously hid the buttons
+    // even when the goal card was right in front of the user.
+    const canManageOpencodeGoal = reduced.latestGoal?.source === 'opencode'
     const goalEventId = useMemo(() => {
         for (let i = normalizedGoalStateMessages.length - 1; i >= 0; i--) {
             const message = normalizedGoalStateMessages[i]
@@ -2048,7 +2055,19 @@ function SessionChatInner(props: SessionChatProps) {
 
             <CursorMigrationBanner metadata={props.session.metadata} />
 
-            {sessionStatus ? <SessionStatusPanel data={sessionStatus} onGoalAction={canManageGoal ? codexGoal.act : undefined} /> : null}
+            {sessionStatus ? (
+                <SessionStatusPanel
+                    data={sessionStatus}
+                    onGoalAction={canManageOpencodeGoal
+                        ? async (action) => {
+                            const text = action.action === 'update'
+                                ? `/goal ${action.objective}`
+                                : `/goal ${action.action}`;
+                            await props.onSend(text);
+                        }
+                        : canManageGoal ? codexGoal.act : undefined}
+                />
+            ) : null}
 
             <div className="flex flex-col min-h-0 flex-1">
             {props.session.teamState && (

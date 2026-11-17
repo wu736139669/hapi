@@ -1448,6 +1448,7 @@ export default {
   'session.goal.saving': 'Saving…',
   'session.goal.invalid': 'Enter an objective of 1–4000 characters and a positive whole token budget, or leave the budget blank to use the Codex default.',
   'session.goal.tokens': '{used} / {budget} tokens',
+  'session.goal.rounds': 'Round {used} / {budget}',
   'session.status.tasks': 'Tasks',
   'session.status.subagents': 'Subagents',
   'session.status.terminals': 'Background tasks',

@@ -47,6 +47,7 @@ export const BUILTIN_SLASH_COMMANDS = {
     ],
     opencode: [
         { name: 'compact', description: 'Compact (summarize) the session context', source: 'builtin' },
+        { name: 'goal', description: 'Keep working until an objective is met [pause|resume|clear]', source: 'builtin' },
         { name: 'help', description: 'Show supported HAPI OpenCode slash commands', source: 'builtin' },
         { name: 'status', description: 'Show current OpenCode session config', source: 'builtin' },
         { name: 'plan', description: 'Enable plan mode; use /plan off to return to default', source: 'builtin' },

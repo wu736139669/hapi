@@ -371,6 +371,18 @@ export async function runOpencode(opts: {
                     return;
                 }
 
+                if (slash.kind === 'goal') {
+                    // OpenCode owns this command (core plugin, v2.2.1+): it
+                    // parses the objective and the pause/resume/clear controls
+                    // itself. Queue the raw slash text as an isolated item so
+                    // the remote launcher forwards it verbatim over ACP, and
+                    // local mode's PTY hands it straight to the TUI. Like
+                    // /compact, it is acked automatically at dequeue time and
+                    // keeps its real FIFO position via pushIsolated.
+                    messageQueue.pushIsolated(slash.text, { ...buildMode(), operation: 'goal' }, localId);
+                    return;
+                }
+
                 if (slash.kind !== 'passthrough') {
                     if (slash.updates) {
                         if (slash.updates.permissionMode !== undefined) {

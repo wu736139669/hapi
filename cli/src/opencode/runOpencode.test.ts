@@ -415,6 +415,35 @@ describe('runOpencode set-session-config handler', () => {
         expect(harness.session.sendAgentMessage).not.toHaveBeenCalled();
     });
 
+    it('queues /goal verbatim as its own isolated operation', async () => {
+        await runOpencode({});
+
+        const messageQueue = harness.opencodeLoopArgs[0]?.messageQueue as
+            { queue: Array<{ message: string; mode: { operation?: string }; localId?: string; isolate?: boolean }> };
+
+        const userMessageHandler = harness.session.onUserMessage.mock.calls[0]?.[0] as
+            ((msg: { content: { text: string; attachments?: unknown[] } }, localId?: string) => void)
+            | undefined;
+        expect(userMessageHandler).toBeDefined();
+
+        userMessageHandler!({ content: { text: '/goal ship the login fix' } }, 'local-goal');
+        for (let i = 0; i < 5; i++) {
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+
+        expect(messageQueue.queue).toEqual([
+            {
+                message: '/goal ship the login fix',
+                mode: expect.objectContaining({ operation: 'goal' }),
+                modeHash: expect.any(String),
+                localId: 'local-goal',
+                isolate: true
+            }
+        ]);
+        // OpenCode owns the command; HAPI must not answer it synchronously.
+        expect(harness.session.sendAgentMessage).not.toHaveBeenCalled();
+    });
+
     it('queues runner-backed /clear as its own FIFO operation without acknowledging it early', async () => {
         await runOpencode({ startedBy: 'runner' });
 

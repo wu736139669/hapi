@@ -1,4 +1,4 @@
-import { isObject } from '@hapi/protocol';
+import { asString, isObject } from '@hapi/protocol';
 import type { FetchLike } from './opencodeCompactBridge';
 import { logger } from '@/ui/logger';
 import { OpencodeCompactionProjector, type OpencodeNativeText, type OpencodeCompactionTrigger } from './opencodeCompactionProjector';
@@ -20,6 +20,8 @@ export class OpencodeNativeTranscript {
     private readonly unbasedDeltas = new Map<string, string>();
     private readonly pendingText = new Map<string, OpencodeNativeText>();
     private readonly textTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    /** v2.2+ replaced `message.part.updated` with `session.text.*` events. */
+    private readonly v2Text = new Map<string, { text: string }>();
 
     constructor(private readonly options: {
         baseUrl: string;
@@ -82,6 +84,37 @@ export class OpencodeNativeTranscript {
                 this.projector.part(next);
             } else if (properties.sessionID === this.options.sessionId) {
                 this.unbasedDeltas.set(properties.partID, (this.unbasedDeltas.get(properties.partID) ?? '') + properties.delta);
+            }
+        }
+        // OpenCode 2.2.x no longer emits `message.updated`/`message.part.updated`
+        // for assistant turns. Text arrives as `session.text.started` +
+        // `session.text.delta`, and a step closes with `session.step.ended`.
+        // ACP owns the text of a foreground prompt; these events are what
+        // remains visible for the /goal loop's background turns.
+        if (this.options.mode === 'v2' && isObject(properties)
+            && properties.sessionID === this.options.sessionId) {
+            const messageID = asString(properties.assistantMessageID);
+            const ordinal = asString(properties.ordinal) ?? '0';
+            const key = messageID ? `${messageID}:${ordinal}` : null;
+            if (key && type === 'session.text.started') {
+                this.v2Text.set(key, { text: '' });
+            } else if (key && type === 'session.text.delta' && typeof properties.delta === 'string') {
+                const entry = this.v2Text.get(key) ?? { text: '' };
+                entry.text += properties.delta;
+                this.v2Text.set(key, entry);
+                this.emitText({
+                    id: `v2:${key}`, messageId: messageID!, role: 'assistant',
+                    type: 'text', text: entry.text, complete: false
+                });
+            } else if (messageID && type === 'session.step.ended') {
+                for (const [openKey, entry] of this.v2Text) {
+                    if (!openKey.startsWith(`${messageID}:`)) continue;
+                    this.emitText({
+                        id: `v2:${openKey}`, messageId: messageID, role: 'assistant',
+                        type: 'text', text: entry.text, complete: true
+                    });
+                    this.v2Text.delete(openKey);
+                }
             }
         }
         if (type === 'session.status' && isObject(properties.status) && properties.status.type === 'idle') void this.refresh();

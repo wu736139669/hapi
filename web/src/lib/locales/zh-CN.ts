@@ -1447,6 +1447,7 @@ export default {
   'session.goal.saving': '保存中…',
   'session.goal.invalid': '目标内容需为 1–4000 个字符；Token 预算需为正整数，留空使用 Codex 默认设置。',
   'session.goal.tokens': 'Token：{used} / {budget}',
+  'session.goal.rounds': '第 {used} / {budget} 轮',
   'session.status.tasks': '任务',
   'session.status.subagents': '子代理',
   'session.status.terminals': '后台任务',

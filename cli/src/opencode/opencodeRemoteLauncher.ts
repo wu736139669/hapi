@@ -40,6 +40,7 @@ import {
 } from './utils/opencodeCompactBridge';
 import { OpencodeNativeTranscript } from './utils/opencodeNativeTranscript';
 import { opencodeCompactionEventId } from './utils/opencodeCompactionProjector';
+import { asOpencodeGoalState, fetchOpencodeGoal, type OpencodeGoalState } from './utils/opencodeGoal';
 import { formatOpencodePromptError } from './utils/opencodeErrorText';
 import {
     formatOpencodeRetryStatus,
@@ -202,6 +203,10 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
     /** Subscription to the agent's own server event stream; null until the ACP session id is known, closed in cleanup(). */
     private eventStream: OpencodeEventSubscription | null = null;
     private nativeTranscript: OpencodeNativeTranscript | null = null;
+    /** Latest goal read from OpenCode's plugin RPC, projected to the hub for the status panel. */
+    private goalState: OpencodeGoalState | null = null;
+    private goalProjectionKey: string | null = null;
+    private goalPollTimer: ReturnType<typeof setInterval> | null = null;
     private stallErrorReportedForPrompt = false;
     /** True while a normal (non-compact/clear) prompt turn is in flight — the only steerable state. */
     private promptInFlight = false;
@@ -440,7 +445,13 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
             },
             onReadFailure: () => session.sendSessionEvent({ type: 'message', message: 'OpenCode native transcript is temporarily unavailable. Retrying on reconnect or at the end of the turn.' }),
             onText: (part) => {
-                if (this.majorVersion !== 'v1' || part.role !== 'assistant') return;
+                if (part.role !== 'assistant') return;
+                // v1 has no ACP text path. In v2 ACP owns the text of an active
+                // prompt turn; only background turns (the /goal loop runs via
+                // the core plugin's `experimental.idle` hook, outside ACP)
+                // need the native event bridge. Without this the goal loop is
+                // healthy but completely invisible in HAPI.
+                if (this.majorVersion === 'v2' && this.promptInFlight) return;
                 const converted = convertAgentMessage(part.type === 'reasoning'
                     ? { type: 'reasoning', id: part.id, text: part.text, live: !part.complete }
                     : { type: 'text', id: part.id, text: part.text, streamSnapshot: true, live: !part.complete });
@@ -465,12 +476,38 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
             } : undefined,
             mode: this.majorVersion ?? 'v1',
             onRetry: (retry) => this.surfaceUpstreamRetry(retry),
-            onConnected: () => { void this.nativeTranscript?.refresh(); },
+            onConnected: () => {
+                void this.nativeTranscript?.refresh();
+                if (this.majorVersion === 'v2' && this.v2RestInfo) {
+                    void fetchOpencodeGoal({
+                        baseUrl: restBaseUrl,
+                        directory: session.path,
+                        sessionID: acpSessionId,
+                        headers: nativeHeaders ?? {}
+                    }).then(goal => this.projectGoal(session, acpSessionId, goal, true)).catch(() => {});
+                }
+            },
             onEvent: (type, properties, eventId) => {
                 this.nativeTranscript?.event(type, properties, eventId);
                 this.handleV2SteerEvent(type, properties);
-            }
+            },
+            onGoalChange: (value) => this.projectGoal(session, acpSessionId, asOpencodeGoalState(value))
         });
+        if (this.majorVersion === 'v2' && this.v2RestInfo) {
+            const readGoal = () => {
+                void fetchOpencodeGoal({
+                    baseUrl: restBaseUrl,
+                    directory: session.path,
+                    sessionID: acpSessionId,
+                    headers: nativeHeaders ?? {}
+                }).then(goal => this.projectGoal(session, acpSessionId, goal)).catch(() => {});
+            };
+            // A goal can be paused by *another* OpenCode server boot, whose
+            // `changed` event never reaches this session's event stream. Poll
+            // so the status panel cannot stay stuck on "active".
+            this.goalPollTimer = setInterval(() => { if (!this.shouldExit) readGoal(); }, 5_000);
+            this.goalPollTimer.unref?.();
+        }
         }
 
         // Seed currentBackendModel from the ACP session metadata so the first
@@ -911,12 +948,19 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                 continue;
             }
 
+            // /goal is OpenCode's own slash command: its core plugin parses
+            // the objective and the pause/resume/clear controls. Keep the text
+            // byte-for-byte as the user typed it — the instruction prefix and
+            // the native REST prompt path below would both hide the leading
+            // "/" from OpenCode's ACP command detector.
+            const isGoalBatch = batch.mode.operation === 'goal';
+
             // Inject title instructions on first prompt
             let messageText = batch.message;
-            if (batch.mode.permissionMode === 'plan') {
+            if (!isGoalBatch && batch.mode.permissionMode === 'plan') {
                 messageText = `${PLAN_MODE_INSTRUCTION}\n\n${messageText}`;
             }
-            if (!this.instructionsSent) {
+            if (!isGoalBatch && !this.instructionsSent) {
                 messageText = `${getOpencodeNativeToolInstruction()}\n\n${messageText}`;
                 this.instructionsSent = true;
             }
@@ -946,7 +990,7 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                     ? this.currentBackendEffort
                     : null;
                 const nativeModel = splitProviderModel(this.currentBackendModel);
-                if (nativeVariant && nativeModel && backend.promptWithVariant && this.baseUrl) {
+                if (!isGoalBatch && nativeVariant && nativeModel && backend.promptWithVariant && this.baseUrl) {
                     await backend.promptWithVariant(acpSessionId, promptContent, (message: AgentMessage) => {
                         this.handleAgentMessage(message);
                     }, {
@@ -1282,6 +1326,44 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                 return { steered: true };
             }
         );
+    }
+
+    /**
+     * Project OpenCode's goal into the shapes the web already understands for
+     * Codex: a `thread_goal_updated` event feeds the top status panel. The
+     * goal loop itself runs outside ACP, so this is the only signal HAPI can
+     * see; the loop's text is projected by the native transcript instead.
+     */
+    private projectGoal(session: OpencodeSession, acpSessionId: string, goal: OpencodeGoalState | null, forceClear = false): void {
+        // On attach we must clear a goal left in the hub by a previous CLI
+        // process even though this process has never seen one.
+        if (!goal && !this.goalState && !forceClear) return;
+        const key = goal ? `${goal.id}:${goal.status}:${goal.rounds}:${goal.objective}` : null;
+        if (key === this.goalProjectionKey) return;
+        this.goalProjectionKey = key;
+        this.goalState = goal;
+        // A goal loop runs outside ACP turns, so nothing else marks the
+        // session as working. Without this the session list shows it idle
+        // while the agent is actively working through rounds.
+        if (!this.promptInFlight) session.onThinkingChange(goal?.status === 'active');
+        if (!goal) {
+            session.client.sendAgentMessage({ type: 'thread_goal_cleared', thread_id: acpSessionId });
+            return;
+        }
+        const webGoal = {
+            source: 'opencode' as const,
+            threadId: acpSessionId,
+            objective: goal.objective,
+            status: goal.status,
+            // OpenCode counts continuation rounds, not tokens. Keep them in
+            // their own fields so the UI never labels them as tokens.
+            rounds: goal.rounds,
+            maxRounds: goal.maxRounds,
+            createdAt: goal.updatedAt,
+            updatedAt: goal.updatedAt,
+            timeUsedSeconds: 0
+        };
+        session.client.sendAgentMessage({ type: 'thread_goal_updated', thread_id: acpSessionId, goal: webGoal });
     }
 
     private handleV2SteerEvent(type: string, properties: Record<string, unknown>): void {
@@ -1632,6 +1714,10 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
         }));
         // Before anything that can fail: a stream left open would keep
         // reconnecting to a subprocess that is on its way out.
+        if (this.goalPollTimer) {
+            clearInterval(this.goalPollTimer);
+            this.goalPollTimer = null;
+        }
         this.nativeTranscript?.close();
         this.nativeTranscript = null;
         this.eventStream?.close();

@@ -127,6 +127,20 @@ describe('resolveOpencodeSlashCommand', () => {
         expect(resolveOpencodeSlashCommand('/compact', state)).toEqual({ kind: 'compact' });
     });
 
+    it('forwards /goal verbatim so OpenCode parses the objective itself', () => {
+        expect(resolveOpencodeSlashCommand('/goal ship the login fix', state)).toEqual({
+            kind: 'goal',
+            text: '/goal ship the login fix'
+        });
+    });
+
+    it.each(['pause', 'resume', 'clear'])('forwards /goal %s verbatim', (control) => {
+        expect(resolveOpencodeSlashCommand(`/goal ${control}`, state)).toEqual({
+            kind: 'goal',
+            text: `/goal ${control}`
+        });
+    });
+
     it('resolves /compact the same way regardless of trailing arguments (compaction takes no arguments)', () => {
         expect(resolveOpencodeSlashCommand('/compact now please', state)).toEqual({ kind: 'compact' });
     });
@@ -165,6 +179,7 @@ describe('resolveOpencodeSlashCommand', () => {
             expect(help.message).toContain('/plan');
             expect(help.message).toContain('/permissions');
             expect(help.message).toContain('/compact` — compact (summarize) the OpenCode session context (remote sessions only)');
+            expect(help.message).toContain('/goal <objective>` — keep working until a reviewer confirms the objective is met (OpenCode v2.2.1+)');
             expect(help.message).toContain('/clear` — archive this HAPI session and open a fresh OpenCode session');
         }
     });

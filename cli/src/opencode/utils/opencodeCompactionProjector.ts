@@ -100,7 +100,7 @@ export class OpencodeCompactionProjector {
 
     private projectText(parts: Iterable<RecordValue> = this.parts.values()): void {
         for (const part of parts) {
-            if ((part.type !== 'text' && part.type !== 'reasoning') || typeof part.text !== 'string') continue;
+            if ((part.type !== 'text' && part.type !== 'reasoning') || typeof part.text !== 'string' || !part.text.trim()) continue;
             const info = typeof part.messageID === 'string' ? this.messages.get(part.messageID) : undefined;
             if (!info || info.summary === true || info.type === 'compaction' || part.ignored === true) continue;
             if (part.synthetic === true && isObject(part.metadata) && part.metadata.compaction_continue === true) continue;

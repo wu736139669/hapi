@@ -80,7 +80,10 @@ function getLatestThreadGoal(normalized: NormalizedMessage[]): ThreadGoal | null
         if (event.type === 'thread-goal-cleared') return null
         if (event.type === 'thread-goal-updated') {
             const goal = (event as { goal?: ThreadGoal }).goal ?? null
-            if (goal?.status === 'complete' && sawNewerNonGoalUserMessage) {
+            // Codex clears the completed card once new work starts. OpenCode's
+            // goal stays visible until explicitly cleared so the user can
+            // still see what the long-running task accomplished.
+            if (goal?.status === 'complete' && sawNewerNonGoalUserMessage && goal.source !== 'opencode') {
                 return null
             }
             return goal

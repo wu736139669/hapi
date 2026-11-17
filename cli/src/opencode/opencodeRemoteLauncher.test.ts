@@ -56,6 +56,7 @@ const harness = vi.hoisted(() => ({
         sessionId: string;
         onRetry: (retry: { attempt: number; message: string }) => void;
         onEvent?: (type: string, properties: Record<string, unknown>, eventId?: string) => void;
+        onGoalChange?: (goal: unknown) => void;
     }>,
     eventStreamCloseCount: 0,
     // Soft-steer (mid-turn inject) controls.
@@ -1835,6 +1836,16 @@ describe('opencodeRemoteLauncher inline model switch', () => {
         expect(JSON.stringify(harness.promptContents[0])).toContain('hapi_display_image');
         expect(JSON.stringify(harness.promptContents[0])).not.toContain('hapi_change_title');
         expect(JSON.stringify(harness.promptContents[1])).not.toContain('skill_lookup');
+    });
+
+    it('forwards a /goal batch verbatim over ACP without the first-prompt instruction prefix', async () => {
+        const { session } = createSessionStub([
+            { message: '/goal ship the login fix', mode: { ...createMode(), operation: 'goal' } }
+        ]);
+
+        await opencodeRemoteLauncher(session as never);
+
+        expect(harness.promptContents).toEqual([[{ type: 'text', text: '/goal ship the login fix' }]]);
     });
 
     it('spawns the ACP backend with an explicit --port/--hostname from allocateFreePort', async () => {
@@ -4723,6 +4734,28 @@ describe('opencodeRemoteLauncher v2 flavor wiring', () => {
         for (const name of ['createOpencodeBackend', 'detectOpencodeFlavorVersion', 'discoverOpencodeV2RestPort', 'listLoopbackListeners']) {
             backendModuleFns[name]?.mockClear();
         }
+    });
+
+    it('v2: projects an OpenCode goal change to the status panel', async () => {
+        harness.detectedVersion = 'v2';
+        harness.discoveredPort = 41234;
+        harness.discoveredPassword = 'pw-secret';
+        harness.sessionModelsMetadata = { currentModelId: 'ollama/x', availableModels: [] };
+        const { session, agentMessages } = createSessionStub([], { keepOpen: true });
+
+        const launcherPromise = opencodeRemoteLauncher(session as never);
+        await vi.waitFor(() => expect(harness.eventStreamOptions).toHaveLength(1));
+
+        harness.eventStreamOptions[0].onGoalChange!({
+            id: 'goal-1', objective: 'ship it', status: 'active', rounds: 2, maxRounds: 50, updatedAt: 1
+        });
+
+        expect(agentMessages).toContainEqual(expect.objectContaining({
+            type: 'thread_goal_updated',
+            goal: expect.objectContaining({ objective: 'ship it', status: 'active' })
+        }));
+        session.queue.close();
+        await launcherPromise;
     });
 
     it('v2: reports one automatic application start without changing turn thinking for preparation', async () => {

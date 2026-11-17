@@ -2,6 +2,7 @@ import { asNumber, asString, isObject } from '@hapi/protocol';
 import { logger } from '@/ui/logger';
 import type { FetchLike } from './opencodeCompactBridge';
 import { collapseWhitespace, truncateOpencodeProviderText } from './opencodeErrorText';
+import { extractOpencodeGoalChange } from './opencodeGoal';
 
 /**
  * `session.status` with `type: "retry"` — OpenCode announcing that it hit an
@@ -39,6 +40,8 @@ export type OpencodeEventStreamOptions = {
     onRetry: (retry: OpencodeRetryStatus) => void;
     /** Native transcript consumer; receives normalized, session-scoped events. */
     onEvent?: (type: string, properties: Record<string, unknown>, eventId?: string) => void;
+    /** `rpc.opencode.goal.changed` payloads. Goal events are not ordinary session messages. */
+    onGoalChange?: (goal: unknown) => void;
     onConnected?: () => void;
     /**
      * Extra request headers merged into every (re)connect attempt. Required
@@ -290,6 +293,16 @@ export function subscribeToOpencodeEvents(options: OpencodeEventStreamOptions): 
     const handleEvent = (event: unknown): void => {
         if (!isObject(event)) return;
         const properties = isObject(event.properties) ? event.properties : null;
+        const goalType = typeof event.type === 'string' && event.type.includes('goal.changed')
+            || isObject(properties) && typeof properties.type === 'string' && properties.type.includes('goal.changed')
+            || isObject(properties) && isObject(properties.data) && typeof properties.data.type === 'string'
+                && properties.data.type.includes('goal.changed');
+        if (goalType && properties) {
+            const change = extractOpencodeGoalChange(properties);
+            if (change && (!change.sessionID || change.sessionID === sessionId)) {
+                options.onGoalChange?.(change.goal);
+            }
+        }
         if (properties && typeof event.type === 'string') {
             const record = isObject(properties.info) ? properties.info : isObject(properties.part) ? properties.part : properties;
             if (record.sessionID === sessionId) options.onEvent?.(event.type, properties, typeof event.id === 'string' ? event.id : undefined);

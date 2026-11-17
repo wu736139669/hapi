@@ -110,11 +110,14 @@ function normalizeThreadGoal(value: unknown) {
         && status !== 'complete'
     ) return null
     return {
+        source: value.source === 'opencode' || value.source === 'codex' ? value.source : undefined,
         threadId,
         objective,
         status,
         tokenBudget: asNumber(value.tokenBudget ?? value.token_budget),
         tokensUsed: asNumber(value.tokensUsed ?? value.tokens_used) ?? 0,
+        rounds: asNumber(value.rounds),
+        maxRounds: asNumber(value.maxRounds),
         timeUsedSeconds: asNumber(value.timeUsedSeconds ?? value.time_used_seconds) ?? 0,
         createdAt: asNumber(value.createdAt ?? value.created_at) ?? 0,
         updatedAt: asNumber(value.updatedAt ?? value.updated_at) ?? 0

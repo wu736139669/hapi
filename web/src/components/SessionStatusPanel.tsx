@@ -59,7 +59,11 @@ export function SessionStatusPanel({ data, onGoalAction }: {
                             {t(`session.status.goal.${data.goal.status}`)}
                             {data.goal.timeUsedSeconds > 0 ? ` · ${formatDuration(data.goal.timeUsedSeconds * 1000)}` : ''}
                         </div>
-                        {data.goal.tokenBudget != null ? (
+                        {data.goal.rounds != null && data.goal.maxRounds != null ? (
+                            <div className="mt-0.5 text-xs text-[var(--app-hint)]">
+                                {t('session.goal.rounds', { used: data.goal.rounds, budget: data.goal.maxRounds })}
+                            </div>
+                        ) : data.goal.tokenBudget != null ? (
                             <div className="mt-0.5 text-xs text-[var(--app-hint)]">
                                 {t('session.goal.tokens', { used: data.goal.tokensUsed.toLocaleString(), budget: data.goal.tokenBudget.toLocaleString() })}
                             </div>

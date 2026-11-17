@@ -342,11 +342,15 @@ export const ThreadGoalStatusSchema = z.enum([
 export type ThreadGoalStatus = z.infer<typeof ThreadGoalStatusSchema>
 
 export const ThreadGoalSchema = z.object({
+    source: z.enum(['opencode', 'codex']).optional(),
     threadId: z.string(),
     objective: z.string(),
     status: ThreadGoalStatusSchema,
     tokenBudget: z.number().nullable().optional(),
     tokensUsed: z.number().optional().default(0),
+    /** OpenCode goals count continuation rounds instead of tokens. */
+    rounds: z.number().optional(),
+    maxRounds: z.number().optional(),
     timeUsedSeconds: z.number().optional().default(0),
     createdAt: z.number().optional().default(0),
     updatedAt: z.number().optional().default(0)

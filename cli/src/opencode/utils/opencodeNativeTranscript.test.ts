@@ -190,6 +190,39 @@ describe('OpenCode native transcript reconciliation', () => {
 });
 
 
+describe('v2 background turn text (OpenCode 2.2.x events)', () => {
+    it('projects session.text.delta and finalizes on session.step.ended', () => {
+        const onText = vi.fn();
+        const transcript = new OpencodeNativeTranscript({
+            baseUrl: 'http://127.0.0.1:1', sessionId: 'ses', directory: '/project', mode: 'v2',
+            fetchImpl: vi.fn(async () => Response.json([])), onSummary: vi.fn(), onText
+        });
+
+        transcript.event('session.text.started', { sessionID: 'ses', assistantMessageID: 'msg1', ordinal: 0 });
+        transcript.event('session.text.delta', { sessionID: 'ses', assistantMessageID: 'msg1', ordinal: 0, delta: 'hello ' });
+        transcript.event('session.text.delta', { sessionID: 'ses', assistantMessageID: 'msg1', ordinal: 0, delta: 'world' });
+        transcript.event('session.step.ended', { sessionID: 'ses', assistantMessageID: 'msg1' });
+
+        expect(onText).toHaveBeenCalledWith(expect.objectContaining({
+            id: 'v2:msg1:0', messageId: 'msg1', role: 'assistant', type: 'text',
+            text: 'hello world', complete: true
+        }));
+        transcript.close();
+    });
+
+    it('ignores text events from another session', () => {
+        const onText = vi.fn();
+        const transcript = new OpencodeNativeTranscript({
+            baseUrl: 'http://127.0.0.1:1', sessionId: 'ses', directory: '/project', mode: 'v2',
+            fetchImpl: vi.fn(async () => Response.json([])), onSummary: vi.fn(), onText
+        });
+
+        transcript.event('session.text.delta', { sessionID: 'foreign', assistantMessageID: 'm', ordinal: 0, delta: 'nope' });
+        expect(onText).not.toHaveBeenCalled();
+        transcript.close();
+    });
+});
+
 describe('v2 durable application start', () => {
     it('keeps the start identity across fast completion and running snapshot replay without observing preparation usage', async () => {
         const onStart = vi.fn(), onSummary = vi.fn();

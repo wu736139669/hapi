@@ -27,6 +27,12 @@ export type OpencodeSlashResolution =
     // /clear exits the current runner-backed HAPI process after its FIFO
     // predecessors finish, then asks the hub to spawn a fresh OpenCode one.
     | { kind: 'clear' }
+    // /goal is OpenCode's native persistent-objective command (core plugin,
+    // v2.2.1+). The launcher must forward the raw slash text over ACP so
+    // OpenCode parses the command itself; HAPI must not prepend its own
+    // instructions or switch to the native REST prompt path (neither leaves
+    // a leading "/" for OpenCode's ACP command detector).
+    | { kind: 'goal'; text: string }
     | {
         kind: 'handled';
         message: string;
@@ -176,6 +182,10 @@ export function resolveOpencodeSlashCommand(
         return { kind: 'compact' };
     }
 
+    if (command === 'goal') {
+        return { kind: 'goal', text };
+    }
+
     if (command === 'clear') {
         return { kind: 'clear' };
     }
@@ -204,6 +214,8 @@ export function resolveOpencodeSlashCommand(
                 '- `/default` — return to default permission mode',
                 '- `/init [extra]` — generate or refresh AGENTS.md for this project',
                 '- `/compact` — compact (summarize) the OpenCode session context (remote sessions only)',
+                '- `/goal <objective>` — keep working until a reviewer confirms the objective is met (OpenCode v2.2.1+)',
+                '- `/goal pause|resume|clear` — control the active goal',
                 '- `/clear` — archive this HAPI session and open a fresh OpenCode session',
                 '',
                 'Model, reasoning effort, and permission mode have dedicated buttons in the composer. ' +
