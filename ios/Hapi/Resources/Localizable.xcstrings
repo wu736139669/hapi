@@ -7611,6 +7611,40 @@
         }
       }
     },
+    "Choose Group" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Выберите группу"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择分组"
+          }
+        }
+      }
+    },
+    "New Group…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Новая группа…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新建分组…"
+          }
+        }
+      }
+    },
     "Change Group…" : {
       "extractionState" : "manual",
       "localizations" : {

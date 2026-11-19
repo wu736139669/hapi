@@ -1,6 +1,10 @@
 package app.hapi.companion.feature.sessions
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -11,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.tooling.preview.Preview
 import app.hapi.companion.R
 import app.hapi.companion.ui.theme.HapiTheme
@@ -56,6 +61,7 @@ fun RenameSessionDialog(
 fun SessionGroupDialog(
     title: String,
     initialName: String,
+    existingNames: List<String> = emptyList(),
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -64,12 +70,26 @@ fun SessionGroupDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it.take(64) },
-                singleLine = true,
-                label = { Text(stringResource(R.string.sessions_group_name)) },
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it.take(64) },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.sessions_group_name)) },
+                )
+                if (existingNames.isNotEmpty()) {
+                    Text(stringResource(R.string.sessions_group_existing))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        existingNames.forEach { existing ->
+                            FilterChip(
+                                selected = name == existing,
+                                onClick = { name = existing },
+                                label = { Text(existing) },
+                            )
+                        }
+                    }
+                }
+            }
         },
         confirmButton = {
             TextButton(enabled = name.isNotBlank(), onClick = { onConfirm(name.trim()) }) {

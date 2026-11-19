@@ -277,6 +277,7 @@
     <string name="sessions_action_save">Сохранить</string>
     <string name="sessions_group_name">Название группы</string>
     <string name="sessions_group_rename">Переименовать группу</string>
+    <string name="sessions_group_existing">Существующие группы</string>
     <string name="sessions_action_join_group">Добавить в группу…</string>
     <string name="sessions_action_change_group">Изменить группу…</string>
     <string name="sessions_action_leave_group">Убрать из группы</string>

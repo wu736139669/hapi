@@ -9,10 +9,11 @@ import { Button } from '@/components/ui/button'
 import { useTranslation } from '@/lib/use-translation'
 
 /** Minimal text-entry dialog for joining, changing, or renaming a group. */
-export function SessionGroupDialog({ isOpen, onClose, currentName, onSave, isPending }: {
+export function SessionGroupDialog({ isOpen, onClose, currentName, existingNames = [], onSave, isPending }: {
     isOpen: boolean
     onClose: () => void
     currentName: string
+    existingNames?: string[]
     onSave: (name: string) => Promise<void>
     isPending?: boolean
 }) {
@@ -55,11 +56,29 @@ export function SessionGroupDialog({ isOpen, onClose, currentName, onSave, isPen
                     <input
                         id="hapi-group-name"
                         autoFocus
+                        list="hapi-group-suggestions"
                         value={draft}
                         maxLength={64}
                         onChange={event => setDraft(event.target.value)}
                         className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
                     />
+                    <datalist id="hapi-group-suggestions">
+                        {existingNames.map(name => <option key={name} value={name} />)}
+                    </datalist>
+                    {existingNames.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                            {existingNames.map(name => (
+                                <button
+                                    key={name}
+                                    type="button"
+                                    onClick={() => setDraft(name)}
+                                    className="rounded-full border border-[var(--app-border)] px-2 py-0.5 text-xs text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)]"
+                                >
+                                    {name}
+                                </button>
+                            ))}
+                        </div>
+                    ) : null}
                     {error ? <div role="alert" className="text-xs text-red-600">{error}</div> : null}
                     <div className="flex justify-end gap-2">
                         <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>{t('button.cancel')}</Button>

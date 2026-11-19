@@ -284,6 +284,7 @@
     <string name="sessions_action_save">保存</string>
     <string name="sessions_group_name">分组名称</string>
     <string name="sessions_group_rename">重命名分组</string>
+    <string name="sessions_group_existing">已有分组</string>
     <string name="sessions_action_join_group">加入分组…</string>
     <string name="sessions_action_change_group">更改分组…</string>
     <string name="sessions_action_leave_group">移出分组</string>

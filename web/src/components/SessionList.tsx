@@ -1345,6 +1345,7 @@ const SessionItem = memo(function SessionItem(props: {
     personalPinned?: boolean
     onSetPersonalPinned?: (pinned: boolean) => void
     onSetGroup?: (group: string | null) => Promise<void>
+    existingGroupNames?: string[]
     onTransferPersonalPinned?: (fromSessionId: string, toSessionId: string) => void
     projectLabel?: string
     machineLabel?: string
@@ -1370,6 +1371,7 @@ const SessionItem = memo(function SessionItem(props: {
         personalPinned = false,
         onSetPersonalPinned,
         onSetGroup,
+        existingGroupNames = [],
         onTransferPersonalPinned,
         projectLabel,
         machineLabel,
@@ -1698,6 +1700,7 @@ const SessionItem = memo(function SessionItem(props: {
                     isOpen={true}
                     onClose={() => setGroupDialogOpen(false)}
                     currentName={s.metadata?.group ?? ''}
+                    existingNames={existingGroupNames}
                     onSave={async name => handleSetGroup(name)}
                     isPending={isPending}
                 />
@@ -1830,6 +1833,12 @@ export function SessionList(props: {
         if (!api) throw new Error('Session unavailable')
         await api.setSessionGroup(sessionId, group)
     }
+    const existingGroupNames = useMemo(() => {
+        const names = props.sessions
+            .map(session => session.metadata?.group?.trim())
+            .filter((name): name is string => Boolean(name))
+        return Array.from(new Set(names)).sort()
+    }, [props.sessions])
     const [groupAction, setGroupAction] = useState<string | null>(null)
     const [dissolveName, setDissolveName] = useState<string | null>(null)
     const applyGroupAction = async (name: string) => {
@@ -2392,6 +2401,7 @@ export function SessionList(props: {
                                             showDetailedStatus={showDetailedStatus}
                                             inRunningSection
                                             onSetGroup={(group) => setSessionGroup(s.id, group)}
+                                            existingGroupNames={existingGroupNames}
                                             projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
                                             shared={sharedSessionIds.has(s.id)}
@@ -2461,6 +2471,7 @@ export function SessionList(props: {
             showDetailedStatus={showDetailedStatus}
             onSetPersonalPinned={(pinned) => setPersonalPinned(s.id, pinned)}
             onSetGroup={(group) => setSessionGroup(s.id, group)}
+            existingGroupNames={existingGroupNames}
             onTransferPersonalPinned={transferPersonalPinned}
             shared={sharedSessionIds.has(s.id)}
             contentSnippet={contentSnippetBySessionId.get(s.id)}
@@ -3196,6 +3207,7 @@ export function SessionList(props: {
                                             personalPinned
                                             onSetPersonalPinned={(pinned) => setPersonalPinned(s.id, pinned)}
                                             onSetGroup={(group) => setSessionGroup(s.id, group)}
+                                            existingGroupNames={existingGroupNames}
                                             onTransferPersonalPinned={transferPersonalPinned}
                                             projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
@@ -3253,6 +3265,7 @@ export function SessionList(props: {
                                             inRunningSection
                                             onSetPersonalPinned={(pinned) => setPersonalPinned(s.id, pinned)}
                                             onSetGroup={(group) => setSessionGroup(s.id, group)}
+                                            existingGroupNames={existingGroupNames}
                                             onTransferPersonalPinned={transferPersonalPinned}
                                             projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
@@ -3297,6 +3310,7 @@ export function SessionList(props: {
                     isOpen={true}
                     onClose={() => setGroupAction(null)}
                     currentName={groupAction}
+                    existingNames={existingGroupNames.filter(name => name !== groupAction)}
                     onSave={applyGroupAction}
                 />
             ) : null}

@@ -314,6 +314,8 @@ fun SessionListScreen(
                 else R.string.sessions_action_change_group
             ),
             initialName = groupDraft,
+            existingNames = state.rows.mapNotNull { it.summary.metadata?.group?.trim() }
+                .filter { it.isNotEmpty() }.distinct().sorted(),
             onConfirm = { name ->
                 viewModel.setGroup(row.id, name)
                 groupRow = null
@@ -325,6 +327,8 @@ fun SessionListScreen(
         SessionGroupDialog(
             title = stringResource(R.string.sessions_group_rename),
             initialName = groupDraft,
+            existingNames = state.rows.mapNotNull { it.summary.metadata?.group?.trim() }
+                .filter { it.isNotEmpty() }.distinct().sorted(),
             onConfirm = { name ->
                 viewModel.changeGroup(from, name)
                 groupSectionFrom = null

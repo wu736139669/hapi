@@ -38,6 +38,7 @@ struct SessionListView: View {
     @State private var renameTarget: SessionRowUI?
     @State private var renameText = ""
     @State private var deleteTarget: SessionRowUI?
+    @State private var groupPickerTarget: SessionRowUI?
     @State private var groupRowTarget: SessionRowUI?
     @State private var groupSectionTarget: SessionListSectionUI?
     @State private var groupText = ""
@@ -134,6 +135,25 @@ struct SessionListView: View {
                 }
             }
             .disabled(!SessionNameRules.isValid(renameText))
+        }
+        .confirmationDialog(
+            "Choose Group",
+            isPresented: Binding(
+                get: { groupPickerTarget != nil },
+                set: { if !$0 { groupPickerTarget = nil } }
+            ),
+            presenting: groupPickerTarget
+        ) { row in
+            ForEach(model.existingGroupNames, id: \.self) { name in
+                Button(name) {
+                    model.setGroup(sessionId: row.id, group: name)
+                }
+            }
+            Button("New Group…") {
+                groupText = row.summary.metadata?.group ?? ""
+                groupRowTarget = row
+            }
+            Button("Cancel", role: .cancel) {}
         }
         .alert(
             "Change Group",
@@ -587,8 +607,7 @@ struct SessionListView: View {
             Label("Rename…", systemImage: "pencil")
         }
         Button {
-            groupText = summary.metadata?.group ?? ""
-            groupRowTarget = row
+            groupPickerTarget = row
         } label: {
             Label(summary.metadata?.group == nil ? "Add to Group…" : "Change Group…", systemImage: "rectangle.stack")
         }

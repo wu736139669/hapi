@@ -277,6 +277,7 @@
     <string name="sessions_action_save">Save</string>
     <string name="sessions_group_name">Group name</string>
     <string name="sessions_group_rename">Rename group</string>
+    <string name="sessions_group_existing">Existing groups</string>
     <string name="sessions_action_join_group">Add to group…</string>
     <string name="sessions_action_change_group">Change group…</string>
     <string name="sessions_action_leave_group">Remove from group</string>

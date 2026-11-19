@@ -394,6 +394,15 @@ final class SessionListModel {
         }
     }
 
+    /// Distinct existing group names for the quick-pick group menu.
+    var existingGroupNames: [String] {
+        let names = sessionStore.sessions.compactMap { summary -> String? in
+            let name = summary.metadata?.group?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return name?.isEmpty == false ? name : nil
+        }
+        return Array(Set(names)).sorted()
+    }
+
     /// H5-style grouped sections. Search stays flat (the view uses `rows`).
     var sections: [SessionListSectionUI] {
         isSearching ? [] : groupedSections(from: rows)
