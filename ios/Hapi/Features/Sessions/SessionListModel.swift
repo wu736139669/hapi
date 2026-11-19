@@ -522,7 +522,7 @@ final class SessionListModel {
 
     /// Rename every session in a group to a new group name.
     func renameGroup(from: String, to: String) {
-        let members = sessions.filter { $0.metadata?.group == from }
+        let members = sessionStore.sessions.filter { $0.metadata?.group == from }
         Task {
             for session in members {
                 do {
@@ -540,7 +540,7 @@ final class SessionListModel {
 
     /// Remove every session from a group.
     func dissolveGroup(_ name: String) {
-        let members = sessions.filter { $0.metadata?.group == name }
+        let members = sessionStore.sessions.filter { $0.metadata?.group == name }
         Task {
             for session in members {
                 do {
