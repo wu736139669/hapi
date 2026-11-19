@@ -5,6 +5,7 @@ import {
     deduplicateSessionsByAgentId,
     expandSelectedSessionCollapseOverrides,
     groupSessionsByDirectory,
+    groupSessionsByUserGroup,
     filterActiveSessionsOnly,
     UNKNOWN_MACHINE_ID,
     bucketRunningSessions,
@@ -668,6 +669,23 @@ describe('bucketRunningSessions', () => {
         ], true)
 
         expect(buckets.idle).toHaveLength(0)
+    })
+})
+
+describe('session list user groups', () => {
+    it('groups same-named sessions and excludes them from directory groups', () => {
+        const groupedA = makeSession({ id: 'g1', metadata: { path: '/proj', group: 'Ship' }, lastUserMessageAt: 2_000 })
+        const groupedB = makeSession({ id: 'g2', metadata: { path: '/other', group: 'Ship' }, lastUserMessageAt: 1_000 })
+        const plain = makeSession({ id: 'plain', metadata: { path: '/proj' }, lastUserMessageAt: 3_000 })
+
+        const userGroups = groupSessionsByUserGroup([groupedA, groupedB, plain])
+        expect(userGroups).toHaveLength(1)
+        expect(userGroups[0]?.key).toBe('group:Ship')
+        expect(userGroups[0]?.sessions.map(session => session.id)).toEqual(['g1', 'g2'])
+        // The list filters grouped rows out before calling groupSessionsByDirectory.
+        const ungrouped = [groupedA, groupedB, plain].filter(session => !session.metadata?.group?.trim())
+        expect(groupSessionsByDirectory(ungrouped).flatMap(g => g.sessions.map(s => s.id)))
+            .toEqual(['plain'])
     })
 })
 

@@ -14,6 +14,7 @@ public enum SessionListGroupKind: String, Hashable, Sendable {
     case globalPinned
     case inProgress
     case active
+    case userGroup
     case directory
 }
 
@@ -81,7 +82,47 @@ public enum SessionListGrouping {
     ) -> [SessionListGroup] {
         var result: [SessionListGroup] = []
 
-        let personal = sessions
+        // User-defined groups have priority: grouped sessions appear only in
+        // their group, never in pinned buckets or project directories.
+        let grouped = sessions.filter { session in
+            guard let name = session.metadata?.group?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !name.isEmpty else { return false }
+            return true
+        }
+        let visible = sessions.filter { session in
+            guard let name = session.metadata?.group?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !name.isEmpty else { return true }
+            return false
+        }
+
+        var byGroupName: [String: [SessionSummary]] = [:]
+        for session in grouped {
+            let name = session.metadata!.group!.trimmingCharacters(in: .whitespacesAndNewlines)
+            byGroupName[name, default: []].append(session)
+        }
+        let sortedGroups = byGroupName.map { name, members -> (SessionListGroup, Int) in
+            let latest = members.reduce(Int.min) { max($0, $1.lastUserMessageAt ?? $1.createdAt ?? 0) }
+            return (
+                SessionListGroup(
+                    id: "group:\(name)",
+                    kind: .userGroup,
+                    displayName: name,
+                    sessions: members.sorted { $0.updatedAt > $1.updatedAt },
+                    hasActive: members.contains { $0.active },
+                    hasProjectPinned: members.contains { $0.pinned == true }
+                ),
+                latest
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.0.hasProjectPinned != rhs.0.hasProjectPinned { return lhs.0.hasProjectPinned }
+            if lhs.0.hasActive != rhs.0.hasActive { return lhs.0.hasActive }
+            if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+            return lhs.0.id < rhs.0.id
+        }
+        .map(\.0)
+
+        let personal = visible
             .filter { personalPinned.contains($0.id) }
             .sorted {
                 if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
@@ -95,7 +136,7 @@ public enum SessionListGrouping {
             ))
         }
 
-        let global = sessions.filter {
+        let global = visible.filter {
             $0.globalPinned == true && !personalPinned.contains($0.id)
         }
         if !global.isEmpty {
@@ -110,7 +151,7 @@ public enum SessionListGrouping {
         var pending: [SessionSummary] = []
         var active: [SessionSummary] = []
         var idle: [SessionSummary] = []
-        for summary in sessions {
+        for summary in visible {
             guard summary.active,
                   !personalPinned.contains(summary.id),
                   summary.globalPinned != true,
@@ -148,8 +189,10 @@ public enum SessionListGrouping {
             ))
         }
 
+        result.append(contentsOf: sortedGroups)
+
         var directories: [String: DirectoryAccumulator] = [:]
-        for summary in sessions {
+        for summary in visible {
             guard !personalPinned.contains(summary.id),
                   summary.globalPinned != true else { continue }
             // Non-project-pinned active sessions float into the top buckets.

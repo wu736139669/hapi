@@ -10,6 +10,7 @@ import app.hapi.protocol.wire.Session
 import app.hapi.protocol.wire.SessionPatch
 import app.hapi.protocol.wire.SessionPatches
 import app.hapi.protocol.wire.SessionSummary
+import app.hapi.protocol.wire.SessionSummaryMetadata
 import app.hapi.protocol.wire.SummaryPatching
 import app.hapi.protocol.wire.SyncEvent
 import app.hapi.protocol.wire.sortSessionSummaries
@@ -52,6 +53,9 @@ interface SessionListStore {
 
     /** Routes `session-added/updated/removed/ended` into the caches. */
     fun applySessionEvent(scope: SseSubscriptionKey, event: SyncEvent)
+
+    /** `PUT /sessions/:id/group`, optimistic `metadata.group`. */
+    suspend fun setGroup(sessionId: String, group: String?) {}
 
     /** `PUT /sessions/:id/pin`, optimistic. [mode] is `none|project|global`. */
     suspend fun setPinMode(sessionId: String, mode: String)
@@ -273,6 +277,24 @@ class SessionStore(
         } catch (error: Exception) {
             // Roll forward to server truth instead of restoring a stale list
             // (SSE may have moved other rows since the optimistic write).
+            scheduleRefresh()
+            throw error
+        }
+    }
+
+    override suspend fun setGroup(sessionId: String, group: String?) {
+        updateSummaries { list ->
+            list.map { summary ->
+                if (summary.id != sessionId) summary
+                else summary.copy(
+                    metadata = summary.metadata?.copy(group = group)
+                        ?: SessionSummaryMetadata(path = "", group = group)
+                )
+            }
+        }
+        try {
+            api.setSessionGroup(sessionId, group)
+        } catch (error: Exception) {
             scheduleRefresh()
             throw error
         }

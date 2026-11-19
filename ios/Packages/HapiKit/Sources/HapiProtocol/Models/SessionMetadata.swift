@@ -104,6 +104,8 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
     public var host: String
     /// User-assigned session name.
     public var name: String?
+    /// User-defined group; sessions with the same name are listed together.
+    public var group: String?
     /// Hub-generated title from the initial user prompt.
     public var promptTitle: String?
     public var os: String?
@@ -148,6 +150,7 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         path: String,
         host: String,
         name: String? = nil,
+        group: String? = nil,
         promptTitle: String? = nil,
         os: String? = nil,
         summary: SessionMetadataSummary? = nil,
@@ -178,6 +181,7 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         self.path = path
         self.host = host
         self.name = name
+        self.group = group
         self.promptTitle = promptTitle
         self.os = os
         self.summary = summary

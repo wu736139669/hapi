@@ -50,6 +50,7 @@ public struct SessionSummaryMetadata: Codable, Equatable, Sendable {
     }
 
     public var name: String?
+    public var group: String?
     public var promptTitle: String?
     public var path: String
     public var machineId: String?
@@ -63,6 +64,7 @@ public struct SessionSummaryMetadata: Codable, Equatable, Sendable {
 
     public init(
         name: String? = nil,
+        group: String? = nil,
         promptTitle: String? = nil,
         path: String,
         machineId: String? = nil,
@@ -74,6 +76,7 @@ public struct SessionSummaryMetadata: Codable, Equatable, Sendable {
         hapiMcpUrl: String? = nil
     ) {
         self.name = name
+        self.group = group
         self.promptTitle = promptTitle
         self.path = path
         self.machineId = machineId

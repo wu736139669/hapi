@@ -281,6 +281,13 @@
     <string name="sessions_delete_title">删除会话？</string>
     <string name="sessions_delete_message">“%1$s”及其消息历史将从 hub 永久移除。运行中的会话必须先归档。</string>
     <string name="sessions_cancel">取消</string>
+    <string name="sessions_action_save">保存</string>
+    <string name="sessions_group_name">分组名称</string>
+    <string name="sessions_group_rename">重命名分组</string>
+    <string name="sessions_action_join_group">加入分组…</string>
+    <string name="sessions_action_change_group">更改分组…</string>
+    <string name="sessions_action_leave_group">移出分组</string>
+    <string name="sessions_error_group">分组操作失败</string>
     <string name="sessions_age_now">刚刚</string>
 
     <!-- Chat screen chrome (B-M2c/B-M3, extracted in B-M5a) -->

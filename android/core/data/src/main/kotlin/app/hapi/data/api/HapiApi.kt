@@ -349,6 +349,15 @@ class HapiApi internal constructor(
         )
     }
 
+    /** `PUT /api/sessions/:id/group` — `null` removes the session from its group. */
+    suspend fun setSessionGroup(sessionId: String, group: String?) {
+        request<Unit>(
+            "PUT",
+            url("api", "sessions", sessionId, "group").build(),
+            jsonBody(buildJsonObject { put("group", group?.let { JsonPrimitive(it) } ?: JsonNull) }),
+        )
+    }
+
     /** `PUT /api/sessions/:id/pin` — mode `'none' | 'project' | 'global'`. */
     suspend fun setSessionPinMode(sessionId: String, mode: String) {
         request<Unit>("PUT", url("api", "sessions", sessionId, "pin").build(), SetSessionPinRequest(mode).toJsonBody())

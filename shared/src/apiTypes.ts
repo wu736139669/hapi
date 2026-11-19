@@ -555,6 +555,12 @@ export const SetSessionPinnedRequestSchema = z.object({
 
 export type SetSessionPinnedRequest = z.infer<typeof SetSessionPinnedRequestSchema>
 
+export const SetSessionGroupRequestSchema = z.object({
+    group: z.string().trim().min(1).max(64).nullable()
+})
+
+export type SetSessionGroupRequest = z.infer<typeof SetSessionGroupRequestSchema>
+
 export const CreateTeamRequestSchema = z.object({
     name: z.string().min(1).max(200),
     leadSessionId: z.string().min(1).optional(),

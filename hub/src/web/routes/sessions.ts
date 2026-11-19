@@ -12,6 +12,7 @@ import {
     isPermissionModeAllowedForFlavor,
     RenameSessionRequestSchema,
     SetSessionPinnedRequestSchema,
+    SetSessionGroupRequestSchema,
     ResumeSessionRequestSchema,
     RewindConversationRequestSchema,
     SCRATCHLIST_MAX_ENTRIES,
@@ -1257,6 +1258,27 @@ export function createSessionsRoutes(
 
         engine.setSessionPinMode(sessionResult.sessionId, parsed.data.mode)
         return c.json({ ok: true })
+    })
+
+    app.put('/sessions/:id/group', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) return sessionResult
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = SetSessionGroupRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body: group must be a name or null' }, 400)
+        }
+
+        try {
+            await engine.setSessionGroup(sessionResult.sessionId, parsed.data.group)
+            return c.json({ ok: true })
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Failed to set session group' }, 502)
+        }
     })
 
     app.delete('/sessions/:id', async (c) => {

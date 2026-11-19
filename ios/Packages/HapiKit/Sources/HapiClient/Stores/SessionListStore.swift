@@ -28,6 +28,9 @@ public protocol SessionListStoring: AnyObject {
     /// `PUT /sessions/:id/pin`, optimistic.
     func setPinMode(sessionId: String, mode: SessionPinMode) async throws
 
+    /// `PUT /sessions/:id/group`, optimistic `metadata.group`.
+    func setGroup(sessionId: String, group: String?) async throws
+
     /// `POST /sessions/:id/archive`, optimistic removal.
     func archiveSession(sessionId: String) async throws
 
@@ -263,6 +266,20 @@ public final class SessionListStore: SessionListStoring {
         }
     }
 
+    public func setGroup(sessionId: String, group: String?) async throws {
+        if let index = sessions.firstIndex(where: { $0.id == sessionId }) {
+            var list = sessions
+            list[index].metadata?.group = group
+            setSessions(sortSessionSummaries(list))
+        }
+        do {
+            try await api.setSessionGroup(id: sessionId, group: group)
+        } catch {
+            scheduleRefresh()
+            throw error
+        }
+    }
+
     public func archiveSession(sessionId: String) async throws {
         let removed = sessions.first { $0.id == sessionId }
         let filtered = sessions.filter { $0.id != sessionId }
@@ -447,4 +464,10 @@ public final class SessionListStore: SessionListStoring {
         snapshot?.scheduleWrite(next)
         onSessionsChanged?(next)
     }
+}
+
+@MainActor
+extension SessionListStoring {
+    /// Test doubles that do not exercise group changes need no implementation.
+    func setGroup(sessionId: String, group: String?) async throws {}
 }

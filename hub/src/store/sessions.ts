@@ -82,7 +82,8 @@ const HUB_OWNED_METADATA_FIELDS = [
     'codexResumePending',
     'titleSuggestionAutoAttemptedAt',
     'titleSuggestionTurn',
-    'promptTitle'
+    'promptTitle',
+    'group'
 ] as const
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

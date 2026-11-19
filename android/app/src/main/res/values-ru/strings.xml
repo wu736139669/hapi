@@ -274,6 +274,13 @@
     <string name="sessions_delete_title">Удалить сессию?</string>
     <string name="sessions_delete_message">«%1$s» и история её сообщений будут навсегда удалены с хаба. Активные сессии сначала нужно архивировать.</string>
     <string name="sessions_cancel">Отмена</string>
+    <string name="sessions_action_save">Сохранить</string>
+    <string name="sessions_group_name">Название группы</string>
+    <string name="sessions_group_rename">Переименовать группу</string>
+    <string name="sessions_action_join_group">Добавить в группу…</string>
+    <string name="sessions_action_change_group">Изменить группу…</string>
+    <string name="sessions_action_leave_group">Убрать из группы</string>
+    <string name="sessions_error_group">Не удалось изменить группу</string>
     <string name="sessions_age_now">сейчас</string>
 
     <!-- Chat screen chrome (B-M2c/B-M3, extracted in B-M5a) -->

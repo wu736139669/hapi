@@ -18,6 +18,7 @@ data class SessionMetadata(
     val path: String,
     val host: String,
     val name: String? = null,
+    val group: String? = null,
     val os: String? = null,
     val summary: MetadataSummary? = null,
     val machineId: String? = null,

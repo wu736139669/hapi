@@ -156,6 +156,18 @@ extension APIClient {
         )
     }
 
+    /// `PUT /api/sessions/:id/group`. `nil` removes the session from its group.
+    public func setSessionGroup(id: String, group: String?) async throws {
+        struct GroupRequest: Encodable {
+            let group: String?
+        }
+        try await requestVoid(
+            .put,
+            "/api/sessions/\(encodePathComponent(id))/group",
+            body: GroupRequest(group: group)
+        )
+    }
+
     // MARK: - Session catalogs (RPC-wrapped — check `success`)
 
     /// `GET /api/sessions/:id/slash-commands`.

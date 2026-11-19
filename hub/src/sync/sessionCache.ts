@@ -1149,6 +1149,32 @@ export class SessionCache {
         throw new Error('Session was modified concurrently. Please try again.')
     }
 
+    async setSessionGroup(sessionId: string, group: string | null): Promise<void> {
+        // Mirrors renameSession's retry-with-refresh: a stale cache would
+        // otherwise 409 forever on repeated group changes.
+        for (let attempt = 0; attempt < METADATA_RETRY_ATTEMPTS; attempt += 1) {
+            const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+            if (!session) {
+                throw new Error('Session not found')
+            }
+            const currentMetadata = session.metadata ?? { path: '', host: '' }
+            const result = this.store.sessions.updateSessionMetadata(
+                sessionId,
+                { ...currentMetadata, group },
+                session.metadataVersion,
+                session.namespace,
+                { touchUpdatedAt: false }
+            )
+            if (result.result === 'error') throw new Error('Failed to update session metadata')
+            if (result.result === 'success') {
+                this.refreshSession(sessionId)
+                return
+            }
+            this.refreshSession(sessionId)
+        }
+        throw new Error('Session was modified concurrently. Please try again.')
+    }
+
     async updateSessionSummary(sessionId: string, text: string, titleLocked?: boolean): Promise<void> {
         // Keep the generated/native title separate from metadata.name. A
         // manually chosen name must continue to win in the Web title helper,

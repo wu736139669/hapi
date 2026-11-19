@@ -1565,6 +1565,13 @@ export class ApiClient {
         })
     }
 
+    async setSessionGroup(sessionId: string, group: string | null): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/group`, {
+            method: 'PUT',
+            body: JSON.stringify({ group })
+        })
+    }
+
     async deleteSession(sessionId: string): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
             method: 'DELETE'

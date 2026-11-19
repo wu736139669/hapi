@@ -18,7 +18,8 @@ struct SessionListGroupingTests {
         path: String = "/Users/me/projects/hapi",
         machineId: String? = "mac",
         lifecycleState: String? = nil,
-        worktree: WorktreeMetadata? = nil
+        worktree: WorktreeMetadata? = nil,
+        group: String? = nil
     ) -> SessionSummary {
         SessionSummary(
             id: id,
@@ -31,6 +32,7 @@ struct SessionListGroupingTests {
             pinned: pinned,
             globalPinned: globalPinned,
             metadata: SessionSummaryMetadata(
+                group: group,
                 path: path,
                 machineId: machineId,
                 worktree: worktree,
@@ -43,6 +45,22 @@ struct SessionListGroupingTests {
             pendingRequestKinds: kinds,
             backgroundTaskCount: background
         )
+    }
+
+    @Test func userGroupsTakePriorityOverDirectoriesAndBuckets() {
+        let grouped = summary("g1", thinking: true, path: "/repo/app", group: "Ship")
+        let alsoGrouped = summary("g2", active: false, path: "/repo/app", group: "Ship")
+        let ungrouped = summary("plain", active: false, path: "/repo/app")
+        let groups = SessionListGrouping.groups(
+            sessions: [grouped, alsoGrouped, ungrouped],
+            personalPinned: []
+        )
+        let userGroup = groups.first { $0.kind == .userGroup }
+        #expect(userGroup?.displayName == "Ship")
+        #expect(userGroup?.sessions.map(\.id) == ["g1", "g2"])
+        #expect(!groups.contains { $0.kind == .directory && $0.sessions.contains { $0.id == "g1" } })
+        #expect(!groups.contains { $0.kind == .inProgress && $0.buckets.contains { $0.sessions.contains { $0.id == "g1" } } })
+        #expect(groups.contains { $0.kind == .directory && $0.sessions.contains { $0.id == "plain" } })
     }
 
     @Test func followsTheWebSectionOrderAndBucketPrecedence() {

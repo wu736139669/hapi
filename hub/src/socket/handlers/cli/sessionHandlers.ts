@@ -72,7 +72,8 @@ const HUB_OWNED_METADATA_KEYS = [
     'opencodeClearOperation',
     'titleSuggestionAutoAttemptedAt',
     'titleSuggestionTurn',
-    'promptTitle'
+    'promptTitle',
+    'group'
 ] as const
 
 function preserveHubOwnedMetadata(incoming: unknown, current: unknown): unknown {

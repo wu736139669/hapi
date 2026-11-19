@@ -520,6 +520,10 @@ export class SyncEngine {
         this.sessionCache.setSessionPinMode(sessionId, mode)
     }
 
+    async setSessionGroup(sessionId: string, group: string | null): Promise<void> {
+        await this.sessionCache.setSessionGroup(sessionId, group)
+    }
+
     getFutureScheduledMessageStats(sessionIds: string[], now: number = Date.now()): Map<string, FutureScheduledMessageStats> {
         return this.store.messages.getFutureScheduledStatsBySessionIds(sessionIds, now)
     }

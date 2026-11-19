@@ -151,6 +151,7 @@ public enum SummaryPatching {
         guard let metadata else { return nil }
         return SessionSummaryMetadata(
             name: metadata.name,
+            group: metadata.group,
             promptTitle: metadata.promptTitle,
             path: metadata.path,
             machineId: metadata.machineId,
@@ -271,6 +272,7 @@ public enum SummaryPatching {
     ) -> Bool {
         guard let current, let next else { return current == nil && next == nil }
         if current.name != next.name { return false }
+        if current.group != next.group { return false }
         if current.promptTitle != next.promptTitle { return false }
         if current.path != next.path { return false }
         if current.machineId != next.machineId { return false }

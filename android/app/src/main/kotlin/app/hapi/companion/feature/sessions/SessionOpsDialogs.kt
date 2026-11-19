@@ -51,6 +51,37 @@ fun RenameSessionDialog(
     )
 }
 
+/** Group-name prompt, reused for join/change/rename. */
+@Composable
+fun SessionGroupDialog(
+    title: String,
+    initialName: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var name by remember { mutableStateOf(initialName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it.take(64) },
+                singleLine = true,
+                label = { Text(stringResource(R.string.sessions_group_name)) },
+            )
+        },
+        confirmButton = {
+            TextButton(enabled = name.isNotBlank(), onClick = { onConfirm(name.trim()) }) {
+                Text(stringResource(R.string.sessions_action_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.sessions_cancel)) }
+        },
+    )
+}
+
 /** Delete confirmation — destructive and irreversible on the hub. */
 @Composable
 fun DeleteSessionDialog(

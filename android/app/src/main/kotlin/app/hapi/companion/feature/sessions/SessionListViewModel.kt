@@ -378,6 +378,36 @@ class SessionListViewModel(
         }
     }
 
+    /** `PUT /sessions/:id/group` with optimistic `metadata.group`. */
+    fun setGroup(sessionId: String, group: String?) {
+        scope.launch {
+            try {
+                sessionStore.setGroup(sessionId, group)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                _errors.tryEmit(SessionListError.GroupFailed(sessionId, error.message))
+            }
+        }
+    }
+
+    /** Apply a group change to every session currently in `from`. */
+    fun changeGroup(from: String, to: String?) {
+        val members = sessionStore.sessions.value.filter { it.metadata?.group == from }
+        scope.launch {
+            for (member in members) {
+                try {
+                    sessionStore.setGroup(member.id, to)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: Exception) {
+                    _errors.tryEmit(SessionListError.GroupFailed(member.id, error.message))
+                    return@launch
+                }
+            }
+        }
+    }
+
     /** `DELETE /sessions/:id` with optimistic removal; 409 while active gets explicit wording (in the UI). */
     fun deleteSession(sessionId: String) {
         scope.launch {
@@ -630,6 +660,7 @@ sealed interface SessionListError {
     data class PinFailed(override val sessionId: String, override val message: String?) : SessionListError
     data class ArchiveFailed(override val sessionId: String, override val message: String?) : SessionListError
     data class RenameFailed(override val sessionId: String, override val message: String?) : SessionListError
+    data class GroupFailed(override val sessionId: String, override val message: String?) : SessionListError
     data class DeleteFailed(
         override val sessionId: String,
         override val message: String?,

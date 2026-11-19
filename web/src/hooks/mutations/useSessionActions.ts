@@ -32,6 +32,7 @@ export function useSessionActions(
     suggestSessionTitle: () => Promise<string>
     updateSessionSummary: (text: string, titleLocked?: boolean) => Promise<void>
     setPinMode: (mode: 'none' | 'project' | 'global') => Promise<void>
+    setSessionGroup: (sessionId: string, group: string | null) => Promise<void>
     deleteSession: () => Promise<void>
     isPending: boolean
 } {
@@ -277,6 +278,14 @@ export function useSessionActions(
         onSuccess: () => void invalidateSession(),
     })
 
+    const groupMutation = useMutation({
+        mutationFn: async ({ sessionId, group }: { sessionId: string; group: string | null }) => {
+            if (!api) throw new Error('Session unavailable')
+            await api.setSessionGroup(sessionId, group)
+        },
+        onSuccess: () => void invalidateSession()
+    })
+
     const deleteMutation = useMutation({
         mutationFn: async () => {
             if (!api || !sessionId) {
@@ -308,6 +317,7 @@ export function useSessionActions(
         suggestSessionTitle: titleSuggestionMutation.mutateAsync,
         updateSessionSummary: (text: string, titleLocked?: boolean) => summaryMutation.mutateAsync({ text, titleLocked }),
         setPinMode: pinMutation.mutateAsync,
+        setSessionGroup: (sessionId: string, group: string | null) => groupMutation.mutateAsync({ sessionId, group }),
         deleteSession: deleteMutation.mutateAsync,
         isPending: abortMutation.isPending
             || archiveMutation.isPending

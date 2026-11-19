@@ -22,6 +22,8 @@ type SessionActionMenuProps = {
     sessionTitle: string
     sessionActive: boolean
     onRename: () => void
+    sessionGroup?: string | null
+    onSetGroup?: (group: string | null) => void
     sessionPinned?: boolean
     sessionGlobalPinned?: boolean
     onSetPinMode?: (mode: 'none' | 'project' | 'global') => void
@@ -215,6 +217,8 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         sessionTitle,
         sessionActive,
         onRename,
+        sessionGroup = null,
+        onSetGroup,
         sessionPinned = false,
         sessionGlobalPinned = false,
         onSetPinMode,
@@ -521,6 +525,37 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                         <PinIcon filled={sessionPersonalPinned} className="text-[var(--app-hint)]" />
                         {t(sessionPersonalPinned ? 'session.action.unpinPersonal' : 'session.action.pinPersonal')}
                     </button>
+                ) : null}
+
+                {onSetGroup ? (
+                    <>
+                        <button
+                            type="button"
+                            role="menuitem"
+                            className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                            onClick={() => {
+                                onClose()
+                                onSetGroup(sessionGroup ?? '')
+                            }}
+                        >
+                            <EditIcon className="text-[var(--app-hint)]" />
+                            {sessionGroup ? t('session.action.renameGroup') : t('session.action.joinGroup')}
+                        </button>
+                        {sessionGroup ? (
+                            <button
+                                type="button"
+                                role="menuitem"
+                                className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                                onClick={() => {
+                                    onClose()
+                                    onSetGroup(null)
+                                }}
+                            >
+                                <PinIcon className="text-[var(--app-hint)]" />
+                                {t('session.action.leaveGroup')}
+                            </button>
+                        ) : null}
+                    </>
                 ) : null}
 
                 {onMarkUnread ? (

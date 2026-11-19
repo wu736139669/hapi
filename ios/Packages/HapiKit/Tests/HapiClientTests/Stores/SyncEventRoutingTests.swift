@@ -31,6 +31,10 @@ private final class FakeSessionListStore: SessionListStoring {
         calls.append("pin:\(sessionId):\(mode.rawValue)")
     }
 
+    func setGroup(sessionId: String, group: String?) async throws {
+        calls.append("group:\(sessionId):\(group ?? "nil")")
+    }
+
     func archiveSession(sessionId: String) async throws {
         calls.append("archive:\(sessionId)")
     }

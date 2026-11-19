@@ -127,6 +127,7 @@ export function sameSessionSummaryMetadata(
         return current == null && next == null
     }
     return current.name === next.name
+        && current.group === next.group
         && current.path === next.path
         && current.machineId === next.machineId
         && current.summary?.text === next.summary?.text

@@ -47,6 +47,7 @@ data class SessionSummary(
 @Serializable
 data class SessionSummaryMetadata(
     val name: String? = null,
+    val group: String? = null,
     val path: String,
     val machineId: String? = null,
     /** Summary text only — no `updatedAt` in the list projection. */

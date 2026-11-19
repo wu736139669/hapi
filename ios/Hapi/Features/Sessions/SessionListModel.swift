@@ -47,6 +47,8 @@ struct SessionListSectionUI: Identifiable, Equatable {
     let hasActive: Bool
     let hasProjectPinned: Bool
 
+    var groupName: String { directoryName ?? "Other" }
+
     var totalCount: Int {
         rows.count + buckets.reduce(0) { $0 + $1.rows.count }
     }
@@ -499,6 +501,57 @@ final class SessionListModel {
                     format: String(localized: "Pin failed: %@"),
                     error.localizedDescription
                 )
+            }
+        }
+    }
+
+    /// `PUT /sessions/:id/group` with store-side optimistic group.
+    func setGroup(sessionId: String, group: String?) {
+        let store = sessionStore
+        Task {
+            do {
+                try await store.setGroup(sessionId: sessionId, group: group)
+            } catch {
+                self.actionError = String(
+                    format: String(localized: "Group failed: %@"),
+                    error.localizedDescription
+                )
+            }
+        }
+    }
+
+    /// Rename every session in a group to a new group name.
+    func renameGroup(from: String, to: String) {
+        let members = sessions.filter { $0.metadata?.group == from }
+        Task {
+            for session in members {
+                do {
+                    try await sessionStore.setGroup(sessionId: session.id, group: to)
+                } catch {
+                    self.actionError = String(
+                        format: String(localized: "Group failed: %@"),
+                        error.localizedDescription
+                    )
+                    return
+                }
+            }
+        }
+    }
+
+    /// Remove every session from a group.
+    func dissolveGroup(_ name: String) {
+        let members = sessions.filter { $0.metadata?.group == name }
+        Task {
+            for session in members {
+                do {
+                    try await sessionStore.setGroup(sessionId: session.id, group: nil)
+                } catch {
+                    self.actionError = String(
+                        format: String(localized: "Group failed: %@"),
+                        error.localizedDescription
+                    )
+                    return
+                }
             }
         }
     }

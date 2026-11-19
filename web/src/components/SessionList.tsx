@@ -16,6 +16,7 @@ import { usePlatform } from '@/hooks/usePlatform'
 import { sessionArchiveMutationKey, useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { useIsMutating } from '@tanstack/react-query'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
+import { SessionGroupDialog } from '@/components/SessionGroupDialog'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -167,6 +168,7 @@ type SessionGroup = {
     latestOrderAt: number
     hasActiveSession: boolean
     hasPinnedSession: boolean
+    isUserGroup?: boolean
 }
 
 const MIN_CONTENT_SEARCH_QUERY_LENGTH = 2
@@ -513,6 +515,51 @@ export function groupSessionsByDirectory(
             if (order.activeFirst && a.hasActiveSession !== b.hasActiveSession) {
                 return a.hasActiveSession ? -1 : 1
             }
+            return compareDescWithKeyTiebreak(
+                { key: a.key, order: a.latestOrderAt },
+                { key: b.key, order: b.latestOrderAt }
+            )
+        })
+}
+
+/**
+ * User-defined groups take priority over directory grouping: a session with
+ * a group appears here only, never in its project's directory group.
+ */
+export function groupSessionsByUserGroup(
+    sessions: SessionSummary[],
+    order: Pick<SessionListView, 'sort' | 'activeFirst'> = LEGACY_LIST_ORDER
+): SessionGroup[] {
+    const compare = createSessionComparator(order)
+    const byName = new Map<string, SessionSummary[]>()
+    for (const session of sessions) {
+        const name = session.metadata?.group?.trim()
+        if (!name) continue
+        const bucket = byName.get(name) ?? []
+        bucket.push(session)
+        byName.set(name, bucket)
+    }
+    return Array.from(byName.entries())
+        .map(([name, members]) => {
+            const sortedSessions = [...members].sort((a, b) => {
+                if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1
+                return compare(a, b)
+            })
+            return {
+                key: `group:${name}`,
+                directory: '',
+                displayName: name,
+                machineId: null as string | null,
+                sessions: sortedSessions,
+                latestOrderAt: members.reduce((max, s) => Math.max(max, getSessionSortKey(s, order.sort)), -Infinity),
+                hasActiveSession: members.some(s => s.active),
+                hasPinnedSession: members.some(s => s.pinned),
+                isUserGroup: true
+            }
+        })
+        .sort((a, b) => {
+            if (a.hasPinnedSession !== b.hasPinnedSession) return a.hasPinnedSession ? -1 : 1
+            if (order.activeFirst && a.hasActiveSession !== b.hasActiveSession) return a.hasActiveSession ? -1 : 1
             return compareDescWithKeyTiebreak(
                 { key: a.key, order: a.latestOrderAt },
                 { key: b.key, order: b.latestOrderAt }
@@ -1297,6 +1344,7 @@ const SessionItem = memo(function SessionItem(props: {
     inRunningSection?: boolean
     personalPinned?: boolean
     onSetPersonalPinned?: (pinned: boolean) => void
+    onSetGroup?: (group: string | null) => Promise<void>
     onTransferPersonalPinned?: (fromSessionId: string, toSessionId: string) => void
     projectLabel?: string
     machineLabel?: string
@@ -1321,6 +1369,7 @@ const SessionItem = memo(function SessionItem(props: {
         inRunningSection = false,
         personalPinned = false,
         onSetPersonalPinned,
+        onSetGroup,
         onTransferPersonalPinned,
         projectLabel,
         machineLabel,
@@ -1371,8 +1420,9 @@ const SessionItem = memo(function SessionItem(props: {
         s.metadata?.flavor ?? null
     )
     const [reopenError, setReopenError] = useState<string | null>(null)
+    const [groupDialogOpen, setGroupDialogOpen] = useState(false)
     const holdPanel = useContext(CollapsiblePanelHoldContext)
-    const overlayOpen = menuOpen || renameOpen || exportOpen || archiveOpen || deleteOpen || forkOpen || reopenError !== null
+    const overlayOpen = menuOpen || renameOpen || exportOpen || archiveOpen || deleteOpen || forkOpen || groupDialogOpen || reopenError !== null
     useEffect(() => {
         if (!overlayOpen || !holdPanel) return
         holdPanel(true)
@@ -1385,6 +1435,20 @@ const SessionItem = memo(function SessionItem(props: {
         } catch (error) {
             addToast({
                 title: t('session.action.pinFailed'),
+                body: error instanceof Error ? error.message : t('dialog.error.default'),
+                sessionId: s.id,
+                url: `/sessions/${s.id}`
+            })
+        }
+    }
+
+    const handleSetGroup = async (group: string | null) => {
+        if (!onSetGroup) return
+        try {
+            await onSetGroup(group)
+        } catch (error) {
+            addToast({
+                title: t('sessions.group.failed'),
                 body: error instanceof Error ? error.message : t('dialog.error.default'),
                 sessionId: s.id,
                 url: `/sessions/${s.id}`
@@ -1557,6 +1621,11 @@ const SessionItem = memo(function SessionItem(props: {
                 onSetPinMode={(mode) => void handleSetPinMode(mode)}
                 sessionPersonalPinned={personalPinned}
                 onSetPersonalPinned={onSetPersonalPinned}
+                sessionGroup={s.metadata?.group}
+                onSetGroup={onSetGroup ? (group) => {
+                    if (group === null) void handleSetGroup(null)
+                    else setGroupDialogOpen(true)
+                } : undefined}
                 onRename={() => setRenameOpen(true)}
                 onExport={() => setExportOpen(true)}
                 onMarkUnread={() => markSessionUnread(s.id, s.readState)}
@@ -1620,6 +1689,16 @@ const SessionItem = memo(function SessionItem(props: {
                     onRename={renameSession}
                     onSuggestTitle={api && titleSuggestionAvailable ? suggestSessionTitle : undefined}
                     onUpdateSummary={api && titleSuggestionAvailable ? updateSessionSummary : undefined}
+                    isPending={isPending}
+                />
+            ) : null}
+
+            {groupDialogOpen ? (
+                <SessionGroupDialog
+                    isOpen={true}
+                    onClose={() => setGroupDialogOpen(false)}
+                    currentName={s.metadata?.group ?? ''}
+                    onSave={async name => handleSetGroup(name)}
                     isPending={isPending}
                 />
             ) : null}
@@ -1747,6 +1826,24 @@ export function SessionList(props: {
     const { pinActiveSessions } = usePinActiveSessions()
     const { preferences: toolbarPreferences, setPreference: setToolbarPreference } = useSessionListToolbar()
     const { personalPinnedSessionIds, setPersonalPinned, transferPersonalPinned } = usePersonalPinnedSessions()
+    const setSessionGroup = async (sessionId: string, group: string | null) => {
+        if (!api) throw new Error('Session unavailable')
+        await api.setSessionGroup(sessionId, group)
+    }
+    const [groupAction, setGroupAction] = useState<string | null>(null)
+    const [dissolveName, setDissolveName] = useState<string | null>(null)
+    const applyGroupAction = async (name: string) => {
+        if (!groupAction) return
+        const members = props.sessions.filter(session => session.metadata?.group === groupAction)
+        await Promise.all(members.map(session => setSessionGroup(session.id, name)))
+        setGroupAction(null)
+    }
+    const applyDissolve = async () => {
+        if (!dissolveName) return
+        const members = props.sessions.filter(session => session.metadata?.group === dissolveName)
+        await Promise.all(members.map(session => setSessionGroup(session.id, null)))
+        setDissolveName(null)
+    }
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
     const [searchQuery, setSearchQuery] = useState('')
@@ -2076,19 +2173,25 @@ export function SessionList(props: {
     const activeSessionTotal = runningSessions.active.length + runningSessions.idle.length
     const groups = useMemo(
         () => {
-            const grouped = groupSessionsByDirectory(
-                machineFilteredSessions.filter((session) => {
-                    if (session.globalPinned || personalPinnedSessionIds.has(session.id)) return false
-                    if (!session.pinned && (
-                        ((pinActiveSessions || pinInProgressSessions) && session.active)
-                        || (pinInProgressSessions && isPinnedInProgressSession(session))
-                    )) return false
-                    return true
-                }),
-                // Search keeps its own contract: relevance first, then the stable
-                // last-message order for ties, whatever the list view says.
-                hasTextQuery ? undefined : listView
-            )
+            const eligible = machineFilteredSessions.filter((session) => {
+                if (session.globalPinned || personalPinnedSessionIds.has(session.id)) return false
+                if (!session.pinned && (
+                    ((pinActiveSessions || pinInProgressSessions) && session.active)
+                    || (pinInProgressSessions && isPinnedInProgressSession(session))
+                )) return false
+                return true
+            })
+            // Search keeps its own contract: relevance first, then the stable
+            // last-message order for ties, whatever the list view says.
+            const order = hasTextQuery ? undefined : listView
+            const userGroups = groupSessionsByUserGroup(eligible, order)
+            const grouped = [
+                ...userGroups,
+                ...groupSessionsByDirectory(
+                    eligible.filter(session => !session.metadata?.group?.trim()),
+                    order
+                )
+            ]
             if (searchScoreIndex && hasTextQuery) {
                 return rankSessionGroupsBySearchRelevance(grouped, searchScoreIndex)
             }
@@ -2288,6 +2391,7 @@ export function SessionList(props: {
                                             selected={s.id === selectedSessionId}
                                             showDetailedStatus={showDetailedStatus}
                                             inRunningSection
+                                            onSetGroup={(group) => setSessionGroup(s.id, group)}
                                             projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
                                             shared={sharedSessionIds.has(s.id)}
@@ -2356,6 +2460,7 @@ export function SessionList(props: {
             selected={s.id === selectedSessionId}
             showDetailedStatus={showDetailedStatus}
             onSetPersonalPinned={(pinned) => setPersonalPinned(s.id, pinned)}
+            onSetGroup={(group) => setSessionGroup(s.id, group)}
             onTransferPersonalPinned={transferPersonalPinned}
             shared={sharedSessionIds.has(s.id)}
             contentSnippet={contentSnippetBySessionId.get(s.id)}
@@ -2386,7 +2491,7 @@ export function SessionList(props: {
         const canStartInGroupDirectory = group.directory !== 'Other'
         // With multiple machines in the unfiltered view, disambiguate
         // same-named directories by suffixing the machine label.
-        const groupTitle = hasMachineFilter && activeMachineFilter === null
+        const groupTitle = !group.isUserGroup && hasMachineFilter && activeMachineFilter === null
             ? `${group.displayName} · ${resolveMachineLabel(group.machineId)}`
             : group.displayName
         return (
@@ -2398,14 +2503,14 @@ export function SessionList(props: {
                         compact ? 'py-1 pl-1.5 pr-1' : 'py-1.5 pl-2 pr-2'
                     )}
                     onClick={() => toggleGroup(group.key, isCollapsed)}
-                    title={group.directory}
+                    title={group.isUserGroup ? group.displayName : group.directory}
                 >
                     <ChevronIcon className={compact ? 'h-3 w-3 text-[var(--app-hint)] shrink-0' : 'h-3.5 w-3.5 text-[var(--app-hint)] shrink-0'} collapsed={isCollapsed} />
                     {!compact ? <ForestAsset name="leaf-crest" className="forest-project-mark" /> : null}
                     <span className={cn('font-medium truncate flex-1 min-w-0', compact ? 'text-[10px]' : 'text-sm')}>
                         {groupTitle}
                     </span>
-                    {!compact ? <CopyPathButton path={group.directory} className="opacity-0 group-hover/project:opacity-100 transition-opacity duration-150" /> : null}
+                    {!compact && !group.isUserGroup ? <CopyPathButton path={group.directory} className="opacity-0 group-hover/project:opacity-100 transition-opacity duration-150" /> : null}
                     {!compact && onNewSessionInDirectory && canStartInGroupDirectory ? (
                         <button
                             type="button"
@@ -2422,6 +2527,24 @@ export function SessionList(props: {
                         >
                             <PlusIcon className="h-3.5 w-3.5" />
                         </button>
+                    ) : null}
+                    {group.isUserGroup ? (
+                        <span className="flex shrink-0 items-center gap-0.5" onClick={event => event.stopPropagation()}>
+                            <button
+                                type="button"
+                                onClick={() => setGroupAction(group.displayName)}
+                                className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-link)]"
+                                title={t('sessions.group.rename')}
+                                aria-label={t('sessions.group.rename')}
+                            >✎</button>
+                            <button
+                                type="button"
+                                onClick={() => setDissolveName(group.displayName)}
+                                className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--app-hint)] hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-link)]"
+                                title={t('sessions.group.dissolve')}
+                                aria-label={t('sessions.group.dissolve')}
+                            >×</button>
+                        </span>
                     ) : null}
                     <span className={cn('tabular-nums text-[var(--app-hint)] shrink-0', compact ? 'text-[9px]' : 'text-[10px]')}>
                         ({group.sessions.length})
@@ -3072,6 +3195,7 @@ export function SessionList(props: {
                                             inRunningSection
                                             personalPinned
                                             onSetPersonalPinned={(pinned) => setPersonalPinned(s.id, pinned)}
+                                            onSetGroup={(group) => setSessionGroup(s.id, group)}
                                             onTransferPersonalPinned={transferPersonalPinned}
                                             projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
@@ -3128,6 +3252,7 @@ export function SessionList(props: {
                                             showDetailedStatus={showDetailedStatus}
                                             inRunningSection
                                             onSetPersonalPinned={(pinned) => setPersonalPinned(s.id, pinned)}
+                                            onSetGroup={(group) => setSessionGroup(s.id, group)}
                                             onTransferPersonalPinned={transferPersonalPinned}
                                             projectLabel={getGroupDisplayName(s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')}
                                             machineLabel={resolveMachineLabel(s.metadata?.machineId ?? null)}
@@ -3167,6 +3292,27 @@ export function SessionList(props: {
             </SessionListScrollAnchor>
             </div>
             </div>
+            {groupAction ? (
+                <SessionGroupDialog
+                    isOpen={true}
+                    onClose={() => setGroupAction(null)}
+                    currentName={groupAction}
+                    onSave={applyGroupAction}
+                />
+            ) : null}
+            {dissolveName ? (
+                <ConfirmDialog
+                    isOpen={true}
+                    onClose={() => setDissolveName(null)}
+                    title={t('sessions.group.dissolve')}
+                    description={t('sessions.group.dissolveDescription', { name: dissolveName })}
+                    confirmLabel={t('sessions.group.dissolve')}
+                    confirmingLabel={t('sessions.group.dissolve')}
+                    onConfirm={applyDissolve}
+                    isPending={false}
+                    destructive
+                />
+            ) : null}
             <ConfirmDialog
                 isOpen={markAllReadOpen}
                 onClose={() => setMarkAllReadOpen(false)}

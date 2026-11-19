@@ -61,6 +61,9 @@ export const MetadataSchema = z.object({
     version: z.string().optional(),
     name: z.string().optional(),
     titleLocked: z.boolean().optional(),
+    // User-defined session group. One group per session; sessions with the
+    // same name are shown together above the directory grouping.
+    group: z.string().optional(),
     os: z.string().optional(),
     summary: MetadataSummarySchema.optional(),
     // Hub-owned marker: the automatic first-turn title fallback has been

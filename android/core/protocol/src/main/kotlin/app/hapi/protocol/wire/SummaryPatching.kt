@@ -145,6 +145,7 @@ object SummaryPatching {
         if (metadata == null) return null
         return SessionSummaryMetadata(
             name = metadata.name,
+            group = metadata.group,
             path = metadata.path,
             machineId = metadata.machineId,
             summary = metadata.summary?.let { SummaryText(it.text) },
@@ -286,6 +287,7 @@ object SummaryPatching {
         if (current === next) return true
         if (current == null || next == null) return current == null && next == null
         return current.name == next.name
+            && current.group == next.group
             && current.path == next.path
             && current.machineId == next.machineId
             && current.summary?.text == next.summary?.text

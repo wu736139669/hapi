@@ -38,6 +38,9 @@ struct SessionListView: View {
     @State private var renameTarget: SessionRowUI?
     @State private var renameText = ""
     @State private var deleteTarget: SessionRowUI?
+    @State private var groupRowTarget: SessionRowUI?
+    @State private var groupSectionTarget: SessionListSectionUI?
+    @State private var groupText = ""
     /// Grouped rows kept while a pushed chat covers the list.
     @State private var frozenSnapshot: SessionListSnapshot?
     /// Per-section overrides; nil means use the section's default. Kept
@@ -131,6 +134,38 @@ struct SessionListView: View {
                 }
             }
             .disabled(!SessionNameRules.isValid(renameText))
+        }
+        .alert(
+            "Change Group",
+            isPresented: Binding(
+                get: { groupRowTarget != nil },
+                set: { if !$0 { groupRowTarget = nil } }
+            ),
+            presenting: groupRowTarget
+        ) { row in
+            TextField("Group name", text: $groupText)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                let name = groupText.trimmingCharacters(in: .whitespacesAndNewlines)
+                model.setGroup(sessionId: row.id, group: name.isEmpty ? nil : name)
+            }
+        }
+        .alert(
+            "Rename Group",
+            isPresented: Binding(
+                get: { groupSectionTarget != nil },
+                set: { if !$0 { groupSectionTarget = nil } }
+            ),
+            presenting: groupSectionTarget
+        ) { section in
+            TextField("Group name", text: $groupText)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                let name = groupText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty && name != section.groupName {
+                    model.renameGroup(from: section.groupName, to: name)
+                }
+            }
         }
         .alert(
             "Delete Session",
@@ -368,6 +403,32 @@ struct SessionListView: View {
                 .foregroundStyle(theme.textSecondary)
                 .accessibilityLabel(Text("New session in this directory"))
             }
+
+            if section.kind == .userGroup {
+                Button {
+                    groupText = section.groupName
+                    groupSectionTarget = section
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: metrics.headerSize * 0.8, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.textSecondary)
+                .accessibilityLabel(Text("Rename Group"))
+                Button {
+                    model.dissolveGroup(section.groupName)
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .font(.system(size: metrics.headerSize * 0.8, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.textSecondary)
+                .accessibilityLabel(Text("Dissolve Group"))
+            }
         }
         .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
     }
@@ -383,6 +444,8 @@ struct SessionListView: View {
             Text("In progress")
         case .active:
             Text("Active sessions")
+        case .userGroup:
+            Text(verbatim: section.groupName)
         case .directory:
             Text(verbatim: directoryTitle(section))
         }
@@ -407,6 +470,7 @@ struct SessionListView: View {
         case .globalPinned: String(localized: "Pinned")
         case .inProgress: String(localized: "In progress")
         case .active: String(localized: "Active sessions")
+        case .userGroup: section.groupName
         case .directory: directoryTitle(section)
         }
         return "\(title), \(section.totalCount)"
@@ -429,6 +493,9 @@ struct SessionListView: View {
             Image(systemName: "circle.fill")
                 .font(.system(size: metrics.bucketDotSize))
                 .foregroundStyle(theme.textSecondary)
+        case .userGroup:
+            Image(systemName: "rectangle.stack")
+                .font(.system(size: metrics.headerSize))
         case .directory:
             Image(systemName: "folder")
                 .font(.system(size: metrics.headerSize))
@@ -518,6 +585,19 @@ struct SessionListView: View {
             renameTarget = row
         } label: {
             Label("Rename…", systemImage: "pencil")
+        }
+        Button {
+            groupText = summary.metadata?.group ?? ""
+            groupRowTarget = row
+        } label: {
+            Label(summary.metadata?.group == nil ? "Add to Group…" : "Change Group…", systemImage: "rectangle.stack")
+        }
+        if summary.metadata?.group != nil {
+            Button {
+                model.setGroup(sessionId: row.id, group: nil)
+            } label: {
+                Label("Remove from Group", systemImage: "rectangle.stack.badge.minus")
+            }
         }
         Button {
             UIPasteboard.general.string = SessionCitation.referenceText(

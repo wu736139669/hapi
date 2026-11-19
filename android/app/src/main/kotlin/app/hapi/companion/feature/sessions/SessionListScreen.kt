@@ -136,6 +136,9 @@ fun SessionListScreen(
     var sheetRow by remember { mutableStateOf<SessionRowUi?>(null) }
     var renameRow by remember { mutableStateOf<SessionRowUi?>(null) }
     var deleteRow by remember { mutableStateOf<SessionRowUi?>(null) }
+    var groupRow by remember { mutableStateOf<SessionRowUi?>(null) }
+    var groupSectionFrom by remember { mutableStateOf<String?>(null) }
+    var groupDraft by remember { mutableStateOf("") }
 
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -167,6 +170,7 @@ fun SessionListScreen(
                     is SessionListError.PinFailed -> R.string.sessions_error_pin
                     is SessionListError.ArchiveFailed -> R.string.sessions_error_archive
                     is SessionListError.RenameFailed -> R.string.sessions_error_rename
+                    is SessionListError.GroupFailed -> R.string.sessions_error_group
                     is SessionListError.DeleteFailed -> R.string.sessions_error_delete
                     is SessionListError.ReopenFailed -> R.string.sessions_error_reopen
                     is SessionListError.MachinesRefreshFailed -> R.string.sessions_error_machines
@@ -225,6 +229,12 @@ fun SessionListScreen(
                         onSwipeEnd = { row ->
                             if (row.summary.active) viewModel.archiveSession(row.id) else deleteRow = row
                         },
+                        onSetGroup = { id, group -> viewModel.setGroup(id, group) },
+                        onRenameGroup = { from, to ->
+                            groupSectionFrom = from
+                            groupDraft = to
+                        },
+                        onDissolveGroup = { viewModel.changeGroup(it, null) },
                     )
                 }
             }
@@ -276,6 +286,15 @@ fun SessionListScreen(
                 viewModel.markRead(row.id)
                 sheetRow = null
             },
+            onRequestGroup = {
+                groupDraft = row.summary.metadata?.group.orEmpty()
+                groupRow = row
+                sheetRow = null
+            },
+            onLeaveGroup = {
+                viewModel.setGroup(row.id, null)
+                sheetRow = null
+            },
         )
     }
     renameRow?.let { row ->
@@ -286,6 +305,31 @@ fun SessionListScreen(
                 renameRow = null
             },
             onDismiss = { renameRow = null },
+        )
+    }
+    groupRow?.let { row ->
+        SessionGroupDialog(
+            title = stringResource(
+                if (row.summary.metadata?.group.isNullOrBlank()) R.string.sessions_action_join_group
+                else R.string.sessions_action_change_group
+            ),
+            initialName = groupDraft,
+            onConfirm = { name ->
+                viewModel.setGroup(row.id, name)
+                groupRow = null
+            },
+            onDismiss = { groupRow = null },
+        )
+    }
+    groupSectionFrom?.let { from ->
+        SessionGroupDialog(
+            title = stringResource(R.string.sessions_group_rename),
+            initialName = groupDraft,
+            onConfirm = { name ->
+                viewModel.changeGroup(from, name)
+                groupSectionFrom = null
+            },
+            onDismiss = { groupSectionFrom = null },
         )
     }
     deleteRow?.let { row ->
@@ -309,25 +353,60 @@ private fun SessionRows(
     onLongPress: (SessionRowUi) -> Unit,
     onSwipePin: (SessionRowUi) -> Unit = {},
     onSwipeEnd: (SessionRowUi) -> Unit = {},
+    onSetGroup: (String, String?) -> Unit = { _, _ -> },
+    onRenameGroup: (String, String) -> Unit = { _, _ -> },
+    onDissolveGroup: (String) -> Unit = {},
 ) {
+    var collapsedGroups by remember { mutableStateOf(emptySet<String>()) }
+    val grouped = rows.filter { !it.summary.metadata?.group?.trim().isNullOrEmpty() }
+    val ungrouped = rows.filter { it.summary.metadata?.group?.trim().isNullOrEmpty() }
+    val groups = grouped.groupBy { it.summary.metadata?.group?.trim() ?: "" }
+        .toList()
+        .sortedByDescending { (_, members) -> members.maxOf { it.summary.lastUserMessageAt ?: it.summary.updatedAt } }
     // The sort contract puts globalPinned/pinned rows first; the boundary
     // index is where the pinned section ends.
-    val pinnedCount = rows.takeWhile {
+    val pinnedCount = ungrouped.takeWhile {
         it.summary.globalPinned == true || it.summary.pinned == true
     }.size
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
+        groups.forEach { (name, members) ->
+            val key = "group:$name"
+            val collapsed = name in collapsedGroups
+            item(key = key) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionHeader(name)
+                    Spacer(modifier = Modifier.weight(1f))
+                    TextButton(onClick = { onRenameGroup(name, name) }) {
+                        Text(text = "✎")
+                    }
+                    TextButton(onClick = { onDissolveGroup(name) }) {
+                        Text(text = "×")
+                    }
+                    TextButton(onClick = {
+                        collapsedGroups = if (collapsed) collapsedGroups - name else collapsedGroups + name
+                    }) {
+                        Text(text = if (collapsed) "›" else "⌄")
+                    }
+                }
+            }
+            if (!collapsed) {
+                items(members, key = { it.id }) { row ->
+                    SwipeableSessionRow(row, onOpen, onLongPress, onSwipePin, onSwipeEnd)
+                }
+            }
+        }
         if (pinnedCount > 0) {
             item(key = "header-pinned") { SectionHeader(stringResource(R.string.sessions_section_pinned)) }
         }
-        items(rows.take(pinnedCount), key = { it.id }) { row ->
+        items(ungrouped.take(pinnedCount), key = { it.id }) { row ->
             SwipeableSessionRow(row, onOpen, onLongPress, onSwipePin, onSwipeEnd)
         }
-        if (pinnedCount in 1 until rows.size) {
+        if (pinnedCount in 1 until ungrouped.size) {
             // "Recent", not "Sessions": the top bar title already says so.
             item(key = "header-recent") { SectionHeader(stringResource(R.string.sessions_section_recent)) }
         }
-        items(rows.drop(pinnedCount), key = { it.id }) { row ->
+        items(ungrouped.drop(pinnedCount), key = { it.id }) { row ->
             SwipeableSessionRow(row, onOpen, onLongPress, onSwipePin, onSwipeEnd)
         }
     }
@@ -736,6 +815,8 @@ private fun SessionActionsSheet(
     onReopen: () -> Unit,
     onDelete: () -> Unit,
     onMarkRead: () -> Unit = {},
+    onRequestGroup: () -> Unit = {},
+    onLeaveGroup: () -> Unit = {},
 ) {
     val summary = row.summary
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -758,6 +839,16 @@ private fun SessionActionsSheet(
         }
         if (summary.globalPinned != true) {
             SheetAction(stringResource(R.string.sessions_action_pin_global)) { onSetPinMode(PinMode.Global) }
+        }
+        SheetAction(
+            stringResource(
+                if (summary.metadata?.group.isNullOrBlank()) R.string.sessions_action_join_group
+                else R.string.sessions_action_change_group
+            ),
+            onClick = onRequestGroup,
+        )
+        if (!summary.metadata?.group.isNullOrBlank()) {
+            SheetAction(stringResource(R.string.sessions_action_leave_group), onClick = onLeaveGroup)
         }
         SheetAction(stringResource(R.string.sessions_action_rename), onClick = onRename)
         if (!summary.active) {
