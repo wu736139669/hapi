@@ -182,20 +182,19 @@ struct SessionConfigView: View {
 
     private var modelRow: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SessionConfigMenu(title: "Model", value: Text(verbatim: model.modelLabel)) {
-                Picker("Model", selection: Binding(
-                    get: { model.currentModel }, set: { model.selectModel($0) }
-                )) {
-                    if let current = model.unlistedModelOption {
-                        Text(verbatim: current.label).tag(current.value).disabled(true)
-                    }
-                    ForEach(model.config.modelOptions ?? [], id: \.value) { option in
-                        Text(verbatim: option.label)
-                            .tag(option.value)
-                            .accessibilityIdentifier("session-config-model-\(option.value ?? "default")")
-                    }
+            // A Menu/Picker with hundreds of OpenCode models re-laid out its
+            // whole inline Picker on every config update (lag + scroll reset).
+            // A pushed List is lazy and keeps its scroll position.
+            NavigationLink {
+                SessionModelPicker(
+                    options: model.config.modelOptions ?? [],
+                    unlisted: model.unlistedModelOption,
+                    selected: model.currentModel
+                ) { value in
+                    model.selectModel(value)
                 }
-                .pickerStyle(.inline)
+            } label: {
+                SessionConfigSummaryRow(title: "Model", value: Text(verbatim: model.modelLabel))
             }
             .disabled(model.config.modelOptionsLoading || model.modelLoadFailed || model.config.modelOptions?.isEmpty != false)
             .accessibilityIdentifier("session-config-model")
@@ -360,5 +359,89 @@ private extension PermissionModeTone {
         case .warning: .orange
         case .neutral, .info: .primary
         }
+    }
+}
+
+/// Searchable, lazy model list for the session config sheet. OpenCode can
+/// report hundreds of provider-qualified models; a Menu was both janky and
+/// scroll-resetting under config updates.
+private struct SessionModelPicker: View {
+    let unlisted: CatalogOption?
+    let selected: String?
+    let onSelect: (String?) -> Void
+
+    /// Snapshot on push: config updates (SSE keep-alives, sibling patches)
+    /// must not rebuild the list while the user is scrolling.
+    @State private var options: [CatalogOption]
+    @State private var query = ""
+    @Environment(\.dismiss) private var dismiss
+
+    init(
+        options: [CatalogOption],
+        unlisted: CatalogOption?,
+        selected: String?,
+        onSelect: @escaping (String?) -> Void
+    ) {
+        self.unlisted = unlisted
+        self.selected = selected
+        self.onSelect = onSelect
+        _options = State(initialValue: options)
+    }
+
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var filtered: [CatalogOption] {
+        guard !trimmedQuery.isEmpty else { return options }
+        return options.filter {
+            $0.label.localizedCaseInsensitiveContains(trimmedQuery)
+                || ($0.value?.localizedCaseInsensitiveContains(trimmedQuery) ?? false)
+        }
+    }
+
+    private var visibleUnlisted: CatalogOption? {
+        guard let unlisted, trimmedQuery.isEmpty
+                || unlisted.label.localizedCaseInsensitiveContains(trimmedQuery)
+                || (unlisted.value?.localizedCaseInsensitiveContains(trimmedQuery) ?? false)
+        else { return nil }
+        return unlisted
+    }
+
+    var body: some View {
+        List {
+            if let unlisted = visibleUnlisted {
+                row(unlisted, enabled: false)
+                    .accessibilityIdentifier("session-config-model-unlisted")
+            }
+            ForEach(filtered, id: \.self) { option in
+                row(option, enabled: true)
+                    .accessibilityIdentifier("session-config-model-\(option.value ?? "default")")
+            }
+        }
+        .searchable(text: $query, prompt: "Search models")
+        .navigationTitle("Model")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func row(_ option: CatalogOption, enabled: Bool) -> some View {
+        Button {
+            onSelect(option.value)
+            dismiss()
+        } label: {
+            HStack(spacing: 10) {
+                Text(verbatim: option.label)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 8)
+                if option.value == selected {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.tint)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
     }
 }

@@ -201,15 +201,23 @@ final class SessionConfigTests: XCTestCase {
     }
 
     func testCapabilitiesAndUnsupportedAgentsRemainCatalogDriven() async throws {
-        for flavor in ["pi", "dsh"] {
-            let harness = try await SessionConfigTestHarness(flavor: flavor)
-            XCTAssertFalse(harness.model.hasSettings)
-            harness.model.selectPermission(.yolo)
-            harness.model.selectModel("opus")
-            harness.model.selectEffort("high")
-            let posts = await harness.http.posts
-            XCTAssertTrue(posts.isEmpty)
-        }
+        let pi = try await SessionConfigTestHarness(flavor: "pi")
+        XCTAssertFalse(pi.model.hasSettings)
+        pi.model.selectPermission(.yolo)
+        pi.model.selectModel("opus")
+        pi.model.selectEffort("high")
+        let piPosts = await pi.http.posts
+        XCTAssertTrue(piPosts.isEmpty)
+
+        // DSH has permission modes now (workspace-write / danger-full-access),
+        // but a mode outside its catalog still must not post.
+        let dsh = try await SessionConfigTestHarness(flavor: "dsh")
+        XCTAssertTrue(dsh.model.hasSettings)
+        dsh.model.selectPermission(.yolo)
+        dsh.model.selectModel("opus")
+        dsh.model.selectEffort("high")
+        let dshPosts = await dsh.http.posts
+        XCTAssertTrue(dshPosts.isEmpty)
         let harness = try await SessionConfigTestHarness(flavor: "codex")
         harness.store.updateDetailLocal("config") {
             $0.active = false
