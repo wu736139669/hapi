@@ -84,21 +84,19 @@ public enum SessionListGrouping {
 
         // User-defined groups have priority: grouped sessions appear only in
         // their group, never in pinned buckets or project directories.
-        let grouped = sessions.filter { session in
-            guard let name = session.metadata?.group?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !name.isEmpty else { return false }
-            return true
-        }
-        let visible = sessions.filter { session in
-            guard let name = session.metadata?.group?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !name.isEmpty else { return true }
-            return false
-        }
-
+        // Resolve + trim each name ONCE per session — this runs on the
+        // snapshot path (enter/leave chat), so repeating trim per pass was
+        // measurable on large hubs.
         var byGroupName: [String: [SessionSummary]] = [:]
-        for session in grouped {
-            let name = session.metadata!.group!.trimmingCharacters(in: .whitespacesAndNewlines)
-            byGroupName[name, default: []].append(session)
+        var visible: [SessionSummary] = []
+        for session in sessions {
+            if let raw = session.metadata?.group,
+               !raw.isEmpty,
+               let name = Self.trimmedGroup(raw), !name.isEmpty {
+                byGroupName[name, default: []].append(session)
+            } else {
+                visible.append(session)
+            }
         }
         let sortedGroups = byGroupName.map { name, members -> (SessionListGroup, Int) in
             let latest = members.reduce(Int.min) { max($0, $1.lastUserMessageAt ?? $1.createdAt ?? 0) }
@@ -250,6 +248,11 @@ public enum SessionListGrouping {
         entries
             .filter { !$0.1.isEmpty }
             .map { SessionListBucketGroup(bucket: $0.0, sessions: $0.1) }
+    }
+
+    private static func trimmedGroup(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func projectPath(_ summary: SessionSummary) -> String {
