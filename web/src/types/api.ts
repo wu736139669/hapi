@@ -13,12 +13,17 @@ import type { DshLocalSessionSummary as ProtocolDshLocalSessionSummary } from '@
 
 export type {
     AgyModelsResponse,
+    AbortChunkedUploadResponse,
     AgentAvailabilityResponse,
     AgentAvailabilityEntry,
     AgentQuotaAccount,
     AgentQuotaBucket,
     AgentQuotasResponse,
     AgyModelSummary,
+    InitChunkedUploadRequest,
+    InitChunkedUploadResponse,
+    UploadChunkResponse,
+    UploadErrorCode,
     CodexModelsResponse,
     CodexModelSummary,
     DshModelsResponse,

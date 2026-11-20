@@ -326,7 +326,7 @@ function createWebApp(options: {
     app.route('/api', createPermissionsRoutes(options.getSyncEngine))
     app.route('/api', createMachinesRoutes(options.getSyncEngine, options.getTeamService, { dataDir: configuration.dataDir }))
     app.route('/api', createStorageRoutes(configuration.dbPath))
-    app.route('/api', createHubSettingsRoutes(configuration.dataDir, () => configuration.teamsEnabled))
+    app.route('/api', createHubSettingsRoutes(configuration.dataDir, () => configuration.teamsEnabled, options.getSyncEngine))
     // Team dashboard usage: scanning the usage ledger is heavier than the other
     // reads, so keep one namespace-wide per-session map for a minute and filter
     // it per request. Usage stays owner-only, matching /api/usage/summary.

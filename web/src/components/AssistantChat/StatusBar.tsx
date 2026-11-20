@@ -225,6 +225,7 @@ export function StatusBar(props: {
     copilotAgentMode?: import('@hapi/protocol').CopilotAgentMode
     agentFlavor?: string | null
     voiceStatus?: ConversationStatus
+    onPendingRequestClick?: (requestId: string) => void
 }) {
     const { t } = useTranslation()
     const { preferences: headerMetadata } = useSessionHeaderMetadata()

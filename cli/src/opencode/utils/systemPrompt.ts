@@ -1,5 +1,5 @@
 /**
- * OpenCode-specific system prompt for hapi MCP tools (change_title, display_image, display_video, display_media).
+ * OpenCode-specific system prompt for HAPI title, peer, and skill tools.
  *
  * OpenCode exposes MCP tools with the naming pattern: <server-name>_<tool-name>
  * The hapi MCP server exposes `change_title`, `display_image`, `display_video`, and `display_media`.
@@ -15,7 +15,7 @@ import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryIn
 import { withTeamInstruction } from '@/modules/team/teamPrompt';
 
 /**
- * Title and display_image / display_video / display_media instructions for OpenCode to call the hapi MCP tools.
+ * Title, peer, and skill instructions for OpenCode to call the HAPI MCP tools.
  */
 export const TITLE_INSTRUCTION = trimIdent(`
     ${HAPI_MCP_BRIDGE_PROMPT}

@@ -6,6 +6,7 @@ import { Hono } from 'hono'
 import { STOCK_PEER_SPAWN_DEFAULTS } from '@hapi/protocol/peerSpawnDefaults'
 import type { WebAppEnv } from '../middleware/auth'
 import { createHubSettingsRoutes } from './hubSettings'
+import { writeAutoBridgeTransientModelErrorsEnabled } from '../../config/autoBridgeTransientModelErrors'
 import { writeSessionSummaryContractEnabled } from '../../config/sessionSummaryContract'
 import { writeSessionSummaryInChatEnabled } from '../../config/sessionSummaryInChat'
 
@@ -32,7 +33,7 @@ describe('GET/PUT /api/hub-settings', () => {
         return { app, dataDir }
     }
 
-    it('returns default off for emit, chat display, and stock peer spawn defaults', async () => {
+    it('returns default off for emit, chat display, auto-bridge, and stock peer spawn defaults', async () => {
         const { app } = await createApp()
         const response = await app.request('/api/hub-settings')
         expect(response.status).toBe(200)
@@ -42,11 +43,12 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryInChat: false,
             teamsEnabled: false,
             teamsEnabledActive: false,
+            autoBridgeTransientModelErrors: false,
             peerSpawnDefaults: stockPeerSpawnDefaults
         })
     })
 
-    it('persists emit toggle for owner without changing display', async () => {
+    it('persists emit toggle for owner without changing display or auto-bridge', async () => {
         const { app } = await createApp()
         const put = await app.request('/api/hub-settings', {
             method: 'PUT',
@@ -59,6 +61,7 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryInChat: false,
             teamsEnabled: false,
             teamsEnabledActive: false,
+            autoBridgeTransientModelErrors: false,
             peerSpawnDefaults: stockPeerSpawnDefaults
         })
 
@@ -68,6 +71,7 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryInChat: false,
             teamsEnabled: false,
             teamsEnabledActive: false,
+            autoBridgeTransientModelErrors: false,
             peerSpawnDefaults: stockPeerSpawnDefaults
         })
     })
@@ -87,6 +91,23 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryInChat: true,
             teamsEnabled: false,
             teamsEnabledActive: false,
+            autoBridgeTransientModelErrors: false,
+            peerSpawnDefaults: stockPeerSpawnDefaults
+        })
+    })
+
+    it('persists autoBridgeTransientModelErrors toggle for owner', async () => {
+        const { app } = await createApp()
+        const put = await app.request('/api/hub-settings', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ autoBridgeTransientModelErrors: true })
+        })
+        expect(put.status).toBe(200)
+        expect(await put.json()).toEqual({
+            sessionSummaryContract: false,
+            sessionSummaryInChat: false,
+            autoBridgeTransientModelErrors: true,
             peerSpawnDefaults: stockPeerSpawnDefaults
         })
     })
@@ -110,6 +131,7 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryInChat: false,
             teamsEnabled: false,
             teamsEnabledActive: false,
+            autoBridgeTransientModelErrors: false,
             peerSpawnDefaults: {
                 agent: 'cursor',
                 permissionMode: 'yolo',
@@ -152,6 +174,7 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryInChat: false,
             teamsEnabled: false,
             teamsEnabledActive: false,
+            autoBridgeTransientModelErrors: false,
             peerSpawnDefaults: {
                 agent: 'codex',
                 permissionMode: 'default',
@@ -170,6 +193,20 @@ describe('GET/PUT /api/hub-settings', () => {
             body: JSON.stringify({ sessionSummaryContract: 'yes' })
         })
         expect(response.status).toBe(400)
+    })
+
+    it('rejects combined two-field updates', async () => {
+        const { app } = await createApp()
+        const response = await app.request('/api/hub-settings', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                sessionSummaryContract: true,
+                autoBridgeTransientModelErrors: true
+            })
+        })
+        expect(response.status).toBe(400)
+        expect(await response.json()).toEqual({ error: 'Update one hub setting per request' })
     })
 
     it('rejects retired gemini as peer spawn default agent', async () => {
@@ -212,6 +249,7 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryInChat: true,
             teamsEnabled: false,
             teamsEnabledActive: false,
+            autoBridgeTransientModelErrors: false,
             peerSpawnDefaults: stockPeerSpawnDefaults
         })
 
@@ -247,12 +285,14 @@ describe('GET/PUT /api/hub-settings', () => {
         const { app, dataDir } = await createApp()
         await writeSessionSummaryContractEnabled(dataDir, true)
         await writeSessionSummaryInChatEnabled(dataDir, true)
+        await writeAutoBridgeTransientModelErrorsEnabled(dataDir, true)
         const response = await app.request('/api/hub-settings')
         expect(await response.json()).toEqual({
             sessionSummaryContract: true,
             sessionSummaryInChat: true,
             teamsEnabled: false,
             teamsEnabledActive: false,
+            autoBridgeTransientModelErrors: true,
             peerSpawnDefaults: stockPeerSpawnDefaults
         })
     })

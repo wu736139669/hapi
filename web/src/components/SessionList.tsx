@@ -893,6 +893,19 @@ export function normalizeSearch(value: string | null | undefined): string {
     return (value ?? '').trim().toLowerCase()
 }
 
+export type SessionSearchMode = 'default' | 'exclude'
+
+export function sessionMatchesSearchMode(
+    session: SessionSummary,
+    query: string,
+    machineLabel: string,
+    mode: SessionSearchMode = 'default'
+): boolean {
+    if (!query) return true
+    const matches = sessionMatchesQuery(session, query, machineLabel)
+    return mode === 'exclude' ? !matches : matches
+}
+
 
 export function getVisibleSessionPreview(
     sessions: SessionSummary[],

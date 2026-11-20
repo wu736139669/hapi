@@ -139,21 +139,6 @@ struct SessionListView: View {
             .disabled(!SessionNameRules.isValid(renameText))
         }
         .alert(
-            "Change Group",
-            isPresented: Binding(
-                get: { groupRowTarget != nil },
-                set: { if !$0 { groupRowTarget = nil } }
-            ),
-            presenting: groupRowTarget
-        ) { row in
-            TextField("Group name", text: $groupText)
-            Button("Cancel", role: .cancel) {}
-            Button("Save") {
-                let name = groupText.trimmingCharacters(in: .whitespacesAndNewlines)
-                model.setGroup(sessionId: row.id, group: name.isEmpty ? nil : name)
-            }
-        }
-        .alert(
             "Rename Group",
             isPresented: Binding(
                 get: { groupSectionTarget != nil },
@@ -837,7 +822,6 @@ struct SessionRowView: View {
         .overlay(alignment: .bottomTrailing) {
             SessionPresenceBadge(presence: row.presence, size: metrics.iconSize * 0.3)
                 .offset(x: 2, y: 2)
-            }
         }
     }
 

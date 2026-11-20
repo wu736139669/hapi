@@ -684,6 +684,8 @@ type SessionChatProps = {
     onInitialOutlineConsumed?: () => void
     initialTargetMessageId?: string
     initialTargetMessageQuery?: string
+    initialPendingRequestId?: string
+    onInitialPendingRequestConsumed?: () => void
     searchRequestId?: number
     onLoadMessageContext?: (messageId: string) => Promise<boolean>
     onInitialTargetConsumed?: () => void

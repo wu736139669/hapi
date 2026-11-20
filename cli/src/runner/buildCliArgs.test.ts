@@ -401,6 +401,8 @@ describe('buildCliArgs', () => {
     })
 
     it('builds a remote DSH runner command with the Web runtime permission policy', () => {
+        // dsh accepts the standard permission flags since the DSH_PERMISSION_MODE
+        // spawn mapping: read-only/yolo pin the server's sandbox preset.
         const args = buildCliArgs('dsh', {
             directory: '/tmp',
             existingSessionId: 'existing-hub-id',

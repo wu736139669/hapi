@@ -9,6 +9,8 @@ import {
 } from '../../config/settings'
 import { writeTeamsEnabled } from '../../config/teamsSetting'
 import { applyPeerSpawnDefaultsPatch } from '../../config/peerSpawnDefaults'
+import { writeAutoBridgeTransientModelErrorsEnabled } from '../../config/autoBridgeTransientModelErrors'
+import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 
 const OWNER_ONLY_ERROR = 'Hub settings are only available to the hub owner'
@@ -21,13 +23,15 @@ function toHubSettings(settings: Settings, teamsEnabledActive: boolean): HubSett
         // process (env override wins, file edits apply on restart).
         teamsEnabled: settings.teamsEnabled === true,
         teamsEnabledActive,
+        autoBridgeTransientModelErrors: settings.autoBridgeTransientModelErrors === true,
         peerSpawnDefaults: mergePeerSpawnDefaults(settings.peerSpawnDefaults)
     }
 }
 
 export function createHubSettingsRoutes(
     dataDir: string,
-    getActiveTeamsEnabled: () => boolean = () => false
+    getActiveTeamsEnabled: () => boolean = () => false,
+    getSyncEngine?: () => SyncEngine | null
 ): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
@@ -50,6 +54,38 @@ export function createHubSettingsRoutes(
         }
         if (parsed.data.teamsEnabled !== undefined) {
             await writeTeamsEnabled(dataDir, parsed.data.teamsEnabled)
+        }
+        const providedFieldCount = [
+            parsed.data.sessionSummaryContract,
+            parsed.data.sessionSummaryInChat,
+            parsed.data.autoBridgeTransientModelErrors,
+            parsed.data.teamsEnabled
+        ].filter((value) => value !== undefined).length
+        if (providedFieldCount > 1) {
+            return c.json({ error: 'Update one hub setting per request' }, 400)
+        }
+        // Auto-bridge is not a plain settings write: SyncEngine fans the pref out
+        // to live Cursor CLIs and rolls the disk value back if any session refuses.
+        // Keep it outside the updateSettings transaction so the engine owns both
+        // halves under its own lock; the write still goes through updateSettings
+        // underneath, so the settings read cache stays write-through fresh.
+        if (parsed.data.autoBridgeTransientModelErrors !== undefined) {
+            const enabled = parsed.data.autoBridgeTransientModelErrors
+            const engine = getSyncEngine?.() ?? null
+            if (engine) {
+                try {
+                    // Disk write + fanout + rollback share SyncEngine's lock so
+                    // concurrent PUTs cannot leave CLI prefs ahead of settings.json.
+                    await engine.applyAutoBridgeTransientModelErrorsSetting(dataDir, enabled)
+                } catch (error) {
+                    const message = error instanceof Error
+                        ? error.message
+                        : 'Failed to update every active Cursor session'
+                    return c.json({ error: message }, 409)
+                }
+            } else {
+                await writeAutoBridgeTransientModelErrorsEnabled(dataDir, enabled)
+            }
         }
         const response = await updateSettings(getSettingsFile(dataDir), (current) => {
             const settings: Settings = { ...current }

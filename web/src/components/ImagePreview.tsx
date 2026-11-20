@@ -61,6 +61,13 @@ export function ImagePreview(props: {
     onTriggerPointerDown?: (event: PointerEvent<HTMLButtonElement>) => void
     onTriggerContextMenu?: (event: MouseEvent<HTMLButtonElement>) => void
     onTriggerClick?: (event: MouseEvent<HTMLButtonElement>) => void
+    /** Gate opening the viewer (e.g. while the full attachment is still loading). */
+    disabled?: boolean
+    loading?: 'lazy' | 'eager'
+    referrerPolicy?: React.HTMLAttributeReferrerPolicy
+    thumbnailProps?: { title?: string }
+    onThumbnailLoad?: () => void
+    onThumbnailError?: () => void
 }) {
     const router = useRouter({ warn: false })
     const [viewerOpen, setViewerOpen] = useState(false)
@@ -324,7 +331,8 @@ export function ImagePreview(props: {
                 onMouseDown={stopEvent}
                 onTouchStart={stopEvent}
                 onContextMenu={props.onTriggerContextMenu}
-                onClick={handleTriggerClick}
+                onClick={props.disabled ? undefined : handleTriggerClick}
+                disabled={props.disabled}
                 data-image-preview-trigger=""
                 data-image-preview-file-name={props.fileName}
                 data-image-preview-label={props.label}
@@ -334,14 +342,18 @@ export function ImagePreview(props: {
                 // Otherwise it can escape the chat viewport and make the app
                 // root scroll when history navigation calls scrollIntoView.
                 className={`relative ${props.buttonClassName ?? 'group flex min-h-[18rem] w-full items-center justify-center overflow-auto rounded-md border border-[var(--app-border)] bg-[var(--app-code-bg)] p-3 text-left'}`}
-                title="Click to zoom"
+                title={props.disabled ? 'Loading image' : 'Click to zoom'}
             >
                 <img
                     src={props.src}
                     alt={props.label}
                     className={props.imageClassName ?? 'max-h-[calc(100vh-14rem)] max-w-full object-contain transition-transform group-hover:scale-[1.01]'}
                     style={props.imageStyle}
-                    onError={props.onImageError}
+                    loading={props.loading}
+                    referrerPolicy={props.referrerPolicy}
+                    title={props.thumbnailProps?.title}
+                    onLoad={() => props.onThumbnailLoad?.()}
+                    onError={() => { props.onImageError?.(); props.onThumbnailError?.() }}
                     draggable={false}
                 />
                 {props.caption}

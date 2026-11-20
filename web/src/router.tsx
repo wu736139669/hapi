@@ -333,8 +333,22 @@ function SessionsPage() {
     const handleSelectSession = useCallback((
         sessionId: string,
         targetMessageId?: string,
-        targetMessageQuery?: string
+        targetMessageQuery?: string,
+        pendingRequestId?: string
     ) => {
+        if (pendingRequestId) {
+            navigate({
+                to: '/sessions/$sessionId',
+                params: { sessionId },
+                search: {
+                    ...(isSessionSidebarHidden(sidebarSearch) ? { sidebar: 'hidden' as const } : {}),
+                    pendingRequestId,
+                },
+                ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+            })
+            return
+        }
+
         // A content-search hit carries the message it matched, so the session
         // opens on that message rather than the tail.
         if (targetMessageId) {
@@ -584,7 +598,7 @@ function SessionPage() {
     const queryClient = useQueryClient()
     const { addToast } = useToast()
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
-    const { outline, share, messageId, messageQuery } = useSearch({ from: '/sessions/$sessionId' })
+    const { outline, share, messageId, messageQuery, pendingRequestId } = useSearch({ from: '/sessions/$sessionId' })
     const {
         effectiveMessageId: effectiveInitialMessageId,
         effectiveMessageQuery: effectiveInitialMessageQuery,
@@ -1043,6 +1057,15 @@ function SessionPage() {
         })
     }, [navigate, sessionId])
 
+    const handleInitialPendingRequestConsumed = useCallback(() => {
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId },
+            replace: true,
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
+    }, [navigate, sessionId])
+
     const handleInitialMessageConsumed = useCallback(() => {
         if (messageId) {
             consumeMessageTarget()
@@ -1175,6 +1198,8 @@ function SessionPage() {
             initialTargetMessageId={hasCompleteInitialMessageTarget ? effectiveInitialMessageId : undefined}
             initialTargetMessageQuery={hasCompleteInitialMessageTarget ? effectiveInitialMessageQuery : undefined}
             searchRequestId={searchRequestId}
+            initialPendingRequestId={pendingRequestId}
+            onInitialPendingRequestConsumed={handleInitialPendingRequestConsumed}
             onLoadMessageContext={loadMessageContextForSession}
             onInitialTargetConsumed={handleInitialMessageConsumed}
             onSearchTargetDismissed={handleSearchTargetDismissed}
@@ -1450,13 +1475,16 @@ const sessionsIndexRoute = createRoute({
 const sessionDetailRoute = createRoute({
     getParentRoute: () => sessionsRoute,
     path: '$sessionId',
-    validateSearch: (search: Record<string, unknown>): { outline?: boolean; guest?: boolean; share?: string; lang?: 'en' | 'zh-CN' | 'ru'; sidebar?: 'hidden'; messageId?: string; messageQuery?: string } => {
+    validateSearch: (search: Record<string, unknown>): { outline?: boolean; guest?: boolean; share?: string; lang?: 'en' | 'zh-CN' | 'ru'; sidebar?: 'hidden'; messageId?: string; messageQuery?: string; pendingRequestId?: string } => {
         const outline = search.outline === true || search.outline === 'true'
         const guest = search.guest === true || search.guest === 'true'
         const share = typeof search.share === 'string' && search.share.length > 0 ? search.share : undefined
         const lang = search.lang === 'en' || search.lang === 'zh-CN' || search.lang === 'ru' ? search.lang : undefined
         const sidebar = search.sidebar === 'hidden' ? 'hidden' : undefined
         const messageTarget = normalizeMessageSearchTarget(search.messageId, search.messageQuery)
+        const pendingRequestId = typeof search.pendingRequestId === 'string' && search.pendingRequestId.trim()
+            ? search.pendingRequestId.trim()
+            : undefined
         return {
             ...(outline ? { outline: true } : {}),
             ...(guest ? { guest: true } : {}),
@@ -1464,6 +1492,7 @@ const sessionDetailRoute = createRoute({
             ...(lang ? { lang } : {}),
             ...(sidebar ? { sidebar } : {}),
             ...messageTarget,
+            ...(pendingRequestId ? { pendingRequestId } : {}),
         }
     },
     component: SessionDetailRoute,
@@ -1748,10 +1777,16 @@ export const routeTree = rootRoute.addChildren([
 
 type RouterHistory = Parameters<typeof createRouter>[0]['history']
 
-export function createAppRouter(history?: RouterHistory) {
+function normalizeRouterBasepath(baseUrl: string): string {
+    const normalized = baseUrl.replace(/\/+$/, '')
+    return normalized || '/'
+}
+
+export function createAppRouter(history?: RouterHistory, basepath = normalizeRouterBasepath(import.meta.env.BASE_URL)) {
     return createRouter({
         routeTree,
         history,
+        basepath,
         scrollRestoration: true,
         getScrollRestorationKey,
     })

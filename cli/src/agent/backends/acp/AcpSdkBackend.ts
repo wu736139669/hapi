@@ -1,7 +1,7 @@
 import type { AgentFlavor } from '@hapi/protocol';
 import type { AgentBackend, AgentMessage, AgentSessionConfig, FormElicitationRequest, FormElicitationResponse, PermissionRequest, PermissionResponse, PromptContent } from '@/agent/types';
 import { asString, isObject } from '@hapi/protocol';
-import { AcpStdioTransport, type AcpStderrError } from './AcpStdioTransport';
+import { AcpStdioTransport, isAcpIndeterminateError, type AcpStderrError } from './AcpStdioTransport';
 import { AcpMessageHandler, type AcpTextChunkMode } from './AcpMessageHandler';
 import { ACP_SESSION_UPDATE_TYPES, OPENCODE_CHILD_SESSION_UPDATES, OPENCODE_CHILD_UPDATE_METHOD } from './constants';
 import { thinkingHintFromSessionUpdate } from './shouldBumpThinkingFromSessionUpdate';
@@ -45,6 +45,7 @@ type AcpUsageUpdate = {
 type PromptRequestResult = {
     stopReason: string | null;
     usage: AcpPromptUsage | null;
+    numTurns?: number;
 };
 
 type OpenCodeNativePromptOptions = {
@@ -386,6 +387,19 @@ export class AcpSdkBackend implements AgentBackend {
         return Boolean(capabilities && Object.prototype.hasOwnProperty.call(capabilities, 'resume'));
     }
 
+    /**
+     * Whether the initialize result advertises inline image prompt content
+     * (`agentCapabilities.promptCapabilities.image`, e.g. DSH 0.2.2+).
+     *
+     * Callers must gate image content blocks on this: sending
+     * `{type:'image'}` blocks to an agent that never advertised the
+     * capability rejects the whole session/prompt.
+     */
+    supportsImagePrompts(): boolean {
+        const promptCapabilities = this.initializeResult?.agentCapabilities?.promptCapabilities;
+        return isObject(promptCapabilities) && promptCapabilities.image === true;
+    }
+
     getSessionConfigOptions(sessionId: string): AcpConfigOptionDescriptor[] | undefined {
         return this.sessionConfigOptions.get(sessionId);
     }
@@ -507,6 +521,13 @@ export class AcpSdkBackend implements AgentBackend {
             }),
             {
                 ...AcpSdkBackend.INIT_RETRY_OPTIONS,
+                // Only transport-indeterminate failures (child exited,
+                // transport closed, failed stdin write) are worth retrying.
+                // dsh answers a mismatched cwd (compared by realpath) or an
+                // already-active session with a TERMINAL invalidParams
+                // rejection; retrying it just delays the caller's
+                // fresh-session fallback by the full backoff chain.
+                shouldRetry: isAcpIndeterminateError,
                 onRetry: (error, attempt, nextDelayMs) => {
                     logger.debug(`[ACP] session/resume attempt ${attempt} failed, retrying in ${nextDelayMs}ms`, error);
                 }
@@ -754,26 +775,34 @@ export class AcpSdkBackend implements AgentBackend {
         sessionId: string,
         content: PromptContent[],
         onUpdate: (msg: AgentMessage) => void,
-        // prompt() waits for earlier output before it sends and for late output
-        // after the answer; callers timing the agent itself need both moments.
-        timing?: { onSent?: () => void; onAnswered?: () => void }
-    ): Promise<void> {
+        options?: {
+            /**
+             * Re-checked immediately before the send. Returning false aborts
+             * the turn without prompting (e.g. a queued bridge superseded by a
+             * real user turn); prompt() then resolves false.
+             */
+            shouldSend?: () => boolean
+            // prompt() waits for earlier output before it sends and for late output
+            // after the answer; callers timing the agent itself need both moments.
+            timing?: { onSent?: () => void; onAnswered?: () => void }
+        }
+    ): Promise<boolean> {
         return await this.runPrompt(sessionId, content, onUpdate, async () => {
             if (!this.transport) {
                 throw new Error('ACP transport not initialized');
             }
 
-            let response: unknown;
-            response = await this.transport.sendRequest('session/prompt', {
+            const response = await this.transport.sendRequest('session/prompt', {
                 sessionId,
                 prompt: content
             }, { timeoutMs: Infinity });
 
             return {
                 stopReason: isObject(response) ? asString(response.stopReason) : null,
-                usage: this.extractPromptUsage(response)
+                usage: this.extractPromptUsage(response),
+                numTurns: this.extractNumTurns(response)
             };
-        }, timing);
+        }, options);
     }
 
     /**
@@ -788,8 +817,12 @@ export class AcpSdkBackend implements AgentBackend {
         sessionId: string,
         content: PromptContent[],
         onUpdate: (msg: AgentMessage) => void,
-        options: OpenCodeNativePromptOptions
-    ): Promise<void> {
+        options: OpenCodeNativePromptOptions,
+        promptOptions?: {
+            shouldSend?: () => boolean
+            timing?: { onSent?: () => void; onAnswered?: () => void }
+        }
+    ): Promise<boolean> {
         return await this.runPrompt(sessionId, content, onUpdate, async () => {
             const controller = new AbortController();
             this.nativePromptAbortController = controller;
@@ -833,7 +866,8 @@ export class AcpSdkBackend implements AgentBackend {
                 const info = isObject(payload) && isObject(payload.info) ? payload.info : null;
                 return {
                     stopReason: asString(info?.finish) ?? (isObject(payload) ? asString(payload.stopReason) : null),
-                    usage: this.extractPromptUsage(payload)
+                    usage: this.extractPromptUsage(payload),
+                    numTurns: this.extractNumTurns(payload)
                 };
             } finally {
                 if (this.nativePromptAbortController === controller) {
@@ -841,7 +875,7 @@ export class AcpSdkBackend implements AgentBackend {
                     this.nativePromptAbortOptions = null;
                 }
             }
-        });
+        }, promptOptions);
     }
 
     private async runPrompt(
@@ -849,8 +883,18 @@ export class AcpSdkBackend implements AgentBackend {
         content: PromptContent[],
         onUpdate: (msg: AgentMessage) => void,
         request: () => Promise<PromptRequestResult>,
-        timing?: { onSent?: () => void; onAnswered?: () => void }
-    ): Promise<void> {
+        options?: {
+            /**
+             * Re-checked immediately before the send. Returning false aborts
+             * the turn without prompting (e.g. a queued bridge superseded by a
+             * real user turn); prompt() then resolves false.
+             */
+            shouldSend?: () => boolean
+            // prompt() waits for earlier output before it sends and for late output
+            // after the answer; callers timing the agent itself need both moments.
+            timing?: { onSent?: () => void; onAnswered?: () => void }
+        }
+    ): Promise<boolean> {
         if (!this.transport) {
             throw new Error('ACP transport not initialized');
         }
@@ -868,6 +912,9 @@ export class AcpSdkBackend implements AgentBackend {
         );
         await this.sessionUpdateQueue;
         this.messageHandler?.drainBuffers();
+        if (options?.shouldSend && !options.shouldSend()) {
+            return false;
+        }
         this.messageHandler = new AcpMessageHandler(onUpdate, {
             textChunkMode: this.options.textChunkMode,
             flavor: this.options.flavor,
@@ -881,6 +928,7 @@ export class AcpSdkBackend implements AgentBackend {
         this.promptUsageCallback = onUpdate;
         this.childEmitSink = onUpdate;
         let stopReason: string | null = null;
+        let numTurns: number | undefined = undefined;
         let promptUsage: AcpPromptUsage | null = null;
 
         try {
@@ -888,15 +936,16 @@ export class AcpSdkBackend implements AgentBackend {
             let result: PromptRequestResult;
             try {
                 const pending = request();
-                timing?.onSent?.();
+                options?.timing?.onSent?.();
                 result = await pending;
             } finally {
                 this.promptRequestInFlight = false;
-                timing?.onAnswered?.();
+                options?.timing?.onAnswered?.();
             }
 
             stopReason = result.stopReason;
             promptUsage = result.usage;
+            numTurns = result.numTurns;
         } finally {
             this.promptRequestInFlight = false;
             // Cursor (#2267/#2268): drain any session updates already queued with
@@ -955,7 +1004,11 @@ export class AcpSdkBackend implements AgentBackend {
                     });
                 }
                 if (stopReason) {
-                    onUpdate({ type: 'turn_complete', stopReason });
+                    onUpdate({
+                        type: 'turn_complete',
+                        stopReason,
+                        ...(numTurns !== undefined ? { numTurns } : {})
+                    });
                 }
             } finally {
                 this.promptUsageCallback = null;
@@ -969,6 +1022,7 @@ export class AcpSdkBackend implements AgentBackend {
                 }
             }
         }
+        return true;
     }
 
     async cancelPrompt(sessionId: string): Promise<void> {
@@ -1226,9 +1280,12 @@ export class AcpSdkBackend implements AgentBackend {
         try {
             return await fn();
         } finally {
+            // A load/compact can finish before its first notification. Measure
+            // quiet from completion too, not only the previous prompt's idle time.
             await this.waitForSessionUpdateQuiet(
                 AcpSdkBackend.PRE_PROMPT_UPDATE_QUIET_PERIOD_MS,
-                AcpSdkBackend.PRE_PROMPT_UPDATE_DRAIN_TIMEOUT_MS
+                AcpSdkBackend.PRE_PROMPT_UPDATE_DRAIN_TIMEOUT_MS,
+                Date.now()
             );
             if (this.messageHandler === null) {
                 this.messageHandler = previousHandler;
@@ -1646,7 +1703,7 @@ export class AcpSdkBackend implements AgentBackend {
         }
     }
 
-    private async waitForSessionUpdateQuiet(quietMs: number, timeoutMs: number): Promise<void> {
+    private async waitForSessionUpdateQuiet(quietMs: number, timeoutMs: number, quietBaseline = 0): Promise<void> {
         if (quietMs <= 0 || timeoutMs <= 0) {
             return;
         }
@@ -1654,7 +1711,7 @@ export class AcpSdkBackend implements AgentBackend {
         const deadline = Date.now() + timeoutMs;
 
         while (Date.now() < deadline) {
-            const elapsedSinceUpdate = Date.now() - this.lastSessionUpdateAt;
+            const elapsedSinceUpdate = Date.now() - Math.max(this.lastSessionUpdateAt, quietBaseline);
             if (elapsedSinceUpdate >= quietMs) {
                 return;
             }
@@ -1836,6 +1893,26 @@ export class AcpSdkBackend implements AgentBackend {
         return typeof value === 'number' && Number.isFinite(value) ? value : null;
     }
 
+
+    /**
+     * The agent's own per-prompt turn count when its result carries one
+     * (google-antigravity/antigravity-cli#1045: agy ACP does not report it —
+     * HAPI then counts model calls from agy's transcript instead). Accepted
+     * from `usage.num_turns`/`numTurns`, the response top level, or `_meta`.
+     */
+    extractNumTurns(response: unknown): number | undefined {
+        if (!isObject(response)) return undefined;
+        const candidates: unknown[] = [];
+        if (isObject(response.usage)) candidates.push(response.usage.num_turns, response.usage.numTurns);
+        candidates.push(response.num_turns, response.numTurns);
+        if (isObject(response._meta)) candidates.push(response._meta.num_turns, response._meta.numTurns);
+        for (const candidate of candidates) {
+            if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0) {
+                return Math.round(candidate);
+            }
+        }
+        return undefined;
+    }
 
     private captureSessionMetadata(sessionId: string, response: unknown): void {
         this.captureSessionModelsMetadata(sessionId, response);

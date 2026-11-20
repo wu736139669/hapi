@@ -7,7 +7,10 @@ import type { CommandDefinition } from './types'
 import { parseRemoteAgentCommandOptions } from './agentCommandOptions'
 
 export function parseDshCommandOptions(commandArgs: string[]) {
-    const options = parseRemoteAgentCommandOptions(commandArgs, DSH_PERMISSION_MODES)
+    const options = parseRemoteAgentCommandOptions(commandArgs, DSH_PERMISSION_MODES, ['remote'])
+    if (options.effort || options.modelReasoningEffort) {
+        throw new Error('DeepSeek Harness effort is configured by the ACP server')
+    }
     return { ...options, startingMode: 'remote' as const }
 }
 
