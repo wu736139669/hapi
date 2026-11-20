@@ -1,7 +1,7 @@
 import React from 'react';
 import { randomUUID } from 'node:crypto';
 import { Buffer } from 'node:buffer';
-import { registerAcpSessionTitleSync } from '@/agent/acpSessionTitle';
+import { createAcpSessionTitleSync, registerAcpSessionTitleSync } from '@/agent/acpSessionTitle';
 import { logger } from '@/ui/logger';
 import { buildHapiMcpBridge } from '@/codex/utils/buildHapiMcpBridge';
 import type { AcpSdkBackend } from '@/agent/backends/acp';
@@ -17,6 +17,7 @@ import type { OpencodeMode, PermissionMode } from './types';
 import type { QueueReservation } from '@/utils/MessageQueue2';
 import { admitOpencodeV2Steer, cancelOpencodeV2Steer, opencodeV2InputId, readOpencodeV2Input, steerOpencodeV2Inbox, type OpencodeSteerCancelHandler, type OpencodeSteerCancelResult } from './utils/opencodeV2Steer';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
+import { captureOpencodeRoundSnapshot, fetchOpencodeRoundSummary, type OpencodeRoundSnapshot } from './utils/opencodeRoundSummary';
 import {
     allocateFreePort,
     createOpencodeBackend,
@@ -49,6 +50,7 @@ import {
     type OpencodeRetryStatus
 } from './utils/opencodeEventStream';
 import { OpencodePermissionHandler } from './utils/permissionHandler';
+import { presentQuestionToolCall } from './utils/opencodeQuestion';
 import { getOpencodeNativeToolInstruction, PLAN_MODE_INSTRUCTION } from './utils/systemPrompt';
 import { resolveThoughtLevelEffort } from './thoughtLevelEffort';
 import { fetchOpenCodeReasoningEffortState, type OpenCodeReasoningEffortState } from './utils/opencodeVariants';
@@ -88,6 +90,29 @@ export type AbortStatusDecision = {
 };
 
 type CompactOperationPhase = 'idle' | 'snapshot' | 'summarize' | 'post-summarize' | 'verification';
+type RoundSummaryPhase = 'idle' | 'snapshot' | 'prompt' | 'settle';
+
+const ROUND_SUMMARY_SETTLE_TIMEOUT_MS = 1_000;
+
+async function settleRoundSummary<T>(promise: Promise<T>, controller: AbortController): Promise<T | null> {
+    return await new Promise<T | null>((resolve) => {
+        let settled = false;
+        const settle = (value: T | null) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            controller.signal.removeEventListener('abort', onAbort);
+            resolve(value);
+        };
+        const onAbort = () => settle(null);
+        const timeout = setTimeout(() => {
+            controller.abort();
+            settle(null);
+        }, ROUND_SUMMARY_SETTLE_TIMEOUT_MS);
+        controller.signal.addEventListener('abort', onAbort, { once: true });
+        void promise.then((summary) => settle(summary), () => settle(null));
+    });
+}
 
 /**
  * One steer operation the launcher still tracks. Deliberately distinct from
@@ -182,6 +207,11 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
     // deliberately unbounded (see triggerOpencodeCompact's doc comment) and
     // the launcher stays wedged until it eventually settles on its own.
     private compactAbortController: AbortController | null = null;
+    private roundSummaryAbortController: AbortController | null = null;
+    /** Distinguishes an active prompt from read-only post-prompt work for Stop semantics. */
+    private roundSummaryPhase: RoundSummaryPhase = 'idle';
+    /** Validated ID boundary returned by the previous post-prompt fetch; explicit history mutations clear it. */
+    private nextRoundSnapshot: OpencodeRoundSnapshot | null = null;
     // A plain Stop must keep waiting only while the summarize POST is
     // actually in flight. That POST can outlive a client-side abort while
     // continuing to mutate the shared OpenCode session, so advancing to a
@@ -287,8 +317,9 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
         // advertises "not steerable" rather than a stale value.
         this.setSteeringActive(false);
 
+        const titleSync = createAcpSessionTitleSync(session.client);
         const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client, {
-            enableChangeTitle: false,
+            onChangeTitle: () => titleSync.markManualTitle(),
             skillLookup: { workingDirectory: session.path, flavor: 'opencode' }
         });
         this.happyServer = happyServer;
@@ -329,7 +360,7 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                 hostname
             });
         this.backend = backend;
-        registerAcpSessionTitleSync(backend, session.client);
+        registerAcpSessionTitleSync(backend, session.client, titleSync);
 
         backend.onStderrError((error) => {
             this.handleAcpStderrError(error);
@@ -626,6 +657,10 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
             backend,
             () => session.getPermissionMode() as PermissionMode | undefined
         );
+        // Archive and SIGTERM end the process through the runner lifecycle. A
+        // question form the user never answered would otherwise leave OpenCode
+        // waiting and the request pending in the session state.
+        session.setKillHandler(() => this.permissionHandler?.cancelAll('Session terminated'));
         this.applyDisplayMode(session.getPermissionMode() as PermissionMode);
 
         this.setupAbortHandlers(session.client.rpcHandlerManager, {
@@ -937,6 +972,7 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                     continue;
                 }
 
+                this.nextRoundSnapshot = null;
                 session.onThinkingChange(true);
                 try {
                     await this.runCompactOperation(acpSessionId, compactAbortController, compactLocalId);
@@ -961,22 +997,59 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
             if (!isGoalBatch && batch.mode.permissionMode === 'plan') {
                 messageText = `${PLAN_MODE_INSTRUCTION}\n\n${messageText}`;
             }
+
+            this.stallErrorReportedForPrompt = false;
+            const roundSummaryAbortController = new AbortController();
+            this.roundSummaryAbortController = roundSummaryAbortController;
+            this.roundSummaryPhase = 'snapshot';
+            const roundApi = this.v2RestInfo
+                ? { baseUrl: this.v2RestInfo.baseUrl, api: { version: 'v2' as const, password: this.v2RestInfo.password } }
+                : this.baseUrl ? { baseUrl: this.baseUrl } : null;
+            const roundSnapshot = this.nextRoundSnapshot ?? (roundApi
+                ? await captureOpencodeRoundSnapshot({
+                    ...roundApi,
+                    sessionId: acpSessionId,
+                    signal: roundSummaryAbortController.signal
+                }).catch((error) => {
+                    logger.debug('[opencode-remote] round snapshot unavailable', error);
+                    return null;
+                })
+                : null);
+            this.nextRoundSnapshot = null;
+            if (
+                this.roundSummaryAbortController !== roundSummaryAbortController
+                || roundSummaryAbortController.signal.aborted
+                || this.shouldExit
+            ) {
+                if (this.roundSummaryAbortController === roundSummaryAbortController) {
+                    this.roundSummaryAbortController = null;
+                    this.roundSummaryPhase = 'idle';
+                }
+                session.onThinkingChange(false);
+                if (session.queue.size() === 0 && !this.shouldExit) {
+                    sendReady();
+                }
+                continue;
+            }
+
             if (!isGoalBatch && !this.instructionsSent) {
                 messageText = `${getOpencodeNativeToolInstruction()}\n\n${messageText}`;
                 this.instructionsSent = true;
             }
-
             const promptContent: PromptContent[] = [{
                 type: 'text',
                 text: messageText,
             }];
 
-            this.stallErrorReportedForPrompt = false;
+            const promptStartedAt = performance.now();
+            let promptDurationMs = 0;
+            this.roundSummaryPhase = 'prompt';
             session.onThinkingChange(true);
             // Only a normal prompt is steerable: /compact and /clear leave this
             // false, so a steer arriving during either is rejected rather than
             // injected into a turn the agent is not running.
             this.promptInFlight = true;
+            this.permissionHandler?.beginTurn();
             this.activePromptModeHash = session.queue.modeHasher({ ...batch.mode, model: steeringModel });
             this.activePromptText = messageText;
             this.steerTurnEpoch += 1;
@@ -986,25 +1059,30 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
             const nativeInput = { uncertain: false };
             this.nativeInputWriters.add(nativeInput);
             try {
-                const nativeVariant = this.nativeReasoningEffortState
-                    && this.nativeReasoningEffortState.modelId === this.currentBackendModel
-                    ? this.currentBackendEffort
-                    : null;
-                const nativeModel = splitProviderModel(this.currentBackendModel);
-                if (!isGoalBatch && nativeVariant && nativeModel && backend.promptWithVariant && this.baseUrl) {
-                    await backend.promptWithVariant(acpSessionId, promptContent, (message: AgentMessage) => {
-                        this.handleAgentMessage(message);
-                    }, {
-                        baseUrl: this.baseUrl,
-                        directory: session.path,
-                        providerId: nativeModel.providerId,
-                        modelId: nativeModel.modelId,
-                        variant: nativeVariant
-                    });
-                } else {
-                    await backend.prompt(acpSessionId, promptContent, (message: AgentMessage) => {
-                        this.handleAgentMessage(message);
-                    });
+                try {
+                    const nativeVariant = this.nativeReasoningEffortState
+                        && this.nativeReasoningEffortState.modelId === this.currentBackendModel
+                        ? this.currentBackendEffort
+                        : null;
+                    const nativeModel = splitProviderModel(this.currentBackendModel);
+                    if (!isGoalBatch && nativeVariant && nativeModel && backend.promptWithVariant && this.baseUrl) {
+                        await backend.promptWithVariant(acpSessionId, promptContent, (message: AgentMessage) => {
+                            this.handleAgentMessage(message);
+                        }, {
+                            baseUrl: this.baseUrl,
+                            directory: session.path,
+                            providerId: nativeModel.providerId,
+                            modelId: nativeModel.modelId,
+                            variant: nativeVariant
+                        });
+                    } else {
+                        await backend.prompt(acpSessionId, promptContent, (message: AgentMessage) => {
+                            this.handleAgentMessage(message);
+                        });
+                    }
+                } finally {
+                    promptDurationMs = performance.now() - promptStartedAt;
+                    this.roundSummaryPhase = 'settle';
                 }
                 this.completeNativeInput(nativeInput);
                 await this.nativeTranscript?.refresh();
@@ -1032,10 +1110,40 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                 // A goal loop runs in the background after the ACP turn
                 // settles. Keep the session marked as working while it is
                 // active, otherwise the list shows it idle mid-task.
-                session.onThinkingChange(this.goalState?.status === 'active');
-                await this.permissionHandler?.cancelAll('Prompt finished');
-                if (session.queue.size() === 0 && !this.shouldExit) {
-                    sendReady();
+                if (
+                    this.roundSummaryAbortController === roundSummaryAbortController
+                    && !roundSummaryAbortController.signal.aborted
+                    && !this.shouldExit
+                    && roundApi
+                    && roundSnapshot
+                ) {
+                    const result = await settleRoundSummary(
+                        fetchOpencodeRoundSummary({
+                            ...roundApi,
+                            sessionId: acpSessionId,
+                            promptText: messageText,
+                            snapshot: roundSnapshot,
+                            durationMs: promptDurationMs,
+                            signal: roundSummaryAbortController.signal
+                        }),
+                        roundSummaryAbortController
+                    );
+                    if (result) {
+                        this.nextRoundSnapshot = result.snapshot;
+                        if (result.summary) this.handleAgentMessage({ type: 'round_summary', summary: result.summary });
+                    }
+                }
+                if (this.roundSummaryAbortController === roundSummaryAbortController) {
+                    this.roundSummaryAbortController = null;
+                }
+                try {
+                    session.onThinkingChange(this.goalState?.status === 'active');
+                    await this.permissionHandler?.cancelAll('Prompt finished');
+                    if (session.queue.size() === 0 && !this.shouldExit) {
+                        sendReady();
+                    }
+                } finally {
+                    this.roundSummaryPhase = 'idle';
                 }
             }
         }
@@ -2240,7 +2348,8 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
         }
     }
 
-    private handleAgentMessage(message: AgentMessage): void {
+    private handleAgentMessage(rawMessage: AgentMessage): void {
+        const message = presentQuestionToolCall(rawMessage);
         // v1 ACP strips the native summary/parent metadata (and old versions
         // strip message IDs too). The native transcript owns these text streams.
         if (this.nativeTranscript && this.majorVersion === 'v1' && (message.type === 'text' || message.type === 'reasoning')) return;
@@ -2284,6 +2393,8 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
             case 'turn_complete':
                 this.messageBuffer.addMessage('Turn complete', 'status');
                 break;
+            case 'round_summary':
+                break;
             default: {
                 const _exhaustive: never = message;
                 return _exhaustive;
@@ -2311,6 +2422,19 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
      * disconnects the ACP subprocess right after.
      */
     private async handleAbort(leavingRemote = false): Promise<void> {
+        this.roundSummaryAbortController?.abort();
+        // Only abandon metadata when no steer or cancellation still owns work.
+        if (
+            !leavingRemote
+            && this.roundSummaryPhase === 'settle'
+            && this.pendingSteerOperations.size === 0
+            && this.v2Steers.size === 0
+            && !Array.from(this.backendSoftSteerOwnership).some(entry =>
+                entry.backend === this.backend && entry.turnEpoch === this.steerTurnEpoch
+            )
+            && !this.v2AbortInProgress
+        ) return;
+
         if (this.majorVersion !== 'v2') return this.performAbort(leavingRemote);
         if (this.v2AbortInProgress) {
             // One overlapping Stop/switch owns queue.reset. A later reset

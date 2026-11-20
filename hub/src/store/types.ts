@@ -147,6 +147,27 @@ export type StoredStudioPost = {
     submittedText: string | null
 }
 
+export type StoredSessionJob = {
+    sessionId: string
+    key: string
+    label: string
+    status: import('@hapi/protocol').AttachedJobStatus
+    done?: number
+    total?: number
+    remaining?: number
+    unit?: string
+    detail?: string
+    runId?: string
+    /** Opt-in terminal wake (#1489). */
+    wakeOnTerminal: boolean
+    wakePrompt?: string
+    /** Dedup: runId for which a wake was already claimed. */
+    wakeEmittedRunId?: string
+    heartbeatAt: number
+    startedAt: number
+    updatedAt: number
+}
+
 export type VersionedUpdateResult<T> =
     | { result: 'success'; version: number; value: T }
     | { result: 'version-mismatch'; version: number; value: T }

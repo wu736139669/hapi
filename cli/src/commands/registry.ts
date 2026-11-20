@@ -25,6 +25,7 @@ import { usageScanCommand } from './usageScan'
 import { spawnPeerCommand } from './spawnPeer'
 import { usageCommand } from './usage'
 import { setModeCommand } from './setMode'
+import { jobCommand } from './job'
 import type { CommandContext, CommandDefinition } from './types'
 
 // Gemini CLI was sunset (Google stopped serving the consumer Gemini CLI on
@@ -73,7 +74,8 @@ const COMMANDS: CommandDefinition[] = [
     usageCommand,
     // Internal: spawned by the hub to scan the local OpenCode store without
     // blocking its event loop (see hub/src/sync/usageReconciliation.ts).
-    usageScanCommand
+    usageScanCommand,
+    jobCommand
 ]
 
 const commandMap = new Map<string, CommandDefinition>()

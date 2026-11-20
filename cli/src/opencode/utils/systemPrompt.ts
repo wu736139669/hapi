@@ -9,12 +9,8 @@ import { trimIdent } from '@/utils/trimIdent';
 import { buildSessionCitationSteerInstruction, SESSION_CITATION_DISABLED_STEER } from '@hapi/protocol/sessionCitation';
 import { isPeerToolsDisabled } from '@/modules/common/peerTools';
 import { HAPI_MCP_BRIDGE_PROMPT } from '@/modules/common/hapiMcpBridgePrompt';
-import {
-    DISPLAY_IMAGE_PROMPT_HAPI_MCP,
-    DISPLAY_MEDIA_PROMPT_HAPI_MCP,
-    DISPLAY_VIDEO_PROMPT_HAPI_MCP,
-} from '@/modules/common/displayImagePrompt';
 import { SKILL_LOOKUP_INSTRUCTION } from '@/modules/common/skillLookupInstruction';
+import { withSessionJobInstruction } from '@/modules/common/sessionJobInstruction';
 import { withSessionSummaryInstruction } from '@/modules/common/sessionSummaryInstruction';
 import { withTeamInstruction } from '@/modules/team/teamPrompt';
 
@@ -33,17 +29,15 @@ export const TITLE_INSTRUCTION = trimIdent(`
 `);
 
 export function getTitleInstruction(env: NodeJS.ProcessEnv = process.env): string {
-    return withTeamInstruction(withSessionSummaryInstruction(TITLE_INSTRUCTION, env), 'hapi_', env)
+    return withTeamInstruction(withSessionSummaryInstruction(withSessionJobInstruction(TITLE_INSTRUCTION), env), 'hapi_', env)
 }
 
 /**
- * Tool instructions for native ACP sessions. Title updates come from ACP, so
- * advertise only the MCP tools that remain available to the model.
+ * Instruction prepended to native ACP session prompts. change_title rides the
+ * same MCP bridge; manual titles take precedence over native ACP title sync.
  */
 export const OPENCODE_NATIVE_TOOL_INSTRUCTION = trimIdent(`
-    ${DISPLAY_IMAGE_PROMPT_HAPI_MCP}
-    ${DISPLAY_VIDEO_PROMPT_HAPI_MCP}
-    ${DISPLAY_MEDIA_PROMPT_HAPI_MCP}
+    ${HAPI_MCP_BRIDGE_PROMPT}
     ${isPeerToolsDisabled() ? SESSION_CITATION_DISABLED_STEER : buildSessionCitationSteerInstruction({
         inspectTool: 'hapi_inspect_peer',
         pingTool: 'hapi_ping_peer',
@@ -54,7 +48,7 @@ export const OPENCODE_NATIVE_TOOL_INSTRUCTION = trimIdent(`
 `);
 
 export function getOpencodeNativeToolInstruction(env: NodeJS.ProcessEnv = process.env): string {
-    return withTeamInstruction(withSessionSummaryInstruction(OPENCODE_NATIVE_TOOL_INSTRUCTION, env), 'hapi_', env)
+    return withTeamInstruction(withSessionSummaryInstruction(withSessionJobInstruction(OPENCODE_NATIVE_TOOL_INSTRUCTION), env), 'hapi_', env)
 }
 
 /**

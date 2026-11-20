@@ -4,6 +4,7 @@ import { getToolCardDisplayModeOptions, useToolCardDisplayMode } from '@/hooks/u
 import { useCodexExplorationCollapse } from '@/hooks/useCodexExplorationCollapse'
 import { useReasoningCollapse } from '@/hooks/useReasoningCollapse'
 import { useExecutionProcess } from '@/hooks/useExecutionProcess'
+import { useConciseChatMode } from '@/hooks/useConciseChatMode'
 import {
     getChatSurfaceColorPickerValue,
     getChatSurfaceColorPresetOptions,
@@ -55,6 +56,7 @@ export default function SettingsChatPage() {
     const { codexExplorationCollapsed, setCodexExplorationCollapsed } = useCodexExplorationCollapse()
     const { reasoningCollapsed, setReasoningCollapsed } = useReasoningCollapse()
     const { executionProcessEnabled, setExecutionProcessEnabled } = useExecutionProcess()
+    const { conciseChatMode, setConciseChatMode } = useConciseChatMode()
     const { toolGroupBackground, userMessageBackground, setToolGroupBackground, setUserMessageBackground } = useChatSurfaceColors()
     return (
         <SettingsPageContent description={t('settings.chat.description')}>
@@ -68,6 +70,12 @@ export default function SettingsChatPage() {
                 <ComposerToolbarLayoutControl />
             </SettingsSection>
             <SettingsSection title={t('settings.chat.tools')}>
+                <SettingsSwitch
+                    label={t('settings.chat.conciseView')}
+                    description={t('settings.chat.conciseView.desc')}
+                    checked={conciseChatMode}
+                    onChange={setConciseChatMode}
+                />
                 <SettingsChoiceGroup
                     label={t('settings.chat.toolCardDisplay')}
                     value={toolCardDisplayMode}

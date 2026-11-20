@@ -15,6 +15,8 @@ export type AskUserQuestionQuestion = {
     detail?: string | null
     options: AskUserQuestionOption[]
     multiSelect: boolean
+    /** False when the agent's form takes no typed answer; absent (older messages) means allowed. */
+    allowFreeText: boolean
 }
 
 export type AskUserQuestionQuestionInfo = {
@@ -66,7 +68,8 @@ export function parseAskUserQuestionInput(input: unknown): { questions: AskUserQ
             question,
             detail: detail.length > 0 ? detail : null,
             options,
-            multiSelect
+            multiSelect,
+            allowFreeText: raw.allowFreeText !== false
         })
     }
 

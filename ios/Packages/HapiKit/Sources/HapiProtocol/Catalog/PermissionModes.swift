@@ -106,7 +106,7 @@ extension AgentFlavor {
         case .dsh:
             return [.default, .readOnly, .workspaceWrite, .dangerFullAccess]
         case .agy:
-            return [.requestReview, .alwaysProceed]
+            return [.requestReview, .acceptEdits, .plan, .alwaysProceed]
         case .cursor:
             return [.default, .plan, .ask, .debug, .autoReview, .yolo]
         case .pi:

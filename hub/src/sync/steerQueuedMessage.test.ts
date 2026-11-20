@@ -161,7 +161,33 @@ describe('SyncEngine.steerQueuedMessage', () => {
         }
     })
 
-    it('rejects sessions without native steer support without invoking the CLI', async () => {
+    it('tells an Antigravity session without agy acp that Steer is not available yet', async () => {
+        const { store, engine } = createEngine()
+        const steer = spyOn(RpcGateway.prototype, 'steerQueuedMessage').mockResolvedValue({ steered: true })
+        try {
+            const session = engine.getOrCreateSession(
+                'steer-agy-starting',
+                { path: '/tmp/project', host: 'localhost', flavor: 'agy' },
+                { requests: {}, completedRequests: {} },
+                'default'
+            )
+            const message = store.messages.addMessage(session.id, { text: 'hi' }, 'local-id')
+
+            const result = await engine.steerQueuedMessage(session.id, message.id)
+
+            expect(result).toEqual({
+                status: 'failed',
+                error: 'Antigravity is not running on agy acp (yet); Steer is not available',
+                localId: null
+            })
+            expect(steer).not.toHaveBeenCalled()
+        } finally {
+            steer.mockRestore()
+            engine.stop()
+        }
+    })
+
+    it('rejects unsupported flavors without invoking the CLI', async () => {
         const { store, engine } = createEngine()
         try {
             const session = engine.getOrCreateSession(
@@ -176,7 +202,7 @@ describe('SyncEngine.steerQueuedMessage', () => {
 
             expect(result).toEqual({
                 status: 'failed',
-                error: 'Steering is only supported for Claude, Pi, Codex, OpenCode, Cursor ACP, and DSH sessions',
+                error: 'Steering is only supported for Claude, Pi, Codex, OpenCode, Cursor ACP, DSH, and Antigravity sessions',
                 localId: null
             })
         } finally {

@@ -1,4 +1,5 @@
 import type { Context } from 'hono'
+import { FOLLOW_SESSION_REDIRECTS_HEADER } from '@hapi/protocol'
 import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 
@@ -24,7 +25,9 @@ export function requireSession(
     if (guestSessionId && guestSessionId !== sessionId) {
         return c.json({ error: 'Session access denied' }, 403)
     }
-    const access = engine.resolveSessionAccess(sessionId, namespace)
+    // Only clients that rebind to the returned id opt into merged-id redirects.
+    const followRedirects = c.req.header(FOLLOW_SESSION_REDIRECTS_HEADER) === '1'
+    const access = engine.resolveSessionAccess(sessionId, namespace, { followRedirects })
     if (!access.ok) {
         const status = access.reason === 'access-denied' ? 403 : 404
         const error = access.reason === 'access-denied' ? 'Session access denied' : 'Session not found'

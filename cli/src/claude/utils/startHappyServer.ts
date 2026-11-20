@@ -26,14 +26,18 @@ import { SESSION_NAME_MAX_LENGTH, toSessionSummaryMetadata } from '@hapi/protoco
 import { isPeerToolsDisabled } from "@/modules/common/peerTools";
 import {
     INSPECT_PEER_TOOL_DESCRIPTION,
+    LIST_PEERS_INCLUDE_INACTIVE_PARAM_DESCRIPTION,
+    LIST_PEERS_TOOL_DESCRIPTION,
     PEER_DELIVERY_MODE_DESCRIPTION,
+    PEER_WAIT_FOR_REPLY_PARAM_DESCRIPTION,
+    PEER_WAKE_PARAM_DESCRIPTION,
     PING_PEER_TOOL_DESCRIPTION,
     SESSION_ID_PREFIX_PARAM_DESCRIPTION,
     SPAWN_PEER_TOOL_DESCRIPTION,
 } from '@hapi/protocol/sessionCitation'
 import { CREATABLE_AGENT_FLAVORS } from '@hapi/protocol/modes'
 import { PermissionModeSchema } from '@hapi/protocol/schemas'
-import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer } from "@/modules/pingPeer/pingPeer";
+import { PingPeerError, formatInspectPeerReport, formatPeerSessionsList, forwardPeerReply, inspectPeer, listPeerSessions, peerListFetchLimit, pingPeer, supportsPeerReply } from "@/modules/pingPeer/pingPeer";
 import {
     TeamClientError,
     createTeamTask,
@@ -49,7 +53,32 @@ import {
     updateTeamTask
 } from "@/modules/team/teamClient";
 import { applySessionDisplayRename, normalizeSessionDisplayTitle } from "@/agent/sessionDisplayRename";
+import {
+    SESSION_JOB_TOOL_DESCRIPTION,
+    SESSION_JOB_TOOL_NAME,
+    handleSessionJobTool,
+    sessionJobInputSchema,
+    type SessionJobToolArgs,
+} from "@/modules/sessionJob/sessionJobMcp";
 import { SpawnPeerError, spawnPeer } from "@/modules/spawnPeer/spawnPeer";
+
+export type HapiMcpToolName =
+    | 'change_title'
+    | 'display_image'
+    | 'display_video'
+    | 'display_media'
+    | 'list_peers'
+    | 'ping_peer'
+    | 'inspect_peer'
+    | 'spawn_peer'
+    | 'session_job'
+    | 'skill_lookup'
+    | 'team_status'
+    | 'team_read'
+    | 'team_send'
+    | 'team_task'
+    | 'team_requirement'
+    | 'team_spawn';
 
 type StartHappyServerOptions = {
     /**
@@ -59,6 +88,7 @@ type StartHappyServerOptions = {
      */
     emitTitleSummary?: boolean;
     enableChangeTitle?: boolean;
+    onChangeTitle?: (title: string) => void;
     /**
      * Session project cwd for resolving relative `spawn_peer` directories.
      * Prefer the launcher's effective cwd (including Codex `--cd` overrides).
@@ -74,6 +104,11 @@ type StartHappyServerOptions = {
      * (404 = teams disabled). Tests use this to exercise the team tool set.
      */
     teamToolsEnabled?: boolean;
+    /**
+     * Restrict the server to an explicit subset of HAPI tools. Omit to keep
+     * the historical behavior where launchers choose through the other flags.
+     */
+    enabledTools?: readonly HapiMcpToolName[];
 };
 
 /**
@@ -123,8 +158,15 @@ function createHapiMcpServer(
     enableChangeTitle: boolean,
     skillLookup: StartHappyServerOptions['skillLookup'],
     teamToolsEnabled: boolean,
-    workingDirectory: string | undefined
+    workingDirectory: string | undefined,
+    enabledTools: ReadonlySet<HapiMcpToolName>,
+    onChangeTitle?: StartHappyServerOptions['onChangeTitle']
 ): McpServer {
+    const registerTool = (name: HapiMcpToolName, config: any, handler: any): void => {
+        if (enabledTools.has(name)) {
+            mcp.registerTool<any, any>(name, config, handler);
+        }
+    };
     const handler = async (title: string) => {
         logger.debug('[hapiMCP] Changing title to:', title);
         try {
@@ -150,6 +192,15 @@ function createHapiMcpServer(
             // The ACK carries the Hub's preserved title and lock.
             if (client.getMetadata()?.titleLocked) {
                 return { success: false, error: 'Session title is locked by the user. Only the user can unlock it.' };
+            }
+            if (onChangeTitle) {
+                onChangeTitle(normalizeSessionDisplayTitle(title)!);
+                if (!await client.flushMetadata()) {
+                    return { success: false, error: 'Title update could not be confirmed by the Hub.' };
+                }
+                if (client.getMetadata()?.titleLocked) {
+                    return { success: false, error: 'Session title is locked by the user. Only the user can unlock it.' };
+                }
             }
             return { success: true };
         } catch (error) {
@@ -185,10 +236,25 @@ function createHapiMcpServer(
         title: z.string().trim().min(1).max(255).optional().describe('Optional display title or filename'),
     });
 
+    /** Start reply forwarding when asked; returns the note for the tool result. */
+    const forwardReplyIfRequested = (
+        waitForReply: boolean | undefined,
+        task: { sessionId: string; localId?: string; flavor?: string | null }
+    ): string => {
+        if (!waitForReply) return '';
+        if (!task.localId) return '; the delivered message could not be identified, so check the reply with inspect_peer';
+        if (!supportsPeerReply(task.flavor)) return `; ${task.flavor} peers do not report turn ends, so check the reply with inspect_peer`;
+        forwardPeerReply({ peerSessionId: task.sessionId, taskLocalId: task.localId, callerSessionId: client.sessionId })
+            .catch((error) => logger.debug('[hapiMCP] peer reply forwarding failed:', error));
+        return '; its reply will be posted here';
+    };
+
     const pingPeerInputSchema: z.ZodTypeAny = z.object({
         sessionIdPrefix: z.string().trim().min(1).describe(SESSION_ID_PREFIX_PARAM_DESCRIPTION),
         message: z.string().min(1).describe('Message text to deliver to the target session'),
         deliveryMode: PeerDeliveryModeSchema.optional().describe(PEER_DELIVERY_MODE_DESCRIPTION),
+        wake: z.boolean().optional().describe(PEER_WAKE_PARAM_DESCRIPTION),
+        waitForReply: z.boolean().optional().describe(PEER_WAIT_FOR_REPLY_PARAM_DESCRIPTION),
     });
 
     const spawnPeerInputSchema: z.ZodTypeAny = z.object({
@@ -214,6 +280,7 @@ function createHapiMcpServer(
                 'Permission mode for the new session. Omit to use hub/stock default (yolo). '
                 + 'Pass only to tighten or when the operator names a mode — do not clone the parent session.'
             ),
+        waitForReply: z.boolean().optional().describe(PEER_WAIT_FOR_REPLY_PARAM_DESCRIPTION),
     });
 
     const maxInlineMediaBytes = 25 * 1024 * 1024;
@@ -233,6 +300,7 @@ function createHapiMcpServer(
         limit: z.number().int().min(1).max(100).optional().describe(
             'Max sessions to return (default 30, max 100). Newest updatedAt first.'
         ),
+        includeInactive: z.boolean().optional().describe(LIST_PEERS_INCLUDE_INACTIVE_PARAM_DESCRIPTION),
     });
 
     async function displayInlineMedia(
@@ -275,7 +343,7 @@ function createHapiMcpServer(
         return media;
     }
     if (enableChangeTitle) {
-        mcp.registerTool<any, any>('change_title', {
+        registerTool('change_title', {
             description: 'Change the title of the current HAPI chat session. Call once when the user\'s primary objective is clear; use a concise task title.',
             title: 'Change Chat Title',
             inputSchema: changeTitleInputSchema,
@@ -308,7 +376,7 @@ function createHapiMcpServer(
         });
     }
 
-    mcp.registerTool<any, any>('display_image', {
+    registerTool('display_image', {
         description: `Display a local image file to the human user inline in the current HAPI chat session. ${DISPLAY_IMAGE_PROMPT_CURSOR}`,
         title: 'Display Image',
         inputSchema: displayImageInputSchema,
@@ -342,7 +410,7 @@ function createHapiMcpServer(
         }
     });
 
-    mcp.registerTool<any, any>('display_video', {
+    registerTool('display_video', {
         description: `Display a local mp4 or webm file inline in the current HAPI chat session. ${DISPLAY_VIDEO_PROMPT_CURSOR}`,
         title: 'Display Video',
         inputSchema: displayVideoInputSchema,
@@ -376,7 +444,7 @@ function createHapiMcpServer(
         }
     });
 
-    mcp.registerTool<any, any>('display_media', {
+    registerTool('display_media', {
         description: `Send a local image, video, audio, or other file to the current HAPI chat session. Recognized media is shown inline; other files use a download card. ${DISPLAY_MEDIA_PROMPT_CURSOR}`,
         title: 'Display Media',
         inputSchema: displayMediaInputSchema,
@@ -409,6 +477,7 @@ function createHapiMcpServer(
         effort?: string
         sessionType?: 'simple' | 'worktree'
         permissionMode?: string
+        waitForReply?: boolean
     }
 
     /**
@@ -457,7 +526,7 @@ function createHapiMcpServer(
                 content: [
                     {
                         type: 'text' as const,
-                        text: `Spawned ${result.sessionId} (${result.name})`,
+                        text: `Spawned ${result.sessionId} (${result.name})${forwardReplyIfRequested(args.waitForReply, result)}`,
                     },
                 ],
                 isError: false,
@@ -481,26 +550,41 @@ function createHapiMcpServer(
         }
     }
 
+    registerTool(SESSION_JOB_TOOL_NAME, {
+        description: SESSION_JOB_TOOL_DESCRIPTION,
+        title: 'Session-Attached Job',
+        inputSchema: sessionJobInputSchema,
+    }, async (args: SessionJobToolArgs) => {
+        logger.debug('[hapiMCP] session_job:', args.action, args.jobKey);
+        const result = await handleSessionJobTool(args, client.sessionId);
+        return {
+            content: [{ type: 'text' as const, text: result.text }],
+            isError: result.isError,
+        };
+    });
+
     if (!peerToolsDisabled) {
-        mcp.registerTool<any, any>('ping_peer', {
+        registerTool('ping_peer', {
             description: PING_PEER_TOOL_DESCRIPTION,
             title: 'Ping Peer Session',
             inputSchema: pingPeerInputSchema,
-        }, async (args: { sessionIdPrefix: string; message: string; deliveryMode?: PeerDeliveryMode }) => {
+        }, async (args: { sessionIdPrefix: string; message: string; deliveryMode?: PeerDeliveryMode; wake?: boolean; waitForReply?: boolean }) => {
             logger.debug('[hapiMCP] ping_peer:', args.sessionIdPrefix);
             try {
                 const result = await pingPeer({
                     sessionIdPrefix: args.sessionIdPrefix,
                     message: args.message,
                     deliveryMode: args.deliveryMode,
+                    wake: args.wake === true,
                 });
+                const replyNote = forwardReplyIfRequested(args.waitForReply, result);
                 return {
                     content: [
                         {
                             type: 'text' as const,
                             text: result.delivery === 'accepted'
-                                ? `Accepted for ${result.sessionId}${result.resumed ? ' (resumed)' : ''} (${result.name}) localId=${result.localId} — delivery shows in the recipient chat when its runtime consumes it`
-                                : `${result.delivery} to ${result.sessionId}${result.resumed ? ' (resumed)' : ''} (${result.name}) localId=${result.localId}`,
+                                ? `Accepted for ${result.sessionId}${result.resumed ? ' (resumed)' : ''} (${result.name}) localId=${result.localId} — delivery shows in the recipient chat when its runtime consumes it${result.steerNote ? ` (${result.steerNote})` : ''}${replyNote}`
+                                : `${result.delivery} to ${result.sessionId}${result.resumed ? ' (resumed)' : ''} (${result.name}) localId=${result.localId}${replyNote}`,
                         },
                     ],
                     isError: false,
@@ -527,13 +611,13 @@ function createHapiMcpServer(
         // Plain peer sessions: available on every hub, team or not. Agent Team
         // registers a separate `team_spawn` below, so this name is never
         // shadowed by team semantics.
-        mcp.registerTool<any, any>('spawn_peer', {
+        registerTool('spawn_peer', {
             description: SPAWN_PEER_TOOL_DESCRIPTION,
             title: 'Spawn Peer Session',
             inputSchema: spawnPeerInputSchema,
         }, async (args: SpawnPeerToolArgs) => runPeerSpawn(args));
 
-        mcp.registerTool<any, any>('inspect_peer', {
+        registerTool('inspect_peer', {
             description: INSPECT_PEER_TOOL_DESCRIPTION,
             title: 'Inspect Peer Session',
             inputSchema: inspectPeerInputSchema,
@@ -572,26 +656,29 @@ function createHapiMcpServer(
             }
         });
 
-        mcp.registerTool<any, any>('list_peers', {
-            description: 'List peer HAPI sessions on the same hub/namespace (id prefix, active, flavor, name). Uses this session\'s hub credentials - works from runner-spawned agents without being on the hub host. Prefer this over shelling `hapi ping-peer --list`. Then call inspect_peer / ping_peer with a listed id, or spawn_peer to create a new peer with a remit.',
+        registerTool('list_peers', {
+            description: LIST_PEERS_TOOL_DESCRIPTION,
             title: 'List Peer Sessions',
             inputSchema: listPeersInputSchema,
-        }, async (args: { limit?: number }) => {
+        }, async (args: { limit?: number; includeInactive?: boolean }) => {
             logger.debug('[hapiMCP] list_peers');
             try {
                 const limit = args.limit ?? 30;
+                const includeInactive = args.includeInactive === true;
                 const sessions = await listPeerSessions({
                     limit: peerListFetchLimit(limit, { excludeCaller: true }),
+                    includeInactive,
                 });
-                const peers = sessions.filter((session) => session.id !== client.sessionId);
-                const hasMore = peers.length > limit;
+                const peerCount = sessions.filter((session) => session.id !== client.sessionId).length;
                 return {
                     content: [
                         {
                             type: 'text' as const,
-                            text: formatPeerSessionsList(peers, {
+                            text: formatPeerSessionsList(sessions, {
                                 maxRows: limit,
-                                hasMore,
+                                hasMore: peerCount > limit,
+                                excludeSessionId: client.sessionId,
+                                includeInactive,
                             }),
                         },
                     ],
@@ -632,7 +719,7 @@ function createHapiMcpServer(
             return status;
         };
 
-        mcp.registerTool<any, any>('team_status', {
+        registerTool('team_status', {
             description: 'Agent Team: show your team, members (live status), pending tasks and remaining budget. Call this right after starting as a team member to pick up your assignment.',
             title: 'Team Status',
             inputSchema: z.object({}),
@@ -646,7 +733,7 @@ function createHapiMcpServer(
             }
         });
 
-        mcp.registerTool<any, any>('team_read', {
+        registerTool('team_read', {
             description: 'Agent Team: read the shared team message log (all members see the same log). Use afterSeq from a previous read to fetch only new messages. Broadcasts are pull-only: call this before starting work to catch up.',
             title: 'Read Team Messages',
             inputSchema: z.object({
@@ -668,7 +755,7 @@ function createHapiMcpServer(
             }
         });
 
-        mcp.registerTool<any, any>('team_send', {
+        registerTool('team_send', {
             description: 'Agent Team: send a message to teammates. to="all" (default) writes to the shared log only; to="lead" wakes the Lead; non-Lead members can only direct-message the Lead (peer-to-peer DMs are blocked); to="human" notifies the human out-of-band (no inbox item); use kind="decision" when you need the human to decide something. Use inReplyTo=<seq> when answering a peer message so the hub can stop runaway back-and-forth. Do NOT use this for routine replies to the human.',
             title: 'Send Team Message',
             inputSchema: z.object({
@@ -703,7 +790,7 @@ function createHapiMcpServer(
 
         // Team-only spawn. Kept separate from the generic spawn_peer so an
         // Agent-Team-enabled hub never hijacks normal peer session creation.
-        mcp.registerTool<any, any>('team_spawn', {
+        registerTool('team_spawn', {
             description: 'Agent Team: spawn a new teammate session (own context window) with a role and an initial task. Members inherit your tool/model/thinking level/permission by default - override only when the human asks; spawning costs tokens - prefer reusing idle members; requires user approval.',
             title: 'Spawn Team Member',
             inputSchema: z.object({
@@ -746,7 +833,7 @@ function createHapiMcpServer(
             }
         });
 
-        mcp.registerTool<any, any>('team_task', {
+        registerTool('team_task', {
             description: 'Agent Team: list team tasks, create one for an existing member (Lead only), or update one. Moving a task to doing/done requires its dependencies to be done; marking a task done requires a deliverable (evidence: branch/commit/files/test result). A member may hold only one doing task at a time.',
             title: 'Team Tasks',
             inputSchema: z.object({
@@ -802,7 +889,7 @@ function createHapiMcpServer(
             }
         });
 
-        mcp.registerTool<any, any>('team_requirement', {
+        registerTool('team_requirement', {
             description: 'Agent Team: list requirements (human asks) or update one. When a requirement is finished, set status=done and write the conclusion so the human sees the result without reading the whole thread.',
             title: 'Team Requirements',
             inputSchema: z.object({
@@ -839,7 +926,7 @@ function createHapiMcpServer(
     }
 
     if (skillLookup) {
-        mcp.registerTool<any, any>('skill_lookup', {
+        registerTool('skill_lookup', {
             description: 'Load a HAPI skill by exact name. When a user message starts with $name, call this tool with that name before acting.',
             title: 'Look Up Skill',
             inputSchema: skillLookupInputSchema,
@@ -899,10 +986,38 @@ function readMcpSessionId(req: IncomingMessage): string | undefined {
 export async function startHappyServer(client: ApiSessionClient, options: StartHappyServerOptions = {}) {
     const emitTitleSummary = options.emitTitleSummary ?? true;
     const enableChangeTitle = options.enableChangeTitle ?? true;
+    const requestedTools = options.enabledTools ? new Set(options.enabledTools) : null;
     // Team tools are registered only when the hub reports the feature enabled
     // (probe -> 404 when disabled, so nothing changes for non-team hubs).
     // Membership itself is resolved per tool call, so mid-life team joins work.
-    const teamToolsEnabled = options.teamToolsEnabled ?? await probeTeamsSupport();
+    const teamToolsEnabled = options.teamToolsEnabled
+        ?? (requestedTools
+            ? [...requestedTools].some((name) => name.startsWith('team_'))
+            : await probeTeamsSupport());
+    const includeTool = (name: HapiMcpToolName): boolean =>
+        requestedTools === null || requestedTools.has(name);
+    const peerToolsDisabled = isPeerToolsDisabled();
+    const toolNames: HapiMcpToolName[] = [];
+    if (enableChangeTitle && includeTool('change_title')) toolNames.push('change_title');
+    for (const name of ['display_image', 'display_video', 'display_media'] as const) {
+        if (includeTool(name)) toolNames.push(name);
+    }
+    if (!peerToolsDisabled) {
+        for (const name of ['list_peers', 'ping_peer', 'inspect_peer', 'spawn_peer'] as const) {
+            if (includeTool(name)) toolNames.push(name);
+        }
+    }
+    if (teamToolsEnabled) {
+        for (const name of ['team_status', 'team_read', 'team_send', 'team_task', 'team_requirement', 'team_spawn'] as const) {
+            if (includeTool(name)) toolNames.push(name);
+        }
+    }
+    if (includeTool(SESSION_JOB_TOOL_NAME)) toolNames.push(SESSION_JOB_TOOL_NAME);
+    if (options.skillLookup && includeTool('skill_lookup')) toolNames.push('skill_lookup');
+    if (toolNames.length === 0) {
+        throw new Error('startHappyServer requires at least one enabled tool');
+    }
+    const enabledTools = new Set(toolNames);
     const transports = new Map<string, StreamableHTTPServerTransport>();
     const mcps = new Map<string, McpServer>();
 
@@ -913,7 +1028,9 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
             enableChangeTitle,
             options.skillLookup,
             teamToolsEnabled,
-            options.workingDirectory
+            options.workingDirectory,
+            enabledTools,
+            options.onChangeTitle
         );
         const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
@@ -969,21 +1086,6 @@ export async function startHappyServer(client: ApiSessionClient, options: StartH
         ...metadata,
         hapiMcpUrl: mcpUrl,
     }));
-
-    const peerToolsDisabled = isPeerToolsDisabled();
-    const toolNames = [
-        ...(enableChangeTitle ? ['change_title'] : []),
-        'display_image',
-        'display_video',
-        'display_media',
-        ...(peerToolsDisabled ? [] : ['list_peers', 'ping_peer', 'inspect_peer', 'spawn_peer']),
-    ];
-    if (teamToolsEnabled) {
-        toolNames.push('team_status', 'team_read', 'team_send', 'team_task', 'team_requirement', 'team_spawn');
-    }
-    if (options.skillLookup) {
-        toolNames.push('skill_lookup');
-    }
 
     return {
         url: mcpUrl,

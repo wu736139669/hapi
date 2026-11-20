@@ -387,7 +387,6 @@ export function QueuedMessagesBar({
                         const editText = getQueuedMessageEditText(preview)
                         const hasAttachments = attachmentNames.length > 0
                         const localId = msg.localId ?? msg.id
-                        const isSteerPending = steerMutation.isPending && steerMutation.variables?.localId === localId
                         const waitingForCompaction = msg.deliveryState === 'indeterminate'
                             && compactionPendingMessageIds?.includes(localId) === true
                         const deliveryPending = msg.deliveryPending === true && deliveryActive === true
@@ -420,8 +419,21 @@ export function QueuedMessagesBar({
                             })
                         }
 
+                        // Steer delivers this message into the active Pi turn. Gated
+                        // on the same server-echo + no-pending-op conditions as
+                        // Edit/Cancel, and never offered for future-scheduled rows
+                        // (the hub rejects those).
+                        const canSteerRow = Boolean(
+                            canSteer
+                            && msg.deliveryState !== 'indeterminate'
+                            && msg.scheduledAt == null
+                            && canCancel
+                        )
+                        const steerPending = steerMutation.isPending
+                            && steerMutation.variables?.sessionId === sessionId
+                            && steerMutation.variables.messageId === msg.id
                         const handleSteer = () => {
-                            if (!canSteer) return
+                            if (!canSteerRow) return
                             const token = beginQueuedOperation(sessionId)
                             if (!token) return
                             void steerMutation.mutateAsync({
@@ -557,6 +569,15 @@ export function QueuedMessagesBar({
                                             {text}
                                         </span>
                                     ) : null}
+                                    {steerPending && msg.deliveryState !== 'indeterminate' ? (
+                                        <div className="mt-1 flex items-center gap-1 text-xs text-[var(--app-hint)]">
+                                            <svg className="h-3 w-3 shrink-0 animate-spin motion-reduce:animate-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                                                <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                                                <path d="M12 2a10 10 0 0 1 10 10" />
+                                            </svg>
+                                            {t('queuedMessages.steerRequesting')}
+                                        </div>
+                                    ) : null}
                                     {msg.deliveryState === 'indeterminate' ? (
                                         <div className={`mt-1 text-xs ${waitingForCompaction ? 'text-[var(--app-hint)]' : 'text-[var(--app-warning-text)]'}`}>
                                             {t(waitingForCompaction ? 'queuedMessages.compactionPending' : deliveryPending ? 'queuedMessages.deliveryPending' : 'queuedMessages.steerOutcomeUnknown')}
@@ -628,12 +649,12 @@ export function QueuedMessagesBar({
                                             type="button"
                                             aria-label={t('queuedMessages.steerNow')}
                                             title={t('queuedMessages.steerNow')}
-                                            disabled={!canSteer}
+                                            disabled={!canSteerRow}
                                             onClick={handleSteer}
                                             onMouseDown={(e) => e.preventDefault()}
                                             className="flex h-6 items-center rounded text-[var(--app-hint)] transition-colors hover:bg-[var(--app-border)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-40"
                                         >
-                                            {isSteerPending ? (
+                                            {steerPending ? (
                                                 <span className="flex h-6 w-6 items-center justify-center text-xs" aria-hidden="true">…</span>
                                             ) : (
                                                 <span className="flex h-6 w-6 shrink-0 items-center justify-center">

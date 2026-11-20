@@ -6,6 +6,7 @@ import { decodeMessageContent } from './contentCodec'
 import type { StoredMessage } from './types'
 import {
     addMessage,
+    upsertToolCallMessage,
     syncNativeQueuedMessage,
     addImportedMessage,
     cancelQueuedMessage,
@@ -26,7 +27,9 @@ import {
     getMatureScheduledMessages,
     getImmediateQueuedLocalMessages,
     getFutureScheduledStatsBySessionIds,
+    countFutureScheduledBySessionIds,
     countFutureScheduledLocalMessages,
+    minFutureScheduledAtBySessionIds,
     countMessages,
     markMessagesInvoked,
     markMessagesIndeterminate,
@@ -49,6 +52,7 @@ import {
     type LocalMessageState,
     type MessagePosition,
     type FutureScheduledMessageStats,
+    type UpsertToolCallResult,
 } from './messages'
 import {
     hasPotentiallyIncompleteMessageContent,
@@ -67,6 +71,10 @@ export class MessageStore {
 
     addMessage(sessionId: string, content: unknown, localId?: string, scheduledAt?: number | null, createdAt?: number): StoredMessage {
         return addMessage(this.db, sessionId, content, localId, scheduledAt, createdAt)
+    }
+
+    upsertToolCallMessage(sessionId: string, content: unknown, callId: string, localId?: string, createdAt?: number): UpsertToolCallResult {
+        return upsertToolCallMessage(this.db, sessionId, content, callId, localId, createdAt)
     }
 
     syncNativeQueuedMessage(sessionId: string, localId: string, text: string): StoredMessage {
@@ -175,6 +183,14 @@ export class MessageStore {
 
     getFutureScheduledStatsBySessionIds(sessionIds: string[], now: number = Date.now()): Map<string, FutureScheduledMessageStats> {
         return getFutureScheduledStatsBySessionIds(this.db, sessionIds, now)
+    }
+
+    countFutureScheduledBySessionIds(sessionIds: string[], now: number = Date.now()): Map<string, number> {
+        return countFutureScheduledBySessionIds(this.db, sessionIds, now)
+    }
+
+    minFutureScheduledAtBySessionIds(sessionIds: string[], now: number = Date.now()): Map<string, number> {
+        return minFutureScheduledAtBySessionIds(this.db, sessionIds, now)
     }
 
     // ponytail: scans through leading bookkeeping; index content if that prefix becomes costly.
