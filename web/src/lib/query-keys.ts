@@ -7,6 +7,7 @@ export const queryKeys = {
     machines: ['machines'] as const,
     sqliteStorage: ['sqlite-storage'] as const,
     hubSettings: ['hub-settings'] as const,
+    passkeys: ['passkeys'] as const,
     usageSummary: (range: string, timeZone: string) => ['usage-summary', range, timeZone] as const,
     claudeCustomModels: ['claude-custom-models'] as const,
     usageQuotas: ['usage-quotas'] as const,

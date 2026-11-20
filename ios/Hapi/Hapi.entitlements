@@ -8,6 +8,10 @@
 	<array>
 		<string>group.com.wusu.hapi</string>
 	</array>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>webcredentials:hapi.run</string>
+	</array>
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$(AppIdentifierPrefix)com.wusu.hapi.push</string>

@@ -13,10 +13,12 @@ import {
     isMachineCapabilitySkewed,
     runnerSupportsAgentTeam,
 } from '@hapi/protocol/runnerCapabilities'
-import type { AbortChunkedUploadResponse, CodexGoalRequest, CodexGoalResponse, OpencodeGoalRequest, OpencodeGoalResponse, CopilotReasoningEffortResponse, KimiReasoningEffortResponse, CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, ImplementCodexPlanResult, InitChunkedUploadRequest, InitChunkedUploadResponse, MessageContextResponse, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, RewindConversationErrorCode, SlashCommandsResponse, UploadChunkResponse } from '@hapi/protocol/apiTypes'
+import type { AbortChunkedUploadResponse, CodexGoalRequest, CodexGoalResponse, OpencodeGoalRequest, OpencodeGoalResponse, CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, InitChunkedUploadRequest, InitChunkedUploadResponse, MessageContextResponse, MessageDeliveryMode, MessagesResponse, QueuedStateResponse, RewindConversationErrorCode, SlashCommandsResponse, UploadChunkResponse } from '@hapi/protocol/apiTypes'
 import type { UsageQueryAgent, UsageQueryAgentSettings, UsageQueryResult, UsageQuerySettingsResponse, UsageQueryTemplate } from '@hapi/protocol/usageQuery'
 import type { SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
 import type { SessionStopPreparationLease } from '@hapi/protocol/rpcMethods'
+import type { ListLocalSessionsRpcResponse, LocalSessionFlavor } from '@hapi/protocol/localTranscript'
+import type { CopilotReasoningEffortResponse, ImplementCodexPlanResult, KimiReasoningEffortResponse } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor, BackgroundTask, CodexCollaborationMode, CopilotAgentMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import { hasConversationMessageContent, unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
@@ -2515,6 +2517,9 @@ export class SyncEngine {
     > {
         try {
             const metadata = source.metadata
+            if (metadata?.codexRuntime?.kind === 'attached') {
+                throw new Error('Fork external threads in the owning desktop, then use hapi attach')
+            }
             if (metadata?.flavor !== 'codex' || !metadata.codexSessionId || !metadata.machineId || !metadata.path) {
                 throw new Error('Inactive fork requires a Codex session with native history and a machine binding')
             }
@@ -4324,6 +4329,9 @@ export class SyncEngine {
 
         const session = access.session
         const metadata = session.metadata
+        if (metadata?.codexRuntime?.kind === 'attached') {
+            return { type: 'error', message: 'Externally attached Codex session: run hapi attach on its machine; owned cold resume is disabled', code: 'resume_unavailable' }
+        }
         if (!metadata || typeof metadata.path !== 'string' || metadata.path.length === 0) {
             return { type: 'error', message: 'Session metadata missing path', code: 'resume_unavailable' }
         }
@@ -4714,6 +4722,7 @@ export class SyncEngine {
     /** Inactive session with directory path but no agent thread and no prior user turn. */
     private canFreshSpawnNeverStartedSession(session: Session, sessionId: string, namespace: string): boolean {
         const metadata = session.metadata
+        if (metadata?.codexRuntime?.kind === 'attached') return false
         if (!metadata || typeof metadata.path !== 'string' || metadata.path.length === 0) {
             return false
         }
@@ -6279,6 +6288,14 @@ export class SyncEngine {
 
     async archiveCodexSessionForMachine(machineId: string, sessionId: string): Promise<RpcArchiveCodexSessionResponse> {
         return await this.rpcGateway.archiveCodexSessionForMachine(machineId, sessionId)
+    }
+
+    async listLocalSessionsForMachine(machineId: string, params: {
+        flavor: LocalSessionFlavor
+        cwd?: string | null
+        sessionIds?: string[] | null
+    }): Promise<ListLocalSessionsRpcResponse> {
+        return await this.rpcGateway.listLocalSessionsForMachine(machineId, params)
     }
 
     async listCursorModelsForSession(sessionId: string): Promise<RpcListCursorModelsResponse> {

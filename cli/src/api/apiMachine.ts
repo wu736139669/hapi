@@ -40,6 +40,12 @@ import { backoff } from '@/utils/time'
 import { getInvokedCwd } from '@/utils/invokedCwd'
 import { RpcHandlerManager } from './rpc/RpcHandlerManager'
 import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
+import { registerLocalSessionHandlers } from '../modules/common/localSessions/rpcHandlers'
+import { registerLocalSessionSource } from '../modules/common/localSessions/registry'
+import { codexLocalSessionSource } from '../modules/common/localSessions/sources/codex'
+import { piLocalSessionSource } from '../modules/common/localSessions/sources/pi'
+import { opencodeLocalSessionSource } from '../modules/common/localSessions/sources/opencode'
+import { claudeLocalSessionSource } from '../modules/common/localSessions/sources/claude'
 import { registerWorkspaceFileHandlers } from '../modules/common/workspaceFileHandlers'
 import { setAgyCatalogChangeListener } from '../modules/common/agyModels'
 import {
@@ -210,6 +216,15 @@ export class ApiMachineClient {
         })
 
         registerCommonHandlers(this.rpcHandlerManager, getInvokedCwd())
+        for (const source of [codexLocalSessionSource, piLocalSessionSource, opencodeLocalSessionSource, claudeLocalSessionSource]) {
+            registerLocalSessionSource(source)
+        }
+        registerLocalSessionHandlers({
+            registerHandler: (method, handler) => this.rpcHandlerManager.registerHandler(method, handler),
+            resolveForCheck: (path) => this.pathPolicy.resolveForCheck(path),
+            isWithinSpawnRoots: (path) => this.pathPolicy.isWithinSpawnRoots(path),
+            isSessionWithinWorkspaceRoots: (session) => this.isLocalSessionWithinWorkspaceRoots(session)
+        })
         registerWorkspaceFileHandlers(this.rpcHandlerManager, {
             resolveForCheck: (path) => this.pathPolicy.resolveForCheck(path),
             isWithinSpawnRoots: (path) => this.pathPolicy.isWithinSpawnRoots(path),

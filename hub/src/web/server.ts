@@ -16,6 +16,12 @@ import type { SyncEngine } from '../sync/syncEngine'
 import { createAuthMiddleware, type WebAppEnv } from './middleware/auth'
 import { createAuthRoutes } from './routes/auth'
 import { createBindRoutes } from './routes/bind'
+import {
+    createPasskeyLoginRoutes,
+    createPasskeyManagementRoutes,
+    nativePasskeyConfigFromEnv,
+    PasskeyChallengeStore
+} from './routes/passkey'
 import { createEventsRoutes } from './routes/events'
 import { createSessionsRoutes } from './routes/sessions'
 import { createMessagesRoutes } from './routes/messages'
@@ -308,6 +314,14 @@ function createWebApp(options: {
 
     app.route('/api', createAuthRoutes(options.jwtSecret, options.store))
     app.route('/api', createBindRoutes(options.jwtSecret, options.store))
+    const passkeyDeps = {
+        jwtSecret: options.jwtSecret,
+        store: options.store,
+        corsOrigins: () => corsOrigins,
+        challenges: new PasskeyChallengeStore(),
+        native: nativePasskeyConfigFromEnv()
+    }
+    app.route('/api', createPasskeyLoginRoutes(passkeyDeps))
     app.route('/api', createPublicStudioRoutes({
         store: options.store,
         getSyncEngine: options.getSyncEngine
@@ -317,6 +331,7 @@ function createWebApp(options: {
         isGuestTokenActive: (shareToken) => options.store.sessionShares.getActiveByToken(shareToken) !== null,
         resolveTeamAgentToken: (token) => options.getTeamService?.()?.resolveAgentToken(token) ?? null
     }))
+    app.route('/api', createPasskeyManagementRoutes(passkeyDeps))
     app.route('/api', createSessionShareRoutes({ store: options.store, jwtSecret: options.jwtSecret, getSyncEngine: options.getSyncEngine }))
     app.route('/api', createEventsRoutes(options.getSseManager, options.getSyncEngine, options.getVisibilityTracker, {
         isGuestTokenActive: (shareToken) => options.store.sessionShares.getActiveByToken(shareToken) !== null

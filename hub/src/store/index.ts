@@ -17,6 +17,7 @@ import { SessionJobsStore } from './sessionJobsStore'
 import { SessionRedirectStore } from './sessionRedirectStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
+import { PASSKEY_CREDENTIALS_TABLE_SQL, PasskeyStore } from './passkeyStore'
 import { TurnStore } from './turnStore'
 import { UsageStore } from './usageStore'
 import { StudioStore } from './studioStore'
@@ -60,6 +61,8 @@ export { ChatAttachmentsStore } from './chatAttachments'
 export { SessionJobsStore } from './sessionJobsStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
+export { PasskeyStore } from './passkeyStore'
+export type { StoredPasskeyCredential } from './passkeyStore'
 export { TurnStore } from './turnStore'
 export type { SessionTurn, SessionTurnEndReason, SessionTurnTrigger } from './turns'
 export { UsageStore } from './usageStore'
@@ -75,7 +78,7 @@ export {
 
 // Usage history is a durable namespace ledger. Keep it independent from
 // session lifetime so deleting a session cannot erase historical totals.
-export const SCHEMA_VERSION: number = 35
+export const SCHEMA_VERSION: number = 36
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -97,7 +100,8 @@ const REQUIRED_TABLES = [
     'session_turns',
     'studio_rooms',
     'studio_posts',
-    'session_redirects'
+    'session_redirects',
+    'passkey_credentials'
 ] as const
 
 export class Store {
@@ -109,6 +113,7 @@ export class Store {
     readonly machines: MachineStore
     readonly messages: MessageStore
     readonly users: UserStore
+    readonly passkeys: PasskeyStore
     readonly push: PushStore
     readonly fcm: FcmStore
     readonly liveActivities: LiveActivityStore
@@ -178,6 +183,7 @@ export class Store {
         this.messages = new MessageStore(this.db)
         this.historySync = new HistorySyncStore(this.db)
         this.users = new UserStore(this.db)
+        this.passkeys = new PasskeyStore(this.db)
         this.push = new PushStore(this.db)
         this.fcm = new FcmStore(this.db)
         this.liveActivities = new LiveActivityStore(this.db)
@@ -424,7 +430,8 @@ export class Store {
             // upstream session_turns at v27→v28; last_user_message_at at v28→v29;
             // upstream read-state at v29→v30;
             // #1404 session_jobs at v31→v32 (after upstream FTS v30→v31); run_id fence at v32→v33;
-            // #1489 wake-on-terminal at v33→v34; session_redirects at v34→v35
+            // #1489 wake-on-terminal at v33→v34; session_redirects at v34→v35;
+            // passkey_credentials at v35→v36
             // (jobs remapped again after upstream took 28/29/30).
             21: () => this.migrateFromV21ToV22(),
             22: () => this.migrateFromV22ToV23(),
@@ -440,6 +447,7 @@ export class Store {
             32: () => this.migrateFromV32ToV33(),
             33: () => this.migrateFromV33ToV34(),
             34: () => this.migrateFromV34ToV35(),
+            35: () => this.migrateFromV35ToV36(),
         })
 
         if (currentVersion === 0) {
@@ -483,6 +491,7 @@ export class Store {
             this.migrateFromV32ToV33()
             this.migrateFromV33ToV34()
             this.migrateFromV34ToV35()
+            this.migrateFromV35ToV36()
             this.ensureUsageScanParserVersion()
             this.setUserVersion(SCHEMA_VERSION)
             return
@@ -675,6 +684,8 @@ export class Store {
             );
             CREATE INDEX IF NOT EXISTS idx_session_redirects_namespace_new
                 ON session_redirects(namespace, new_id);
+
+            ${PASSKEY_CREDENTIALS_TABLE_SQL}
 
             CREATE TABLE IF NOT EXISTS usage_events (
                 namespace TEXT NOT NULL DEFAULT 'default',
@@ -1747,6 +1758,11 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_session_redirects_namespace_new
                 ON session_redirects(namespace, new_id);
         `)
+    }
+
+    /** v35→v36: WebAuthn credentials that can be exchanged for a web JWT. */
+    private migrateFromV35ToV36(): void {
+        this.db.exec(PASSKEY_CREDENTIALS_TABLE_SQL)
     }
 
     private ensureUsageScanParserVersion(): void {

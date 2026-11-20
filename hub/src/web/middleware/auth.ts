@@ -29,7 +29,14 @@ export function createAuthMiddleware(jwtSecret: Uint8Array, options?: {
 }): MiddlewareHandler<WebAppEnv> {
     return async (c, next) => {
         const path = c.req.path
-        if (path === '/api/auth' || path === '/api/bind' || path.startsWith('/api/public/studios/') || path.startsWith('/api/public/session-shares/')) {
+        if (
+            path === '/api/auth'
+            || path === '/api/bind'
+            || path === '/api/passkey/login/options'
+            || path === '/api/passkey/login/verify'
+            || path.startsWith('/api/public/studios/')
+            || path.startsWith('/api/public/session-shares/')
+        ) {
             await next()
             return
         }

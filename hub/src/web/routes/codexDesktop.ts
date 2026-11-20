@@ -78,7 +78,7 @@ type CodexLocalSessionsResponse = {
     machineId?: string
 }
 
-type CodexImportedMessageContent = {
+export type CodexImportedMessageContent = {
     role: 'user'
     content: {
         type: 'text'

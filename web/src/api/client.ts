@@ -97,6 +97,13 @@ import type {
 import { fetchThroughAuthProxy } from '@/api/authProxy'
 import { FOLLOW_SESSION_REDIRECTS_HEADER } from '@hapi/protocol'
 import type { SessionReadState, SessionReadStateRequest, AgentFlavor, MessageDeliveryMode } from '@hapi/protocol'
+import type { PasskeyListResponse } from '@hapi/protocol'
+import type {
+    AuthenticationResponseJSON,
+    PublicKeyCredentialCreationOptionsJSON,
+    PublicKeyCredentialRequestOptionsJSON,
+    RegistrationResponseJSON
+} from '@simplewebauthn/browser'
 import type { CancelMessageResponse, SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
 import type { TranscriptionMode, TranscriptionProvider, TranscriptionProviderInfo } from '@hapi/protocol/voice'
 import { readBlobWithProgress, type BlobProgressReporter } from '@/lib/readBlobWithProgress'
@@ -232,6 +239,27 @@ function parseErrorCode(bodyText: string): string | undefined {
     }
 }
 
+function parseErrorDisplay(bodyText: string): string | undefined {
+    try {
+        const parsed = JSON.parse(bodyText) as ErrorPayload
+        if (typeof parsed.error === 'string' && parsed.error.trim().length > 0) return parsed.error
+        return undefined
+    } catch {
+        return undefined
+    }
+}
+
+/**
+ * User-facing message for a failed API call: unwrap the hub's human error
+ * string instead of leaking the raw `HTTP <status>: <body>` envelope.
+ */
+export function apiErrorMessage(error: unknown, fallback: string): string {
+    if (!(error instanceof ApiError)) {
+        return error instanceof Error && error.message.trim().length > 0 ? error.message : fallback
+    }
+    return parseErrorDisplay(error.body ?? '') ?? error.code?.trim() ?? fallback
+}
+
 export class ApiError extends Error {
     status: number
     code?: string
@@ -320,7 +348,9 @@ export class ApiClient {
         return await res.json() as T
     }
 
-    async authenticate(auth: { initData: string } | { accessToken: string }): Promise<AuthResponse> {
+    async authenticate(
+        auth: { initData: string } | { accessToken: string } | { passkeySession: string }
+    ): Promise<AuthResponse> {
         const res = await fetchThroughAuthProxy(this.buildUrl('/api/auth'), {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -335,6 +365,49 @@ export class ApiClient {
         }
 
         return await res.json() as AuthResponse
+    }
+
+    /** Unauthenticated JSON POST used by the passkey login ceremony. */
+    private async postPublic<T>(path: string, body: unknown, label: string): Promise<T> {
+        const res = await fetchThroughAuthProxy(this.buildUrl(path), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body)
+        })
+        if (!res.ok) {
+            const text = await res.text().catch(() => '')
+            const code = parseErrorCode(text)
+            const detail = text ? `: ${text}` : ''
+            throw new ApiError(`${label}: HTTP ${res.status} ${res.statusText}${detail}`, res.status, code, text || undefined)
+        }
+        return await res.json() as T
+    }
+
+    async getPasskeyLoginOptions(): Promise<PublicKeyCredentialRequestOptionsJSON> {
+        return await this.postPublic('/api/passkey/login/options', {}, 'Passkey sign-in failed')
+    }
+
+    async verifyPasskeyLogin(response: AuthenticationResponseJSON): Promise<AuthResponse & { passkeySession: string }> {
+        return await this.postPublic('/api/passkey/login/verify', { response }, 'Passkey sign-in failed')
+    }
+
+    async getPasskeyRegistrationOptions(): Promise<PublicKeyCredentialCreationOptionsJSON> {
+        return await this.request('/api/passkey/register/options', { method: 'POST', body: '{}' })
+    }
+
+    async verifyPasskeyRegistration(response: RegistrationResponseJSON, name?: string): Promise<void> {
+        await this.request('/api/passkey/register/verify', {
+            method: 'POST',
+            body: JSON.stringify({ response, name })
+        })
+    }
+
+    async listPasskeys(): Promise<PasskeyListResponse> {
+        return await this.request<PasskeyListResponse>('/api/passkeys')
+    }
+
+    async deletePasskey(id: string): Promise<void> {
+        await this.request(`/api/passkeys/${encodeURIComponent(id)}`, { method: 'DELETE' })
     }
 
     async bind(auth: { initData: string; accessToken: string }): Promise<AuthResponse> {
