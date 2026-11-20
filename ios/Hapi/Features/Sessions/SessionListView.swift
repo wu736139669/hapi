@@ -41,10 +41,6 @@ struct SessionListView: View {
     @State private var groupRowTarget: SessionRowUI?
     @State private var groupSectionTarget: SessionListSectionUI?
     @State private var groupText = ""
-    /// Cached once per snapshot. Computing `model.existingGroupNames` inside
-    /// the context-menu builder runs it for every row (O(n²)) on every render,
-    /// which stalls scrolling on large hubs.
-    @State private var groupNameOptions: [String] = []
     /// Grouped rows kept while a pushed chat covers the list.
     @State private var frozenSnapshot: SessionListSnapshot?
     /// Per-section overrides; nil means use the section's default. Kept
@@ -90,9 +86,6 @@ struct SessionListView: View {
         }
         .onChange(of: model.selectedSessionId, initial: true) { _, sessionId in
             expandSelectedSection(sessionId)
-        }
-        .onChange(of: model.snapshot, initial: true) { _, _ in
-            groupNameOptions = model.existingGroupNames
         }
         .task {
             // Explicit fetch on entry: the snapshot may be stale and a
@@ -188,6 +181,15 @@ struct SessionListView: View {
             Button("Cancel", role: .cancel) {}
         } message: { row in
             Text(SessionNameRules.deleteMessage(title: row.title))
+        }
+        .sheet(item: $groupRowTarget) { row in
+            GroupPickerSheet(
+                names: model.existingGroupNames,
+                current: row.summary.metadata?.group,
+                onSelect: { name in
+                    model.setGroup(sessionId: row.id, group: name)
+                }
+            )
         }
     }
 
@@ -593,19 +595,9 @@ struct SessionListView: View {
         } label: {
             Label("Rename…", systemImage: "pencil")
         }
-        Menu {
-            ForEach(groupNameOptions, id: \.self) { name in
-                Button(name) {
-                    model.setGroup(sessionId: row.id, group: name)
-                }
-            }
-            if !groupNameOptions.isEmpty {
-                Divider()
-            }
-            Button("New Group…") {
-                groupText = summary.metadata?.group ?? ""
-                groupRowTarget = row
-            }
+        Button {
+            groupText = summary.metadata?.group ?? ""
+            groupRowTarget = row
         } label: {
             Label(summary.metadata?.group == nil ? "Add to Group…" : "Change Group…", systemImage: "rectangle.stack")
         }
@@ -1016,5 +1008,64 @@ private struct PlatformSessionListStyle: ViewModifier {
         #else
         content.listStyle(.plain)
         #endif
+    }
+}
+
+/// Presented on demand (not inside any row's context-menu builder): building
+/// a menu per row forced every cell to rebuild it on each render, which made
+/// scrolling janky on large hubs. A sheet is created only when the user taps
+/// "Add to Group".
+private struct GroupPickerSheet: View {
+    let names: [String]
+    let current: String?
+    let onSelect: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var newName = ""
+
+    private var trimmedNewName: String {
+        newName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if !names.isEmpty {
+                    Section("Existing groups") {
+                        ForEach(names, id: \.self) { name in
+                            Button {
+                                onSelect(name)
+                                dismiss()
+                            } label: {
+                                HStack {
+                                    Text(verbatim: name)
+                                    Spacer(minLength: 8)
+                                    if name == current {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(.tint)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                            }
+                        }
+                    }
+                }
+                Section("New group") {
+                    TextField("Group name", text: $newName)
+                    Button("Create") {
+                        onSelect(trimmedNewName)
+                        dismiss()
+                    }
+                    .disabled(trimmedNewName.isEmpty)
+                }
+            }
+            .navigationTitle("Choose Group")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
     }
 }
