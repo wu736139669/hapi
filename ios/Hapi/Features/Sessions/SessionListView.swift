@@ -41,6 +41,10 @@ struct SessionListView: View {
     @State private var groupRowTarget: SessionRowUI?
     @State private var groupSectionTarget: SessionListSectionUI?
     @State private var groupText = ""
+    /// Cached once per snapshot. Computing `model.existingGroupNames` inside
+    /// the context-menu builder runs it for every row (O(n²)) on every render,
+    /// which stalls scrolling on large hubs.
+    @State private var groupNameOptions: [String] = []
     /// Grouped rows kept while a pushed chat covers the list.
     @State private var frozenSnapshot: SessionListSnapshot?
     /// Per-section overrides; nil means use the section's default. Kept
@@ -86,6 +90,9 @@ struct SessionListView: View {
         }
         .onChange(of: model.selectedSessionId, initial: true) { _, sessionId in
             expandSelectedSection(sessionId)
+        }
+        .onChange(of: model.snapshot, initial: true) { _, _ in
+            groupNameOptions = model.existingGroupNames
         }
         .task {
             // Explicit fetch on entry: the snapshot may be stale and a
@@ -587,12 +594,12 @@ struct SessionListView: View {
             Label("Rename…", systemImage: "pencil")
         }
         Menu {
-            ForEach(model.existingGroupNames, id: \.self) { name in
+            ForEach(groupNameOptions, id: \.self) { name in
                 Button(name) {
                     model.setGroup(sessionId: row.id, group: name)
                 }
             }
-            if !model.existingGroupNames.isEmpty {
+            if !groupNameOptions.isEmpty {
                 Divider()
             }
             Button("New Group…") {
