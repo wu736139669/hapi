@@ -19,7 +19,11 @@ vi.mock('@assistant-ui/react', () => ({
     useAui: () => ({ composer: () => ({ getState: () => ({ text: '' }) }) }),
     useAuiState: () => '',
 }))
-vi.mock('@/lib/use-translation', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+vi.mock('@/lib/use-translation', () => ({ useTranslation: () => ({ t: (key: string) => ({
+    'queuedMessages.edit': 'Edit queued message',
+    'queuedMessages.cancel': 'Cancel queued message',
+    'queuedMessages.steerNow': 'Steer queued message',
+})[key] ?? key }) }))
 vi.mock('@/lib/toast-context', () => ({ useToast: () => ({ addToast }) }))
 
 const sid = 'steer-feedback'

@@ -110,6 +110,9 @@ export function SessionRowSummary(props: {
     className?: string
     /** Rows inside the pinned "in progress" section skip the pending text label. */
     inRunningSection?: boolean
+    /** Oldest pending request; clicking its icon opens that request. */
+    pendingRequestId?: string
+    onPendingRequestClick?: () => void
     /** Short project name shown under the title (pinned "in progress" rows). */
     projectLabel?: string
     /** Machine label shown next to the project name (pinned "in progress" rows). */
@@ -136,6 +139,8 @@ export function SessionRowSummary(props: {
         scheduleTooltipId: scheduleTooltipIdProp,
         className,
         inRunningSection = false,
+        pendingRequestId,
+        onPendingRequestClick,
         projectLabel,
         machineLabel,
         shared = false,
@@ -297,12 +302,19 @@ export function SessionRowSummary(props: {
                             summary={s}
                             label={attentionLabel ?? ''}
                             tooltipId={attentionId}
+                            pendingRequestId={pendingRequestId}
                         />
                     ) : requestKind ? (
                         <span className="inline-flex shrink-0 items-center gap-1 text-[var(--app-badge-warning-text)]">
                             <SessionRequestIcon
                                 kind={requestKind}
                                 label={attentionLabel ?? t('session.item.pending')}
+                                requestId={pendingRequestId}
+                                onClick={(event) => {
+                                    if (!onPendingRequestClick) return
+                                    event.stopPropagation()
+                                    onPendingRequestClick()
+                                }}
                             />
                             {!urgentAttention && !inRunningSection ? (
                                 <span className="text-[11px] font-medium leading-none">{t('session.item.pending')}</span>

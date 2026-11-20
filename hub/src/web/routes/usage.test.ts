@@ -106,7 +106,7 @@ describe('GET /api/usage/summary', () => {
                 c.set('namespace', 'default')
                 await next()
             })
-            app.route('/api', createUsageRoutes(store, () => fakeSyncEngine as never))
+            app.route('/api', createUsageRoutes(store, undefined, () => fakeSyncEngine as never))
 
             const response = await app.request('/api/usage/quotas?refresh=1')
             expect(response.status).toBe(200)

@@ -923,7 +923,7 @@ export default {
   'queuedMessages.scheduledFor': 'Scheduled for {time}',
   'queuedMessages.editAlreadyInvoked': "Message already sent — it can't be edited",
   'queuedMessages.editBusyNotRestored': 'Delivery still unresolved — draft not restored (may still be in flight)',
-  'queuedMessages.steerNow': 'Steer',
+  'queuedMessages.steerNow': 'Steer queued message',
   'queuedMessages.steerFailed': 'Steer failed — message stays queued',
   'queuedMessages.steerAlreadyInvoked': 'Message already sent',
   'queuedMessages.deliveryPending': 'Waiting for agent confirmation',

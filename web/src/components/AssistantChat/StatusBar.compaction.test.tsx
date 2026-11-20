@@ -54,7 +54,7 @@ describe('compaction status', () => {
             ...props.agentState,
             requests: { permission: { tool: 'Bash', arguments: {}, createdAt: NOW } }
         } }))
-        expect(screen.getByText('需要权限')).toBeTruthy()
+        expect(screen.getByText('需要审批')).toBeTruthy()
         expect(screen.queryByText('正在压缩上下文')).toBeNull()
         expect(interval).not.toHaveBeenCalled()
     })

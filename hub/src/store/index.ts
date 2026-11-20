@@ -720,8 +720,7 @@ export class Store {
                 session_id TEXT PRIMARY KEY,
                 message_epoch INTEGER NOT NULL DEFAULT 0,
                 last_seq INTEGER NOT NULL DEFAULT 0,
-                parser_version INTEGER NOT NULL DEFAULT 2,
-                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                parser_version INTEGER NOT NULL DEFAULT 2
             );
 
             CREATE TABLE IF NOT EXISTS events (
@@ -1768,6 +1767,12 @@ export class Store {
     private ensureUsageScanParserVersion(): void {
         const columns = this.db.prepare('PRAGMA table_info(usage_scan_state)').all() as Array<{ name: string }>
         if (columns.length === 0) return
+        // The fork's usage ledger is namespace-scoped; upstream's scan table is
+        // not. Repair both shapes so an upgraded or hand-built table can be
+        // re-indexed without losing the namespace.
+        if (!columns.some((col) => col.name === 'namespace')) {
+            this.db.exec("ALTER TABLE usage_scan_state ADD COLUMN namespace TEXT NOT NULL DEFAULT 'default'")
+        }
         if (!columns.some((col) => col.name === 'parser_version')) {
             this.db.exec('ALTER TABLE usage_scan_state ADD COLUMN parser_version INTEGER NOT NULL DEFAULT 2')
             this.db.exec('DELETE FROM usage_scan_state')

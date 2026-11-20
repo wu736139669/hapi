@@ -9,11 +9,16 @@ import { Hono } from 'hono'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
 import type { Store, StoredMessage } from '../../store'
 import { truncateOversizedMessageContent } from '../../store/contentCodec'
+import type { LocalTranscript, LocalTranscriptSummary } from '@hapi/protocol/localTranscript'
+import { CODEX_LOCAL_SESSION_SOURCE, machineSupportsLocalSessionImport } from './localSessions/sources'
+import { pickImportMachine } from './localSessions/machinePick'
 import type { WebAppEnv } from '../middleware/auth'
 
 type ScriptLogKind = 'sync' | 'restart'
 
 const DIRECT_IMPORT_COMMAND = 'direct-import'
+const MAX_CODEX_SESSION_IMPORTS = 200
+const DEFAULT_CODEX_SESSION_SCAN_LIMIT = 500
 const RESTART_SCRIPT_ENV_NAME = 'HAPI_CODEX_RESTART_SCRIPT'
 const RESTART_SCRIPT_DEFAULT_FILE = 'Restart-CodexDesktop.ps1'
 const RESTART_SCRIPT_ARGS = ['-Apply']
@@ -173,7 +178,6 @@ const SCRIPT_TIMEOUT_ERROR = '执行超时'
 const NO_SYNC_SESSION_SELECTED_ERROR = '未选择需要导入的 Codex 会话'
 const CODEX_DESKTOP_CONTROL_NAMESPACE_ERROR = 'Codex Desktop control is not available outside the default namespace'
 const DEFAULT_SCRIPT_TIMEOUT_MS = 60_000
-const DEFAULT_CODEX_SESSION_SCAN_LIMIT = 500
 const DARWIN_CODEX_APP_NAME = 'Codex'
 const DARWIN_CODEX_APP_CANDIDATES = [
     '/Applications/Codex.app',
@@ -582,27 +586,6 @@ function parseCodexLocalSession(
     }
 }
 
-function listLocalCodexSessions(limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT): CodexLocalSessionSummary[] {
-    const files: string[] = []
-    for (const root of getCodexSessionRoots()) {
-        collectJsonlFiles(root, files)
-    }
-
-    const sessionIndexTitles = readCodexSessionIndexTitles()
-    const deduped = new Map<string, CodexLocalSessionSummary>()
-    for (const filePath of files) {
-        const session = parseCodexLocalSession(filePath, sessionIndexTitles)
-        if (!session) continue
-        const previous = deduped.get(session.id)
-        if (!previous || previous.modifiedAt < session.modifiedAt) {
-            deduped.set(session.id, session)
-        }
-    }
-
-    return Array.from(deduped.values())
-        .sort((a, b) => b.modifiedAt - a.modifiedAt)
-        .slice(0, limit)
-}
 
 function buildImportedUserMessage(text: string): CodexImportedMessageContent {
     return {
@@ -951,36 +934,79 @@ function asRemoteCodexSessions(value: unknown, requireMessages: boolean): Remote
     })
 }
 
+function toRemoteCodexSession(session: LocalTranscriptSummary | LocalTranscript): CodexLocalSessionSummary | RemoteCodexSession {
+    const extra = 'extra' in session && session.extra && typeof session.extra === 'object'
+        ? session.extra as Record<string, unknown>
+        : {}
+    const originator = typeof extra.originator === 'string' ? extra.originator : null
+    const cliVersion = typeof extra.cliVersion === 'string' ? extra.cliVersion : null
+    return {
+        id: session.id,
+        title: session.title,
+        lastUserMessage: session.lastUserMessage ?? null,
+        cwd: session.cwd ?? null,
+        file: session.file,
+        modifiedAt: session.modifiedAt,
+        originator,
+        cliVersion,
+        ...('messages' in session
+            ? { messages: session.messages.map((message) => message.content as CodexImportedMessageContent) }
+            : {})
+    } as CodexLocalSessionSummary | RemoteCodexSession
+}
+
 async function listCodexSessionsViaMachine(options: {
     engine: SyncEngine | null
     namespace: string
     cwd?: string | null
     machineId?: string | null
     sessionIds?: string[]
-}): Promise<{ sessions: RemoteCodexSession[]; machineId?: string; error?: string }> {
-    const machineId = resolveCodexImportMachineId(options.cwd, options.namespace, options.engine, options.machineId)
-    if (!machineId || !options.engine) {
+}): Promise<{ sessions: Array<CodexLocalSessionSummary | RemoteCodexSession>; machineId?: string; error?: string }> {
+    const machine = pickImportMachine({
+        engine: options.engine,
+        namespace: options.namespace,
+        requestedMachineId: options.machineId,
+        cwd: options.cwd
+    })
+    if (!machine || !options.engine) {
         return { sessions: [], error: 'No online machine available for Codex history import' }
     }
-    const result = await options.engine.listCodexSessionsForMachine(machineId, options.cwd, options.sessionIds)
+    if (machineSupportsLocalSessionImport(CODEX_LOCAL_SESSION_SOURCE, machine)) {
+        const result = await options.engine.listLocalSessionsForMachine(machine.id, {
+            flavor: 'codex',
+            cwd: options.cwd ?? null,
+            sessionIds: options.sessionIds?.length ? options.sessionIds : null
+        })
+        if (!result.success) {
+            return { sessions: [], machineId: machine.id, error: result.error }
+        }
+        return {
+            sessions: result.sessions.map(toRemoteCodexSession),
+            machineId: machine.id
+        }
+    }
+    const result = await options.engine.listCodexSessionsForMachine(machine.id, options.cwd, options.sessionIds)
     if (!result || typeof result !== 'object') {
-        return { sessions: [], machineId, error: 'Unexpected Codex sessions RPC response' }
+        return { sessions: [], machineId: machine.id, error: 'Unexpected Codex sessions RPC response' }
     }
     if ((result as { success?: unknown }).success !== true) {
-        return { sessions: [], machineId, error: typeof (result as { error?: unknown }).error === 'string' ? (result as { error: string }).error : 'Failed to list local Codex sessions' }
+        return { sessions: [], machineId: machine.id, error: typeof (result as { error?: unknown }).error === 'string' ? (result as { error: string }).error : 'Failed to list local Codex sessions' }
     }
-    return { sessions: asRemoteCodexSessions((result as { sessions?: unknown }).sessions, Boolean(options.sessionIds?.length)), machineId }
+    return { sessions: asRemoteCodexSessions((result as { sessions?: unknown }).sessions, Boolean(options.sessionIds?.length)), machineId: machine.id }
 }
 
 function buildImportedSessionMetadata(
     data: CodexTranscriptImportData,
     existingMetadata?: Record<string, unknown> | null,
     resolvedMachineId?: string,
-    permissionMode?: string
+    permissionMode?: string,
+    machineHost?: string | null
 ): Record<string, unknown> {
     const now = Date.now()
     const path = data.cwd ?? (typeof existingMetadata?.path === 'string' ? existingMetadata.path : dirname(data.file))
-    const host = typeof existingMetadata?.host === 'string' ? existingMetadata.host : (process.env.HAPI_HOSTNAME || hostname())
+    const host = typeof existingMetadata?.host === 'string'
+        ? existingMetadata.host
+        : (machineHost || process.env.HAPI_HOSTNAME || hostname())
     const osValue = typeof existingMetadata?.os === 'string' ? existingMetadata.os : platform()
     const summaryText = data.lastUserMessage ?? data.title
     const machineId = typeof existingMetadata?.machineId === 'string'
@@ -995,7 +1021,10 @@ function buildImportedSessionMetadata(
         path,
         host,
         os: osValue,
-        name: data.title,
+        // A HAPI-side rename outlives the imported transcript title.
+        name: typeof existingMetadata?.name === 'string' && existingMetadata.name.trim()
+            ? existingMetadata.name
+            : data.title,
         summary: summaryText
             ? {
                 text: summaryText,
@@ -1989,6 +2018,27 @@ function createImportSuccessResponse(
     }
 }
 
+function listLocalCodexSessions(limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT): CodexLocalSessionSummary[] {
+    const files: string[] = []
+    for (const root of getCodexSessionRoots()) {
+        collectJsonlFiles(root, files)
+    }
+
+    const sessionIndexTitles = readCodexSessionIndexTitles()
+    const deduped = new Map<string, CodexLocalSessionSummary>()
+    for (const filePath of files) {
+        const session = parseCodexLocalSession(filePath, sessionIndexTitles)
+        if (!session) continue
+        const previous = deduped.get(session.id)
+        if (!previous || previous.modifiedAt < session.modifiedAt) {
+            deduped.set(session.id, session)
+        }
+    }
+    return Array.from(deduped.values())
+        .sort((a, b) => b.modifiedAt - a.modifiedAt)
+        .slice(0, limit)
+}
+
 function importSingleCodexSession(options: {
     codexSessionId: string
     localSessionsById: Map<string, CodexLocalSessionSummary | RemoteCodexSession>
@@ -1999,6 +2049,7 @@ function importSingleCodexSession(options: {
     modelReasoningEffort?: string | null
     yolo?: boolean
     machineId?: string | null
+    machineHost?: string | null
 }): ScriptLaunchResponse {
     const summary = options.localSessionsById.get(options.codexSessionId)
     if (!summary) {
@@ -2029,6 +2080,7 @@ function importSingleCodexSession(options: {
         .map((message) => normalizeComparableContent(message))
         .filter((value): value is string => value !== null)
 
+    let createdSessionId: string | null = null
     try {
         const candidates = collectImportCandidates(options.store, options.namespace, options.getSyncEngine)
         const activeCandidate = candidates.find((candidate) => (
@@ -2056,7 +2108,8 @@ function importSingleCodexSession(options: {
             transcript,
             asRecord(existingStored?.metadata),
             options.machineId ?? resolveImportMachineId(transcript.cwd, options.namespace, engine) ?? undefined,
-            options.yolo ? 'yolo' : undefined
+            options.yolo ? 'yolo' : undefined,
+            options.machineHost
         )
 
         let sessionId = existingStored?.id ?? null
@@ -2074,6 +2127,7 @@ function importSingleCodexSession(options: {
             ) ?? options.store.sessions.getOrCreateSession(randomUUID(), metadata, {}, options.namespace, options.model ?? undefined, undefined, options.modelReasoningEffort ?? undefined)
             sessionId = createdSession.id
             created = true
+            createdSessionId = sessionId
         } else if (existingStored) {
             const updatedMetadata = options.store.sessions.updateSessionMetadata(
                 existingStored.id,
@@ -2145,6 +2199,15 @@ function importSingleCodexSession(options: {
             syncedCount: 1
         }
     } catch (error) {
+        // A failed first import must not leave a half-populated session behind;
+        // re-syncs build on the stored prefix and would treat it as complete.
+        if (createdSessionId) {
+            try {
+                options.store.sessions.deleteSession(createdSessionId, options.namespace)
+            } catch {
+                // Best-effort cleanup; the original failure is what callers act on.
+            }
+        }
         const message = error instanceof Error ? error.message : String(error)
         return {
             ...createImportErrorResponse([options.codexSessionId], message),
@@ -2171,7 +2234,35 @@ export async function importSelectedCodexSessions(options: {
         return createImportErrorResponse(codexSessionIds, NO_SYNC_SESSION_SELECTED_ERROR)
     }
 
-    const localSessionsById = new Map((options.localSessions ?? listLocalCodexSessions()).map((session) => [session.id, session]))
+    const engine = options.getSyncEngine?.() ?? null
+    const onlineMachines = typeof engine?.getOnlineMachinesByNamespace === 'function'
+        ? engine.getOnlineMachinesByNamespace(options.namespace)
+        : []
+    // Import from the runner when it can answer either local-session RPC.
+    // Partial test/engine doubles and hub-local desktop imports without any
+    // runner keep the historical CODEX_HOME scan.
+    const canUseRunner = onlineMachines.length > 0 && (
+        onlineMachines.some((machine) => machineSupportsLocalSessionImport(CODEX_LOCAL_SESSION_SOURCE, machine))
+        || typeof engine?.listCodexSessionsForMachine === 'function'
+    )
+    const remote = options.localSessions || !canUseRunner
+        ? null
+        : await listCodexSessionsViaMachine({
+            engine,
+            namespace: options.namespace,
+            machineId: options.machineId,
+            sessionIds: codexSessionIds
+        })
+    if (remote?.error) {
+        return createImportErrorResponse(codexSessionIds, remote.error)
+    }
+    const machineId = options.machineId ?? remote?.machineId ?? null
+    const machineHost = machineId
+        ? onlineMachines.find((machine) => machine.id === machineId)?.metadata?.host ?? null
+        : null
+    const localSessionsById = new Map(
+        (options.localSessions ?? remote?.sessions ?? listLocalCodexSessions()).map((session) => [session.id, session])
+    )
     const results: ScriptLaunchResponse[] = []
     for (const codexSessionId of codexSessionIds) {
         const result = importSingleCodexSession({
@@ -2183,11 +2274,17 @@ export async function importSelectedCodexSessions(options: {
             model: options.model,
             modelReasoningEffort: options.modelReasoningEffort,
             yolo: options.yolo,
-            machineId: options.machineId
+            machineId,
+            machineHost
         })
         results.push(result)
 
-        if (result.success && (options.serviceTier !== undefined || options.collaborationMode !== undefined)) {
+        if (result.success && (
+            options.model !== undefined
+            || options.modelReasoningEffort !== undefined
+            || options.serviceTier !== undefined
+            || options.collaborationMode !== undefined
+        )) {
             const importedSessionId = result.hapiSessionIds?.[0]
             const engine = options.getSyncEngine?.() ?? null
             if (!importedSessionId || !engine) {
@@ -2195,6 +2292,8 @@ export async function importSelectedCodexSessions(options: {
             }
             try {
                 await engine.applySessionConfig(importedSessionId, {
+                    ...(options.model !== undefined ? { model: options.model } : {}),
+                    ...(options.modelReasoningEffort !== undefined ? { modelReasoningEffort: options.modelReasoningEffort } : {}),
                     ...(options.serviceTier !== undefined ? { serviceTier: options.serviceTier } : {}),
                     ...(options.collaborationMode !== undefined ? { collaborationMode: options.collaborationMode } : {})
                 })
@@ -2251,7 +2350,10 @@ export function createCodexDesktopRoutes(options: {
         }
         return c.json({
             success: true,
-            sessions: remote.sessions.map(({ messages: _messages, ...summary }) => summary),
+            sessions: remote.sessions.map((session) => {
+                const { messages: _messages, ...summary } = session as CodexTranscriptImportData
+                return summary
+            }),
             ...(remote.machineId ? { machineId: remote.machineId } : {})
         } satisfies CodexLocalSessionsResponse)
     })
@@ -2300,6 +2402,15 @@ export function createCodexDesktopRoutes(options: {
                 codexClientAvailable: codexStatus.clientAvailable
             })
         }
+        if (parsed.sessionIds.length > MAX_CODEX_SESSION_IMPORTS) {
+            return c.json({
+                success: false,
+                error: `At most ${MAX_CODEX_SESSION_IMPORTS} Codex sessions can be imported at once`,
+                cwd: getDirectImportRouteContext().workspace,
+                codexDesktopRunning: codexStatus.running,
+                codexClientAvailable: codexStatus.clientAvailable
+            }, 400)
+        }
 
         // 中文注释：hub 可能运行在服务器上；Codex transcript 必须通过用户本机 runner RPC 读取，不能扫描服务器磁盘。
         const remote = await listCodexSessionsViaMachine({
@@ -2324,7 +2435,7 @@ export function createCodexDesktopRoutes(options: {
             store: options.store,
             namespace: c.get('namespace'),
             getSyncEngine: options.getSyncEngine,
-            localSessions: remote.sessions,
+            localSessions: remote.sessions as RemoteCodexSession[],
             machineId: remote.machineId ?? null,
             model: parsed.model,
             modelReasoningEffort: parsed.modelReasoningEffort,

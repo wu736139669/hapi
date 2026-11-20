@@ -46,7 +46,7 @@ describe('SyncEngine steerQueuedMessage', () => {
 
         await expect(engine.steerQueuedMessage(session.id, message.id)).resolves.toEqual({
             status: 'failed',
-            error: 'Steering is only supported for Claude, Pi, Codex, OpenCode, Cursor ACP, and DSH sessions',
+            error: 'Steering is only supported for Claude, Pi, Codex, OpenCode, Cursor ACP, DSH, and Antigravity sessions',
             localId: null
         })
     })

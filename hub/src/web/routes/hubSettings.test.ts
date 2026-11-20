@@ -107,6 +107,8 @@ describe('GET/PUT /api/hub-settings', () => {
         expect(await put.json()).toEqual({
             sessionSummaryContract: false,
             sessionSummaryInChat: false,
+            teamsEnabled: false,
+            teamsEnabledActive: false,
             autoBridgeTransientModelErrors: true,
             peerSpawnDefaults: stockPeerSpawnDefaults
         })
@@ -274,6 +276,7 @@ describe('GET/PUT /api/hub-settings', () => {
             sessionSummaryInChat: false,
             teamsEnabled: true,
             teamsEnabledActive: false,
+            autoBridgeTransientModelErrors: false,
             peerSpawnDefaults: stockPeerSpawnDefaults
         })
 

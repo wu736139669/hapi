@@ -13,6 +13,7 @@ import { LEGACY_ELEVENLABS_VOICE_STORAGE_KEY, VOICE_BACKEND_PREFERENCE_STORAGE_K
 export const SETTINGS_STORAGE_KEYS: readonly string[] = [
     // Display
     'hapi-appearance',
+    'hapi-appearance-skin',
     'hapi-color-theme',
     'hapi-theme-colors',
     'hapi-font-scale',
@@ -48,6 +49,10 @@ export const SETTINGS_STORAGE_KEYS: readonly string[] = [
     'hapi-session-list-unread-only',
     'hapi-show-active-sessions-only', // legacy fallback for hapi-session-list-status
     'hapi-session-preview-limit',
+    'hapi-session-list-toolbar',
+    'hapi-show-unavailable-agents',
+    'hapi-pin-active-sessions',
+    'hapi-execution-process-enabled',
     'hapi-machine-labels',
     'hapi-directory-sort',
     'hapi:workspaceBrowserShowHidden',

@@ -622,7 +622,7 @@ export function QueuedMessagesBar({
                                     ) : null}
                                     <button
                                         type="button"
-                                        aria-label={t('queuedMessages.edit')}
+                                        aria-label="Edit queued message"
                                         title={t('queuedMessages.edit')}
                                         disabled={!canEdit}
                                         onClick={handleEdit}
@@ -665,7 +665,7 @@ export function QueuedMessagesBar({
                                     )}
                                     <button
                                         type="button"
-                                        aria-label={t('queuedMessages.cancel')}
+                                        aria-label="Cancel queued message"
                                         title={t('queuedMessages.cancel')}
                                         disabled={!canCancel}
                                         onClick={handleCancel}

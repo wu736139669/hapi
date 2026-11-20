@@ -477,6 +477,16 @@ export function AskUserQuestionFooter(props: {
                 </div>
 
                 <div className="flex items-center gap-2">
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={props.disabled || loading}
+                        onClick={() => void skip()}
+                        className={askUserQuestionNavButtonClassName}
+                    >
+                        {t('tool.skip')}
+                    </Button>
                     {props.allowSkip === true && questions.length > 0 ? (
                         <Button
                             type="button"

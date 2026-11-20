@@ -231,6 +231,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onSessionShare,
         onForkSession,
         forkDisabledReason,
+        linkedPr,
         onSyncCodex,
         onSyncPi,
         onSyncDsh,
@@ -425,6 +426,29 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
             className="fixed z-50 box-border w-max max-w-[calc(100vw-16px)] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-lg animate-menu-pop"
             style={menuStyle}
         >
+            {linkedPr ? (
+                <div
+                    id={`${resolvedMenuId}-linked-pr`}
+                    className="border-b border-[var(--app-border)] px-3 py-2"
+                    data-testid="session-action-menu-linked-pr"
+                >
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                        {t('session.menu.linkedPr')}
+                    </div>
+                    <a
+                        href={linkedPr.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 flex items-start gap-2 whitespace-normal text-sm font-medium leading-snug text-[var(--app-link)] hover:underline"
+                        onClick={onClose}
+                    >
+                        <span className="shrink-0 text-base leading-snug" aria-hidden="true">
+                            {linkedPr.glyph}
+                        </span>
+                        <span className="min-w-0">{linkedPr.detail}</span>
+                    </a>
+                </div>
+            ) : null}
             <div
                 id={headingId}
                 className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--app-hint)]"

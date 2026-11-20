@@ -16,6 +16,10 @@ const NOT_SETTINGS_KEYS = new Set([
     'hapi.push.disabled',
     'hapi.push.vapidKey',
     'hapi-sidebar-width',
+    'hapi-sidebar-collapsed-v1',
+    'hapi-personal-pinned-sessions-v1',
+    'hapi.studio.guestId',
+    'hapi.studio.guestName',
     // Trust grant: an imported file must not be able to allow link schemes
     'hapi-allowed-schemes',
     // Data, drafts, history, last-used values
@@ -49,8 +53,14 @@ const NOT_SETTINGS_KEYS = new Set([
     'hapi-voice-context-notice',
     'hapi.scratchlist.v2.banner-dismissed.',
     'hapi.scratchlist.v2.migrated.',
-    // Not storage keys: event names and the export file format tag
+    // Not storage keys: event names, CSS class names, and the export file format tag
     'hapi-web-settings',
+    'hapi-appearance-skin-change',
+    'hapi-session-list-toolbar-change',
+    'hapi-composer-shell',
+    'hapi-skin-composer',
+    'hapi-new-session',
+    'hapi-session-chat',
     'hapi-color-theme-change',
     'hapi-composer-toolbar-layout-change',
     'hapi-session-preview-limit-changed',

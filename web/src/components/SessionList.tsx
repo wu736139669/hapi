@@ -22,6 +22,8 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ArchiveSessionDialog } from '@/components/ArchiveSessionDialog'
 import { DeleteSessionDialog } from '@/components/DeleteSessionDialog'
 import { ProjectGroupRow } from '@/components/ProjectGroupRow'
+import { ForkPreviewDialog } from '@/components/AssistantChat/ForkPreviewDialog'
+import { useForkFlow } from '@/hooks/useForkFlow'
 import { ArchiveIcon, CheckIcon, CopyIcon, InfoIcon, LoaderIcon, MarkAllReadIcon } from '@/components/icons'
 import { useFue } from '@/lib/use-fue'
 import { FueCallout, FueDot } from '@/components/Fue'
@@ -32,6 +34,26 @@ function PinnedSectionIcon(props: { className?: string }) {
             <path d="M12 17v5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
             <path d="M5 17h14" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
             <path d="M7 4V2h10v2l-2 5v4l2 2H7l2-2V9Z" />
+        </svg>
+    )
+}
+
+function ChevronDownIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+            aria-hidden="true"
+        >
+            <path d="m6 9 6 6 6-6" />
         </svg>
     )
 }
@@ -379,12 +401,18 @@ function getGroupDisplayName(directory: string): string {
 export const UNKNOWN_MACHINE_ID = '__unknown__'
 export const GROUP_SESSION_PREVIEW_LIMIT = DEFAULT_SESSION_PREVIEW_LIMIT
 
+const MACHINE_LOCAL_AGENT_FLAVORS = new Set(['codex', 'claude', 'pi', 'opencode'])
+
 export function getSessionDedupKey(session: SessionSummary): string | null {
     const agentId = session.metadata?.agentSessionId?.trim()
     if (!agentId) return null
     // Scope by flavor: agentSessionId is flattened from native ids and can retain a
     // stale cross-flavor value (codexSessionId ?? claudeSessionId ?? ...).
-    return `${session.metadata?.flavor ?? 'unknown'}:${agentId}`
+    const flavor = session.metadata?.flavor ?? 'unknown'
+    // These native ids live in one machine's local store; the hub keeps
+    // sessions from different machines apart, so dedup must too.
+    const machineId = MACHINE_LOCAL_AGENT_FLAVORS.has(flavor) ? session.metadata?.machineId : undefined
+    return machineId ? `${flavor}:${machineId}:${agentId}` : `${flavor}:${agentId}`
 }
 
 export function deduplicateSessionsByAgentId(
@@ -1081,6 +1109,8 @@ export function SessionListSearch(props: {
     showDateFilter?: boolean
     searchMode?: 'metadata' | 'content'
     onSearchModeChange?: (mode: 'metadata' | 'content') => void
+    searchMatchMode?: 'default' | 'exclude'
+    onSearchMatchModeChange?: (mode: 'default' | 'exclude') => void
     customStart?: string
     customEnd?: string
     sessionActivityDates?: ReadonlySet<string>
@@ -1097,6 +1127,7 @@ export function SessionListSearch(props: {
     const inputRef = useRef<HTMLInputElement>(null)
     const collapsedButtonRef = useRef<HTMLButtonElement>(null)
     const [datePickerOpen, setDatePickerOpen] = useState(false)
+    const [searchMatchModeOpen, setSearchMatchModeOpen] = useState(false)
     const dateButtonRef = useRef<HTMLButtonElement>(null)
     const hasDateRange = Boolean(props.customStart && props.customEnd)
     const showSearch = props.showSearch ?? true
@@ -1109,6 +1140,7 @@ export function SessionListSearch(props: {
             inputRef.current?.focus()
         } else {
             setDatePickerOpen(false)
+            setSearchMatchModeOpen(false)
         }
     }, [props.expanded])
 
@@ -1264,6 +1296,52 @@ export function SessionListSearch(props: {
         </>
     ) : null
 
+    const searchMatchMode = props.searchMatchMode ?? 'default'
+    const canChangeSearchMatchMode = Boolean(props.onSearchMatchModeChange)
+    const renderSearchMatchMode = () => canChangeSearchMatchMode && searchMode === 'metadata' ? (
+        <div className="relative shrink-0">
+            <button
+                type="button"
+                aria-label={t('sessions.search.scope.toggle')}
+                aria-expanded={searchMatchModeOpen}
+                onClick={() => setSearchMatchModeOpen(open => !open)}
+                className="flex h-full w-auto items-center gap-0.5 border-r border-[var(--app-border)] px-1.5 text-xs leading-none text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)]"
+            >
+                <span className="shrink-0 whitespace-nowrap leading-none">
+                    {t(`sessions.search.scope.${searchMatchMode}`)}
+                </span>
+                <ChevronDownIcon className={cn(
+                    'h-3.5 w-3.5 shrink-0 transition-transform duration-200',
+                    searchMatchModeOpen && 'rotate-180'
+                )} />
+            </button>
+            {searchMatchModeOpen ? (
+                <div className="absolute left-0 top-full z-30 mt-1 flex w-max min-w-full flex-col gap-0.5 overflow-hidden rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-0.5 shadow-lg">
+                    {(['default', 'exclude'] as const).map(mode => (
+                        <button
+                            key={mode}
+                            type="button"
+                            aria-pressed={searchMatchMode === mode}
+                            onClick={() => {
+                                props.onSearchMatchModeChange?.(mode)
+                                setSearchMatchModeOpen(false)
+                                inputRef.current?.focus()
+                            }}
+                            className={cn(
+                                'flex min-h-8 w-full items-center justify-center whitespace-nowrap rounded-md px-2 py-0.5 text-center text-sm leading-none transition-colors',
+                                searchMatchMode === mode
+                                    ? 'bg-[var(--app-subtle-bg)] text-[var(--app-fg)]'
+                                    : 'text-[var(--app-hint)] hover:text-[var(--app-fg)]'
+                            )}
+                        >
+                            {t(`sessions.search.scope.${mode}`)}
+                        </button>
+                    ))}
+                </div>
+            ) : null}
+        </div>
+    ) : null
+
     if (!showSearch) {
         return showDateFilter ? (
             <div className="relative flex items-center gap-1">
@@ -1386,6 +1464,7 @@ export function SessionListSearch(props: {
                     <SearchIcon className="h-5 w-5" />
                 </div>
                 {renderSearchMode()}
+                {renderSearchMatchMode()}
                 {showDateFilter ? renderDateButton('embedded') : null}
                 <input
                     ref={inputRef}
@@ -1451,7 +1530,7 @@ function CollapsiblePanel(props: { open: boolean; children: ReactNode }) {
 
 const SessionItem = memo(function SessionItem(props: {
     session: SessionSummary
-    onSelect: (sessionId: string, targetMessageId?: string, targetMessageQuery?: string) => void
+    onSelect: (sessionId: string, targetMessageId?: string, targetMessageQuery?: string, pendingRequestId?: string) => void
     compact?: boolean
     showPath?: boolean
     api: ApiClient | null
@@ -1506,8 +1585,11 @@ const SessionItem = memo(function SessionItem(props: {
     const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
-    const [forkOpen, setForkOpen] = useState(false)
-    const [forkPending, setForkPending] = useState(false)
+    const forkFlow = useForkFlow({
+        session: s,
+        api: api as ApiClient,
+        onForked: (childSessionId) => onSelect(childSessionId)
+    })
     const {
         status: cursorChatStoreStatus,
         isApplicable: cursorChatStoreApplicable,
@@ -1541,7 +1623,7 @@ const SessionItem = memo(function SessionItem(props: {
     const [reopenError, setReopenError] = useState<string | null>(null)
     const [groupDialogOpen, setGroupDialogOpen] = useState(false)
     const holdPanel = useContext(CollapsiblePanelHoldContext)
-    const overlayOpen = menuOpen || renameOpen || exportOpen || archiveOpen || deleteOpen || forkOpen || groupDialogOpen || reopenError !== null
+    const overlayOpen = menuOpen || renameOpen || exportOpen || archiveOpen || deleteOpen || forkFlow.flowOpen || groupDialogOpen || reopenError !== null
     useEffect(() => {
         if (!overlayOpen || !holdPanel) return
         holdPanel(true)
@@ -1663,6 +1745,7 @@ const SessionItem = memo(function SessionItem(props: {
     })
 
     const sessionName = getSessionTitle(s)
+    const pendingRequestId = s.pendingRequests?.[0]?.id
     const attention = useMemo(
         () => showDetailedStatus
             ? classifySessionAttention(s, {
@@ -1687,6 +1770,14 @@ const SessionItem = memo(function SessionItem(props: {
                 <button
                     type="button"
                     {...longPressHandlers}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Enter' && selected && pendingRequestId) {
+                            event.preventDefault()
+                            onSelect(s.id, undefined, undefined, pendingRequestId)
+                            return
+                        }
+                        longPressHandlers.onKeyDown?.(event)
+                    }}
                     data-session-scroll-anchor
                     className={`session-list-item ${compact ? 'hapi-session-compact' : ''} group/session-row flex w-full flex-col text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg ${compact ? 'gap-0 py-1 pl-1.5 pr-1' : 'gap-1 py-2 pl-2.5 pr-2'} ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
                     style={{ WebkitTouchCallout: 'none' }}
@@ -1709,6 +1800,10 @@ const SessionItem = memo(function SessionItem(props: {
                         projectLabel={projectLabel}
                         machineLabel={machineLabel}
                         shared={shared}
+                        pendingRequestId={pendingRequestId}
+                        onPendingRequestClick={pendingRequestId
+                            ? () => onSelect(s.id, undefined, undefined, pendingRequestId)
+                            : undefined}
                         contentSnippet={contentSnippet}
                         contentSearchTruncated={contentSearchTruncated}
                         trailingClassName={showQuickArchive ? 'session-row-trailing' : undefined}
@@ -1750,7 +1845,7 @@ const SessionItem = memo(function SessionItem(props: {
                 onExport={() => setExportOpen(true)}
                 onMarkUnread={() => markSessionUnread(s.id, s.readState)}
                 onForkSession={api && ((supportsCurrentFork && (!s.thinking || supportsCompletedFork)) || supportsArchivedFork)
-                    ? () => setForkOpen(true)
+                    ? () => forkFlow.openFork()
                     : undefined}
                 forkDisabledReason={forkDisabledReason}
                 onArchive={() => setArchiveOpen(true)}
@@ -1761,28 +1856,48 @@ const SessionItem = memo(function SessionItem(props: {
                 anchorPoint={menuAnchorPoint}
             />
 
-            {forkOpen ? (
+            {forkFlow.preview ? (
+                <ForkPreviewDialog
+                    isOpen
+                    view={forkFlow.preview.view}
+                    prefixMayHaveMore={forkFlow.preview.view.prefixTruncated}
+                    stale={forkFlow.stale}
+                    loading={forkFlow.loading}
+                    onCancel={forkFlow.closePreview}
+                    onConfirm={forkFlow.confirmPreview}
+                />
+            ) : null}
+
+            {forkFlow.legacyFallback ? (
                 <ConfirmDialog
                     isOpen={true}
-                    onClose={() => { if (!forkPending) setForkOpen(false) }}
+                    onClose={() => { if (!forkFlow.confirming) forkFlow.closePreview() }}
                     title={t('dialog.sessionFork.title')}
                     description={t(s.thinking && supportsCompletedFork ? 'dialog.sessionFork.completedDescription' : 'dialog.sessionFork.description')}
                     confirmLabel={t('dialog.sessionFork.confirm')}
                     confirmingLabel={t('dialog.sessionFork.confirming')}
-                    isPending={forkPending}
+                    isPending={forkFlow.confirming}
                     destructive
                     centerTitle
+                    onConfirm={forkFlow.confirmLegacy}
+                />
+            ) : null}
+
+            {forkFlow.errorMessage && !forkFlow.preview ? (
+                <ConfirmDialog
+                    isOpen={true}
+                    onClose={forkFlow.closePreview}
+                    title={t('dialog.sessionFork.title')}
+                    description={forkFlow.errorMessage}
+                    confirmLabel={forkFlow.errorWasConnectFailure ? t('button.retry') : t('dialog.reopen.dismiss')}
+                    confirmingLabel={forkFlow.errorWasConnectFailure ? t('button.retry') : t('dialog.reopen.dismiss')}
+                    isPending={forkFlow.loading}
+                    hideCancel
+                    keepOpenAfterConfirm={forkFlow.errorWasConnectFailure}
+                    centerTitle
                     onConfirm={async () => {
-                        if (!api) return
-                        setForkPending(true)
-                        try {
-                            const result = s.thinking && supportsCompletedFork
-                                ? await api.forkConversation(s.id, undefined, true)
-                                : await api.forkConversation(s.id)
-                            onSelect(result.sessionId)
-                        } finally {
-                            setForkPending(false)
-                        }
+                        if (forkFlow.errorWasConnectFailure) forkFlow.retryPreview()
+                        else forkFlow.closePreview()
                     }}
                 />
             ) : null}
@@ -1896,7 +2011,7 @@ function PullRefreshIcon(props: { rotation: number }) {
 
 export function SessionList(props: {
     sessions: SessionSummary[]
-    onSelect: (sessionId: string, targetMessageId?: string, targetMessageQuery?: string) => void
+    onSelect: (sessionId: string, targetMessageId?: string, targetMessageQuery?: string, pendingRequestId?: string) => void
     onNewSession: () => void
     onNewSessionInDirectory?: (args: { machineId: string | null; directory: string }) => void
     onBrowse?: () => void
@@ -1983,6 +2098,7 @@ export function SessionList(props: {
     const showDetailedStatus = sessionListStatusMode === 'detailed'
     const [searchQuery, setSearchQuery] = useState('')
     const [searchMode, setSearchMode] = useState<'metadata' | 'content'>('metadata')
+    const [searchMatchMode, setSearchMatchMode] = useState<'default' | 'exclude'>('default')
     const [contentSearchResponse, setContentSearchResponse] = useState<SessionContentSearchResponse | null>(null)
     const [contentSearchLoading, setContentSearchLoading] = useState(false)
     const [contentSearchError, setContentSearchError] = useState(false)
@@ -2116,7 +2232,9 @@ export function SessionList(props: {
             }
             if (!isFiltering) return allSessions
             const matched = hasTextQuery && searchScoreIndex
-                ? timeScopedSessions.filter(session => searchScoreIndex.matchedIds.has(session.id))
+                ? searchMatchMode === 'exclude'
+                    ? timeScopedSessions.filter(session => !searchScoreIndex.matchedIds.has(session.id))
+                    : timeScopedSessions.filter(session => searchScoreIndex.matchedIds.has(session.id))
                 : timeScopedSessions.filter(session => (
                     sessionMatchesQuery(
                         session,
@@ -2124,12 +2242,12 @@ export function SessionList(props: {
                         resolveMachineLabel(session.metadata?.machineId ?? null)
                     )
                 ))
-            if (hasTextQuery && searchScoreIndex) {
+            if (hasTextQuery && searchScoreIndex && searchMatchMode !== 'exclude') {
                 return sortSessionsBySearchRelevance(matched, searchScoreIndex)
             }
             return matched
         },
-        [allSessions, contentSearchActive, contentSearchResponse, hasTextQuery, isFiltering, normalizedQuery, searchScoreIndex, selectedSessionId, listView.status, listView.unreadOnly, isSessionUnread, timeScopedSessions, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
+        [allSessions, contentSearchActive, contentSearchResponse, hasTextQuery, isFiltering, normalizedQuery, searchScoreIndex, selectedSessionId, listView.status, listView.unreadOnly, isSessionUnread, timeScopedSessions, machineLabelsById, searchMatchMode] // eslint-disable-line react-hooks/exhaustive-deps
     )
     const contentSnippetBySessionId = useMemo(() => {
         const snippets = new Map<string, string>()
@@ -2595,16 +2713,20 @@ export function SessionList(props: {
             : group.displayName
         return (
             <div key={group.key} data-session-scroll-anchor>
-                <div
+                <ProjectGroupRow
                     className="hapi-session-group-header group/project sticky top-0 z-10 flex items-center gap-2 bg-[var(--app-bg)] py-1.5 pl-2 pr-2 text-left rounded-lg transition-colors hover:bg-[var(--app-secondary-bg)] min-w-0 w-full select-none"
-                    title={group.directory}
+                    directory={group.directory}
+                    displayName={groupTitle}
+                    sessions={group.sessions}
+                    api={api}
+                    onNewSession={getNewSessionInGroup(group)}
                 >
                     <span className="font-medium text-sm truncate flex-1">
                         {groupTitle}
                     </span>
                     <CopyPathButton path={group.directory} className="opacity-0 group-hover/project:opacity-100 transition-opacity duration-150" />
                     {renderNewSessionInGroupButton(group)}
-                </div>
+                </ProjectGroupRow>
             </div>
         )
     }
@@ -3028,6 +3150,8 @@ export function SessionList(props: {
                             showDateFilter={showDateFilter}
                             searchMode={searchMode}
                             onSearchModeChange={setSearchMode}
+                            searchMatchMode={searchMatchMode}
+                            onSearchMatchModeChange={setSearchMatchMode}
                             customStart={customStart}
                             customEnd={customEnd}
                             sessionActivityDates={sessionActivityDates}

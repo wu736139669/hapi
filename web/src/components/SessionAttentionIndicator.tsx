@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from 'react'
+import { useRef, type MouseEvent, type ReactNode } from 'react'
 import type { PendingRequest, SessionSummary } from '@/types/api'
 import type { SessionAttention } from '@/lib/sessionAttention'
 import { getSessionAttentionLabelKey } from '@/lib/sessionAttention'
@@ -11,7 +11,7 @@ import { HandIcon, LoaderIcon, MessageIcon } from '@/components/icons'
  * Pending-request symbol: amber hand (permission) or bubble (input). Symbols,
  * not dots, so the row's presence badge stays its only dot.
  */
-export function SessionRequestIcon(props: { kind: 'permission' | 'input'; label?: string; requestId?: string }) {
+export function SessionRequestIcon(props: { kind: 'permission' | 'input'; label?: string; requestId?: string; onClick?: (event: MouseEvent<HTMLSpanElement>) => void }) {
     const Icon = props.kind === 'permission' ? HandIcon : MessageIcon
     return (
         <span
@@ -19,6 +19,7 @@ export function SessionRequestIcon(props: { kind: 'permission' | 'input'; label?
             title={props.label}
             aria-label={props.label}
             data-session-pending-request-id={props.requestId}
+            onClick={props.onClick}
         >
             <Icon className="h-3.5 w-3.5" />
         </span>

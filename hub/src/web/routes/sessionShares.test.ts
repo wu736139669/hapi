@@ -71,6 +71,10 @@ describe("session share routes", () => {
       resolveSessionAccess: () => ({ ok: true, sessionId: session.id, session }),
       getSessionsByNamespace: () => [session],
       getFutureScheduledMessageStats: () => new Map(),
+      getFutureScheduledMessageCounts: () => new Map(),
+      getNextScheduledAtBySessionIds: () => new Map(),
+      allocateAttachedJobVersion: () => 0,
+      getPrimaryAttachedJobsBySessionIds: () => new Map(),
     } as unknown as SyncEngine;
     const app = createApp(store, engine);
     const owner = await ownerToken();
@@ -122,6 +126,10 @@ describe("session share routes", () => {
       getSessionsByNamespace: (namespace: string) =>
         [session, otherSession].filter((item) => item.namespace === namespace),
       getFutureScheduledMessageStats: () => new Map(),
+      getFutureScheduledMessageCounts: () => new Map(),
+      getNextScheduledAtBySessionIds: () => new Map(),
+      allocateAttachedJobVersion: () => 0,
+      getPrimaryAttachedJobsBySessionIds: () => new Map(),
     } as unknown as SyncEngine;
     const app = createApp(store, engine);
     const owner = await ownerToken();
@@ -270,6 +278,10 @@ describe("session share routes", () => {
       }),
       getSessionsByNamespace: () => [session],
       getFutureScheduledMessageStats: () => new Map(),
+      getFutureScheduledMessageCounts: () => new Map(),
+      getNextScheduledAtBySessionIds: () => new Map(),
+      allocateAttachedJobVersion: () => 0,
+      getPrimaryAttachedJobsBySessionIds: () => new Map(),
     } as unknown as SyncEngine;
     const app = createApp(store, engine);
     const owner = await ownerToken();

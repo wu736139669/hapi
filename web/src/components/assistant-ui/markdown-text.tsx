@@ -155,7 +155,10 @@ export const MARKDOWN_PLUGINS_STANDALONE_WITH_BREAKS = [
     ...MARKDOWN_PLUGIN_TAIL_STANDALONE,
 ] satisfies NonNullable<MarkdownTextPrimitiveProps['remarkPlugins']>
 
-export const MARKDOWN_REHYPE_PLUGINS = [rehypeKatex] satisfies NonNullable<MarkdownTextPrimitiveProps['rehypePlugins']>
+// Explicitly pin KaTeX to untrusted mode: options are read through the
+// prototype chain, so a page-level Object.prototype.trust must not turn
+// user Markdown into clickable javascript: links.
+export const MARKDOWN_REHYPE_PLUGINS = [[rehypeKatex, { trust: false }]] satisfies NonNullable<MarkdownTextPrimitiveProps['rehypePlugins']>
 export const MARKDOWN_CLASSNAME = 'aui-md happy-chat-text min-w-0 max-w-full break-words text-[var(--app-fg)]'
 export const MARKDOWN_COMPONENTS_BY_LANGUAGE = {
     mermaid: {
