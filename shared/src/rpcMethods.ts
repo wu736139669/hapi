@@ -77,6 +77,7 @@ export const RPC_METHODS = {
     SteerQueuedMessage: 'steer-queued-message',
     RetryCodexTurn: 'retry-codex-turn',
     ForkConversation: 'fork-conversation',
+    PreviewForkBoundary: 'preview-fork-boundary',
     ForkArchivedCodex: 'fork-archived-codex',
     RewindConversation: 'rewind-conversation',
     UsageQueryGetSettings: 'usage-query-get-settings',

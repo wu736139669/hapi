@@ -32,7 +32,6 @@ export function createAuthMiddleware(jwtSecret: Uint8Array, options?: {
         if (
             path === '/api/auth'
             || path === '/api/bind'
-            || path === '/api/passkey/login/options'
             || path === '/api/passkey/login/verify'
             || path.startsWith('/api/public/studios/')
             || path.startsWith('/api/public/session-shares/')

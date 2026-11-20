@@ -35,6 +35,7 @@ type SessionActionMenuProps = {
     onSessionShare?: () => void
     onForkSession?: () => void
     forkDisabledReason?: string
+    linkedPr?: { glyph: string; detail: string; href: string } | null
     onSyncCodex?: () => void
     onSyncPi?: () => void
     onSyncDsh?: () => void

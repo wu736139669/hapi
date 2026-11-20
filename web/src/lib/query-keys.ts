@@ -11,6 +11,7 @@ export const queryKeys = {
     usageSummary: (range: string, timeZone: string) => ['usage-summary', range, timeZone] as const,
     claudeCustomModels: ['claude-custom-models'] as const,
     usageQuotas: ['usage-quotas'] as const,
+    machineAgentQuotas: (machineId: string) => ['machine-agent-quotas', machineId] as const,
     machineCodexModels: (machineId: string) => ['machine-codex-models', machineId] as const,
     machineAgentAvailability: (machineId: string) => ['machine-agent-availability', machineId] as const,
     sessionCodexModels: (sessionId: string) => ['session-codex-models', sessionId] as const,
@@ -57,4 +58,5 @@ export const queryKeys = {
     team: (teamId: string) => ['team', teamId] as const,
     teamOverview: ['team-overview'] as const,
     teamMessages: (teamId: string) => ['team-messages', teamId] as const,
+    features: ['features'] as const,
 }

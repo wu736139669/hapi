@@ -24,6 +24,7 @@ export type HappyChatContextValue = {
     /** Only the latest terminal Codex capacity error may expose Retry. */
     retryableCodexTurnMessageId?: string | null
     historyActionPending?: boolean
+    onBranchConversation?: (messageLocalId?: string, messageId?: string) => void
     onForkConversation?: (messageLocalId?: string) => Promise<void>
     onRewindConversation?: (messageLocalId: string) => Promise<void>
     isLatestCompletedBoundary?: (messageId: string) => boolean

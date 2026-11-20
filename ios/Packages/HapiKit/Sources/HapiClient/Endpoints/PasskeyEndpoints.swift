@@ -22,23 +22,9 @@ extension APIClient {
         try await requestVoid(.post, "/api/passkey/register/verify", body: Body(response: response, name: normalized))
     }
 
-    /// `POST /api/passkey/login/options` (unauthenticated). A
-    /// `404 {"error":"no_passkeys"}` is mapped to ``PasskeyError/noPasskeys``.
-    public func passkeyLoginOptions() async throws -> PasskeyAssertionOptions {
-        do {
-            return try await request(
-                .post,
-                "/api/passkey/login/options",
-                body: PasskeyOptionsRequest(),
-                authenticated: false
-            )
-        } catch let error as APIError where error.status == 404 && error.code == "no_passkeys" {
-            throw PasskeyError.noPasskeys
-        }
-    }
-
     /// `POST /api/passkey/login/verify` `{response}` (unauthenticated) →
-    /// JWT + passkey session.
+    /// JWT + passkey session. The assertion signs a self-issued challenge
+    /// (``PasskeyAssertionRequest/nativeLogin(now:)``); there is no options call.
     public func verifyPasskeyLogin(_ response: PasskeyAssertionResponseJSON) async throws -> PasskeyLoginResponse {
         struct Body: Encodable {
             let response: PasskeyAssertionResponseJSON
@@ -67,7 +53,7 @@ extension APIClient {
     /// ``APIError``.
     public func registerPasskey(name: String?, using authenticator: any PasskeyAuthenticating) async throws {
         let options = try await passkeyRegistrationOptions()
-        let request = try PasskeyRegistrationRequest(options: options)
+        let request = try PasskeyRegistrationRequest(options: options, hubURL: baseURL)
         let result = try await authenticator.register(request)
         try await verifyPasskeyRegistration(PasskeyRegistrationResponseJSON(result), name: name)
     }

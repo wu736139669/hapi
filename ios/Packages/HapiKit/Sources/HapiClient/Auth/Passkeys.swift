@@ -8,8 +8,8 @@ import Foundation
 /// base64url coding, RP validation, and the ``PasskeyAuthenticating`` seam
 /// the app implements with AuthenticationServices.
 public enum NativePasskeys {
-    /// RP ID of every native passkey (`webcredentials:hapi.run`).
-    public static let nativeRelyingPartyID = "hapi.run"
+    /// RP ID of every native passkey (`webcredentials:auth.hapi.run`).
+    public static let nativeRelyingPartyID = "auth.hapi.run"
     /// Transports reported for a platform (iCloud Keychain) credential.
     public static let registrationTransports = ["internal", "hybrid"]
 }
@@ -23,8 +23,6 @@ public enum PasskeyError: Error, Equatable, Sendable {
     case relyingPartyMismatch(String)
     /// The options JSON lacked a field or carried invalid base64url.
     case malformedOptions
-    /// `POST /api/passkey/login/options` answered `404 {"error":"no_passkeys"}`.
-    case noPasskeys
     /// The platform returned a registration without an attestation object.
     case missingAttestation
     /// The user dismissed the system sheet. Callers treat this as silent.
@@ -102,14 +100,6 @@ public struct PasskeyRegistrationOptions: Decodable, Equatable, Sendable {
     public var excludeCredentials: [PasskeyCredentialDescriptor]?
 }
 
-/// `PublicKeyCredentialRequestOptionsJSON` — the fields a platform
-/// assertion needs.
-public struct PasskeyAssertionOptions: Decodable, Equatable, Sendable {
-    public var challenge: String
-    public var rpId: String?
-    public var allowCredentials: [PasskeyCredentialDescriptor]?
-}
-
 // MARK: - Platform requests (decoded options)
 
 /// Input for a platform registration, already validated and decoded.
@@ -124,6 +114,7 @@ public struct PasskeyRegistrationRequest: Equatable, Sendable {
     /// and decodes the base64url fields.
     public init(
         options: PasskeyRegistrationOptions,
+        hubURL: URL,
         expectedRelyingPartyID: String = NativePasskeys.nativeRelyingPartyID
     ) throws {
         guard let rpId = options.rp.id, rpId == expectedRelyingPartyID else {
@@ -134,6 +125,10 @@ public struct PasskeyRegistrationRequest: Equatable, Sendable {
               !options.user.name.isEmpty else {
             throw PasskeyError.malformedOptions
         }
+        try PasskeyHubBinding.validate(challenge, hub: hubURL, operation: "register")
+        try PasskeyHubBinding.validateUser(userID, hub: hubURL)
+        let authority = try PasskeyHubBinding.origin(hubURL).dropFirst("https://".count)
+        guard options.user.name.hasSuffix("@\(authority)") else { throw PasskeyError.malformedOptions }
         let excluded = try (options.excludeCredentials ?? []).map { descriptor in
             guard let id = Base64URL.decode(descriptor.id) else { throw PasskeyError.malformedOptions }
             return id
@@ -146,30 +141,31 @@ public struct PasskeyRegistrationRequest: Equatable, Sendable {
     }
 }
 
-/// Input for a platform assertion, already validated and decoded.
+/// Input for a platform sign-in assertion: always the shared RP, user
+/// verification required, no allow list (resident credentials only, so the
+/// user picks the account and with it the Hub), no extensions. Built only from
+/// ``nativeLogin(now:)``, never from Hub-supplied options.
 public struct PasskeyAssertionRequest: Equatable, Sendable {
     public let relyingPartyID: String
+    /// Raw challenge bytes: the self-issued native login JSON.
     public let challenge: Data
-    /// This hub's passkeys; the system sheet offers only these.
-    public let allowedCredentialIDs: [Data]
 
-    public init(
-        options: PasskeyAssertionOptions,
-        expectedRelyingPartyID: String = NativePasskeys.nativeRelyingPartyID
-    ) throws {
-        guard let rpId = options.rpId, rpId == expectedRelyingPartyID else {
-            throw PasskeyError.relyingPartyMismatch(options.rpId ?? "")
-        }
-        guard let challenge = Base64URL.decode(options.challenge), !challenge.isEmpty else {
-            throw PasskeyError.malformedOptions
-        }
-        let allowed = try (options.allowCredentials ?? []).map { descriptor in
-            guard let id = Base64URL.decode(descriptor.id) else { throw PasskeyError.malformedOptions }
-            return id
-        }
-        self.relyingPartyID = rpId
+    /// A fresh self-issued native login challenge
+    /// (`shared/src/passkey.ts` `createPasskeyNativeLoginChallenge`):
+    /// `{"v":2,"operation":"login","channel":"native","iat":<epoch ms>,"nonce":<32 random bytes, base64url>}`.
+    /// The Hub accepts it once, within minutes of `iat`.
+    public static func nativeLogin(now: Date = Date()) -> Self {
+        let nonce = Data((0..<32).map { _ in UInt8.random(in: .min ... .max) })
+        let iat = Int64((now.timeIntervalSince1970 * 1000).rounded(.down))
+        let challenge = try! JSONSerialization.data(withJSONObject: [
+            "v": 2, "operation": "login", "channel": "native", "iat": iat, "nonce": Base64URL.encode(nonce)
+        ] as [String: Any], options: [.sortedKeys])
+        return Self(relyingPartyID: NativePasskeys.nativeRelyingPartyID, challenge: challenge)
+    }
+
+    private init(relyingPartyID: String, challenge: Data) {
+        self.relyingPartyID = relyingPartyID
         self.challenge = challenge
-        self.allowedCredentialIDs = allowed
     }
 }
 
@@ -195,13 +191,15 @@ public struct PasskeyAssertionResult: Equatable, Sendable {
     public let authenticatorData: Data
     public let signature: Data
     public let userID: Data?
+    public let authenticatorAttachment: String
 
-    public init(credentialID: Data, clientDataJSON: Data, authenticatorData: Data, signature: Data, userID: Data?) {
+    public init(credentialID: Data, clientDataJSON: Data, authenticatorData: Data, signature: Data, userID: Data?, authenticatorAttachment: String = "platform") {
         self.credentialID = credentialID
         self.clientDataJSON = clientDataJSON
         self.authenticatorData = authenticatorData
         self.signature = signature
         self.userID = userID
+        self.authenticatorAttachment = authenticatorAttachment
     }
 }
 
@@ -262,7 +260,7 @@ public struct PasskeyAssertionResponseJSON: Encodable, Equatable, Sendable {
             signature: Base64URL.encode(result.signature),
             userHandle: result.userID.flatMap { $0.isEmpty ? nil : Base64URL.encode($0) }
         )
-        self.authenticatorAttachment = "platform"
+        self.authenticatorAttachment = result.authenticatorAttachment
         self.clientExtensionResults = [:]
     }
 }
@@ -296,9 +294,7 @@ public struct PasskeySummary: Codable, Equatable, Identifiable, Sendable {
         self.valid = valid
     }
 
-    /// Usable from the app (registered for the shared native RP ID). Other
-    /// entries are web passkeys bound to a browser origin — listed for
-    /// management only.
+    /// Registered for the supported shared Web/App RP ID.
     public var isNative: Bool {
         rpId == NativePasskeys.nativeRelyingPartyID
     }

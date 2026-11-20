@@ -9,27 +9,19 @@ import Testing
 @Suite("Passkeys")
 struct PasskeysTests {
     private func registrationOptionsJSON(
-        rpId: String = "hapi.run",
-        userID: String = Base64URL.encode(Data("handle".utf8)),
-        challenge: String = Base64URL.encode(Data("challenge-bytes".utf8)),
+        rpId: String = "auth.hapi.run",
+        userID: String = Base64URL.encode(boundPasskeyUser()),
+        challenge: String = Base64URL.encode(boundPasskeyChallenge(operation: "register")),
         exclude: [String] = []
     ) -> String {
         let excluded = exclude.map { "{\"id\":\"\($0)\",\"type\":\"public-key\",\"transports\":[\"internal\"]}" }
         return """
         {"challenge":"\(challenge)","rp":{"id":"\(rpId)","name":"HAPI"},
-         "user":{"id":"\(userID)","name":"hapi@hub.example.com","displayName":"HAPI · hub.example.com"},
+         "user":{"id":"\(userID)","name":"hapi@hub.test","displayName":"HAPI · hub.test"},
          "pubKeyCredParams":[{"alg":-7,"type":"public-key"}],
          "excludeCredentials":[\(excluded.joined(separator: ","))],
          "authenticatorSelection":{"residentKey":"required","userVerification":"required"},
          "attestation":"none"}
-        """
-    }
-
-    private func assertionOptionsJSON(rpId: String = "hapi.run", credentials: [String] = []) -> String {
-        let allowed = credentials.map { "{\"id\":\"\($0)\",\"type\":\"public-key\",\"transports\":[\"internal\"]}" }
-        return """
-        {"challenge":"\(Base64URL.encode(Data("challenge-bytes".utf8)))","rpId":"\(rpId)",
-         "allowCredentials":[\(allowed.joined(separator: ","))],"userVerification":"required"}
         """
     }
 
@@ -54,11 +46,11 @@ struct PasskeysTests {
             PasskeyRegistrationOptions.self,
             from: Data(registrationOptionsJSON(exclude: ["Y3JlZDE"]).utf8)
         )
-        let request = try PasskeyRegistrationRequest(options: options)
-        #expect(request.relyingPartyID == "hapi.run")
-        #expect(request.challenge == Data("challenge-bytes".utf8))
-        #expect(request.userID == Data("handle".utf8))
-        #expect(request.userName == "hapi@hub.example.com")
+        let request = try PasskeyRegistrationRequest(options: options, hubURL: URL(string: testHubURLString)!)
+        #expect(request.relyingPartyID == "auth.hapi.run")
+        #expect(request.challenge == boundPasskeyChallenge(operation: "register"))
+        #expect(request.userID == boundPasskeyUser())
+        #expect(request.userName == "hapi@hub.test")
         #expect(request.excludedCredentialIDs == [Data("cred1".utf8)])
     }
 
@@ -68,37 +60,46 @@ struct PasskeysTests {
             from: Data(registrationOptionsJSON(rpId: "hub.example.com").utf8)
         )
         #expect(throws: PasskeyError.relyingPartyMismatch("hub.example.com")) {
-            _ = try PasskeyRegistrationRequest(options: options)
+            _ = try PasskeyRegistrationRequest(options: options, hubURL: URL(string: testHubURLString)!)
         }
     }
 
     @Test func registrationRejectsMissingRelyingParty() throws {
-        let json = registrationOptionsJSON(rpId: "hapi.run").replacingOccurrences(of: "\"id\":\"hapi.run\"", with: "\"id\":\"\"")
+        let json = registrationOptionsJSON(rpId: "auth.hapi.run").replacingOccurrences(of: "\"id\":\"auth.hapi.run\"", with: "\"id\":\"\"")
         let options = try HapiJSON.decoder.decode(PasskeyRegistrationOptions.self, from: Data(json.utf8))
         #expect(throws: PasskeyError.relyingPartyMismatch("")) {
-            _ = try PasskeyRegistrationRequest(options: options)
+            _ = try PasskeyRegistrationRequest(options: options, hubURL: URL(string: testHubURLString)!)
         }
     }
 
-    @Test func assertionRequestDecodesAllowList() throws {
-        let options = try HapiJSON.decoder.decode(
-            PasskeyAssertionOptions.self,
-            from: Data(assertionOptionsJSON(credentials: ["Y3JlZDE"]).utf8)
-        )
-        let request = try PasskeyAssertionRequest(options: options)
-        #expect(request.relyingPartyID == "hapi.run")
-        #expect(request.challenge == Data("challenge-bytes".utf8))
-        #expect(request.allowedCredentialIDs == [Data("cred1".utf8)])
+    // MARK: - Native login challenge
+
+    /// Mirrors `parsePasskeyNativeLoginChallenge` in `shared/src/passkey.ts`.
+    @Test func nativeLoginChallengeMatchesHubFormat() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000.123_9)
+        let request = PasskeyAssertionRequest.nativeLogin(now: now)
+        #expect(request.relyingPartyID == "auth.hapi.run")
+        let json = try #require(try JSONSerialization.jsonObject(with: request.challenge) as? [String: Any])
+        #expect(Set(json.keys) == ["v", "operation", "channel", "iat", "nonce"])
+        #expect(json["v"] as? Int == 2)
+        #expect(json["operation"] as? String == "login")
+        #expect(json["channel"] as? String == "native")
+        // Integer epoch milliseconds (the Hub requires a safe integer).
+        #expect(json["iat"] as? Int64 == 1_700_000_000_123)
+        #expect(!String(decoding: request.challenge, as: UTF8.self).contains("."))
+        let nonce = try #require(json["nonce"] as? String)
+        #expect(nonce.count == 43)
+        #expect(nonce.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") })
+        #expect(Base64URL.decode(nonce)?.count == 32)
+        // The Hub base64url-decodes clientDataJSON.challenge back to these bytes.
+        #expect(Base64URL.decode(Base64URL.encode(request.challenge)) == request.challenge)
     }
 
-    @Test func assertionRejectsForeignRelyingParty() throws {
-        let options = try HapiJSON.decoder.decode(
-            PasskeyAssertionOptions.self,
-            from: Data(assertionOptionsJSON(rpId: "evil.example").utf8)
-        )
-        #expect(throws: PasskeyError.relyingPartyMismatch("evil.example")) {
-            _ = try PasskeyAssertionRequest(options: options)
-        }
+    @Test func nativeLoginChallengesAreFresh() {
+        let first = PasskeyAssertionRequest.nativeLogin(now: testNow)
+        let second = PasskeyAssertionRequest.nativeLogin(now: testNow)
+        #expect(first.challenge != second.challenge)
+        #expect(first != second)
     }
 
     // MARK: - Response encoding
@@ -146,6 +147,17 @@ struct PasskeysTests {
         #expect(object["authenticatorAttachment"] as? String == "platform")
     }
 
+    @Test func roamingSecurityKeyAssertionPreservesAttachment() throws {
+        let result = PasskeyAssertionResult(
+            credentialID: Data("id".utf8), clientDataJSON: Data("{}".utf8),
+            authenticatorData: Data([1]), signature: Data([2]), userID: nil,
+            authenticatorAttachment: "cross-platform"
+        )
+        let body = try HapiJSON.encoder.encode(PasskeyAssertionResponseJSON(result))
+        let object = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(object["authenticatorAttachment"] as? String == "cross-platform")
+    }
+
     @Test func assertionWithoutUserHandleOmitsIt() throws {
         let result = PasskeyAssertionResult(
             credentialID: Data("id".utf8),
@@ -165,7 +177,7 @@ struct PasskeysTests {
     @Test func passkeySummaryDecodesListResponse() throws {
         let json = """
         {"passkeys":[
-          {"id":"abc","name":"iPhone","rpId":"hapi.run","createdAt":1700000000000,"lastUsedAt":1700000100000,"valid":true},
+          {"id":"abc","name":"iPhone","rpId":"auth.hapi.run","createdAt":1700000000000,"lastUsedAt":1700000100000,"valid":true},
           {"id":"def","name":null,"rpId":"hub.example.com","createdAt":1700000000000,"lastUsedAt":null,"valid":false}
         ]}
         """
@@ -191,18 +203,6 @@ struct PasskeysTests {
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer \(freshJWT())")
         let body = try #require(request.httpBody.flatMap { String(data: $0, encoding: .utf8) })
         #expect(body == "{\"client\":\"native\"}")
-    }
-
-    @Test func loginOptionsIsUnauthenticatedAndMapsNoPasskeys() async throws {
-        let harness = try makeHarness(paired: false)
-        await harness.performer.enqueue(status: 404, json: "{\"error\":\"no_passkeys\"}")
-        let error = await capturedError { try await harness.client.passkeyLoginOptions() }
-        #expect(error as? PasskeyError == .noPasskeys)
-        let requests = await harness.performer.requests
-        let request = try #require(requests.first)
-        #expect(request.url?.absoluteString == "\(testHubURLString)/api/passkey/login/options")
-        #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
-        #expect(request.httpBody.flatMap { String(data: $0, encoding: .utf8) } == "{\"client\":\"native\"}")
     }
 
     @Test func loginVerifyPostsResponseEnvelope() async throws {
@@ -274,7 +274,7 @@ struct PasskeysTests {
         try await harness.client.registerPasskey(name: "  iPad  ", using: authenticator)
         let seen = await authenticator.registrations
         #expect(seen.count == 1)
-        #expect(seen.first?.challenge == Data("challenge-bytes".utf8))
+        #expect(seen.first?.challenge == boundPasskeyChallenge(operation: "register"))
         let requests = await harness.performer.requests
         #expect(requests.count == 2)
         let body = try #require(requests[1].httpBody)

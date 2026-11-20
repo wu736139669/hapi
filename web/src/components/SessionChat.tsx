@@ -685,6 +685,7 @@ type SessionChatProps = {
     initialTargetMessageId?: string
     initialTargetMessageQuery?: string
     initialPendingRequestId?: string
+    isCatchingUpFromCache?: boolean
     onInitialPendingRequestConsumed?: () => void
     searchRequestId?: number
     onLoadMessageContext?: (messageId: string) => Promise<boolean>
