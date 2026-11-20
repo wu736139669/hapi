@@ -20,6 +20,7 @@ final class SessionListCoveredRefreshTests: XCTestCase {
         func fullResync() async throws {}
         func applySessionEvent(_ event: SyncEvent) {}
         func setPinMode(sessionId: String, mode: SessionPinMode) async throws {}
+        func setGroup(sessionId: String, group: String?) async throws {}
         func archiveSession(sessionId: String) async throws {}
         func renameSession(sessionId: String, name: String) async throws {}
         func deleteSession(sessionId: String) async throws {}

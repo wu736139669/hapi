@@ -27,7 +27,7 @@ struct ToolTextContent: View {
             if terminal {
                 TerminalTextView(text: code, isError: isError)
             } else {
-                CodeBlockView(language: language, code: code)
+                CodeBlockView(language: language, code: code, collapsible: false)
             }
         } else {
             PagedToolText(language: language, code: code, terminal: terminal, isError: isError)
@@ -53,7 +53,7 @@ private struct PagedToolText: View {
                 if terminal {
                     TerminalTextView(text: page, isError: isError)
                 } else {
-                    CodeBlockView(language: language, code: page)
+                    CodeBlockView(language: language, code: page, collapsible: false)
                 }
             }
             if visiblePages < pages.count {

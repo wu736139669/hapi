@@ -11,6 +11,10 @@ import SwiftUI
 public struct CodeBlockView: View {
     public let language: String?
     public let code: String
+    /// Long blocks collapse to a height cap in the transcript; tool inspectors
+    /// render the complete content instead (they already provide their own
+    /// scroll and paging).
+    public let collapsible: Bool
 
     @Environment(\.hapiTheme) private var theme
     @Environment(\.hapiTypography) private var typography
@@ -23,9 +27,10 @@ public struct CodeBlockView: View {
     @State private var wrapLines = false
     @State private var expanded = false
 
-    public init(language: String?, code: String) {
+    public init(language: String?, code: String, collapsible: Bool = true) {
         self.language = language
         self.code = code
+        self.collapsible = collapsible
     }
 
     private var displayLanguage: String {
@@ -42,7 +47,7 @@ public struct CodeBlockView: View {
         max(1, code.split(separator: "\n", omittingEmptySubsequences: false).count)
     }
 
-    private var isCollapsible: Bool { lineCount > 18 }
+    private var isCollapsible: Bool { collapsible && lineCount > 18 }
 
     private var isCollapsed: Bool { isCollapsible && !expanded && !wrapLines }
 

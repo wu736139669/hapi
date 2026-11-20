@@ -778,10 +778,11 @@ private struct BucketHeader: View {
         }
     }
 
+}
+
 private struct ListIdentity: Hashable {
     let filters: SessionListFilters
     let order: SessionListOrder
-}
 }
 
 struct SessionRowView: View {
@@ -869,8 +870,8 @@ struct SessionRowView: View {
                     .fixedSize()
                     .layoutPriority(1)
                     .accessibilityLabel(Text("Running"))
-            } else if let status = row.status, let symbol = status.symbolName {
-                Image(systemName: symbol)
+            } else if let status = row.status {
+                Image(systemName: status.symbolName)
                     .symbolVariant(.none)
                     .symbolRenderingMode(.monochrome)
                     .foregroundStyle(attentionColor)
@@ -894,7 +895,7 @@ struct SessionRowView: View {
     /// Thinking rows get the green spinner; background-only work gets the
     /// blue one. Pending attention keeps its symbol instead.
     private var showsSpinner: Bool {
-        if row.status == .running { return true }
+        if row.status == nil && row.summary.thinking { return true }
         return row.status == nil
             && row.summary.active
             && row.summary.backgroundTaskCount > 0
@@ -913,7 +914,7 @@ struct SessionRowView: View {
     }
 
     private var spinnerColor: Color {
-        row.status == .running ? theme.success : theme.accent
+        row.summary.thinking ? theme.success : theme.accent
     }
 
     private var detailText: String? {

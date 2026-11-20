@@ -303,7 +303,6 @@ private final class TranscriptCollectionView: UICollectionView {
 /// SwiftUI wrapper reads the latest builder and inherited environment,
 /// including action captures. SwiftUI can diff the resulting row instead of UIKit
 /// reinstalling every visible hosting configuration and measuring it again.
-@MainActor @Observable
 /// Lets the keyboard-dismiss tap run alongside cell gestures instead of
 /// waiting for them to fail.
 private final class SimultaneousGestureDelegate: NSObject, UIGestureRecognizerDelegate {
@@ -311,6 +310,7 @@ private final class SimultaneousGestureDelegate: NSObject, UIGestureRecognizerDe
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 }
 
+@MainActor @Observable
 private final class TranscriptContent<Item> {
     var render: (Item) -> AnyView = { _ in AnyView(EmptyView()) }
     var environment = EnvironmentValues()

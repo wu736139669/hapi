@@ -318,6 +318,10 @@ final class HomeFilterTestSessions: SessionListStoring {
         sessions = sortSessionSummaries(sessions)
     }
     func archiveSession(sessionId: String) async throws { sessions.removeAll { $0.id == sessionId } }
+    func setGroup(sessionId: String, group: String?) async throws {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        sessions[index].metadata?.group = group
+    }
     func renameSession(sessionId: String, name: String) async throws {
         guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
         sessions[index].metadata?.name = name
