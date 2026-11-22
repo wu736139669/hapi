@@ -226,8 +226,14 @@ struct ChatStatusPanelData: Equatable {
 
 struct ChatStatusPanelView: View {
     let data: ChatStatusPanelData
+    /// Nil when goal controls are unavailable; each closure applies one action.
+    var onGoalAction: ((_ action: String, _ objective: String?) -> Void)?
+    var goalActionEnabled = true
 
     @State private var expanded = false
+    @State private var editingGoal = false
+    @State private var goalDraft = ""
+    @State private var confirmingClear = false
     @Environment(\.hapiTheme) private var theme
     @Environment(\.hapiTypography) private var typography
 
@@ -292,6 +298,18 @@ struct ChatStatusPanelView: View {
         }
         .background(theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, 12)
+        .alert("Edit goal", isPresented: $editingGoal) {
+            TextField("Objective", text: $goalDraft)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                let name = goalDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty { onGoalAction?("update", name) }
+            }
+        }
+        .alert("Clear goal?", isPresented: $confirmingClear) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear", role: .destructive) { onGoalAction?("clear", nil) }
+        }
     }
 
     private func goalSection(_ goal: ChatStatusPanelData.Goal) -> some View {
@@ -308,6 +326,29 @@ struct ChatStatusPanelView: View {
             }
             .font(typography.captionFont)
             .foregroundStyle(theme.textHint)
+
+            if let act = onGoalAction {
+                HStack(spacing: 6) {
+                    Button {
+                        goalDraft = goal.objective
+                        editingGoal = true
+                    } label: {
+                        Text("Edit")
+                    }
+                    Button {
+                        act(goal.status == "active" ? "pause" : "resume", nil)
+                    } label: {
+                        Text(goal.status == "active" ? "Pause" : "Resume")
+                    }
+                    Button(role: .destructive) {
+                        confirmingClear = true
+                    } label: {
+                        Text("Clear")
+                    }
+                }
+                .font(typography.captionFont)
+                .disabled(!goalActionEnabled)
+            }
         }
     }
 

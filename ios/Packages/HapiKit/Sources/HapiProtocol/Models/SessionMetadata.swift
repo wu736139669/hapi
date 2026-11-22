@@ -65,15 +65,21 @@ public struct ConversationHistoryCapabilities: Codable, Equatable, Sendable {
 public struct SessionCapabilities: Codable, Equatable, Sendable {
     public var concurrentClients: Bool?
     public var terminal: Bool?
+    public var codexGoal: Bool?
+    public var opencodeGoal: Bool?
     public var conversationHistory: ConversationHistoryCapabilities?
 
     public init(
         terminal: Bool? = nil,
         concurrentClients: Bool? = nil,
+        codexGoal: Bool? = nil,
+        opencodeGoal: Bool? = nil,
         conversationHistory: ConversationHistoryCapabilities? = nil
     ) {
         self.concurrentClients = concurrentClients
         self.terminal = terminal
+        self.codexGoal = codexGoal
+        self.opencodeGoal = opencodeGoal
         self.conversationHistory = conversationHistory
     }
 }

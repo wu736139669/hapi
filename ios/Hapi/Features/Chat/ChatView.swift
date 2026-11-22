@@ -101,7 +101,13 @@ struct ChatView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 0) {
                 if let status = model.statusPanelData {
-                    ChatStatusPanelView(data: status)
+                    ChatStatusPanelView(
+                        data: status,
+                        onGoalAction: model.canManageGoal ? { action, objective in
+                            model.manageGoal(action: action, objective: objective)
+                        } : nil,
+                        goalActionEnabled: model.canManageGoal
+                    )
                         .padding(.top, 6)
                         .padding(.bottom, 2)
                 }

@@ -110,6 +110,12 @@ public final class ChatInteractor {
     }
     private var scratchlistQueueAttempts: [String: ScratchlistQueueAttempt] = [:]
     private var scratchlistSendTarget: String?
+    /// Live goal from the REST/RPC endpoint (preferred over the transcript-
+    /// derived one on the chat screen).
+    public private(set) var liveGoal: JSONValue?
+    /// One goal control request at a time.
+    public private(set) var goalOpPending = false
+
     // Screen-owned, not row-local: recycled plan cards retain operation state.
     private var pendingCodexPlanId: String?
     private var implementedCodexPlanIds: Set<String> = []
@@ -1292,6 +1298,67 @@ public final class ChatInteractor {
             } catch {
                 self.emit(.notice(formatReopenError(error) ?? "Failed to reopen session"))
             }
+        }
+    }
+
+    // MARK: - Goal client actions
+
+    /// Whether goal controls should be shown for the current session, and
+    /// whether a control may be tapped right now. Mirrors the web gating.
+    public var goalActionsAvailable: Bool {
+        let detail = sessionStore.detail(for: sessionId)
+        guard detail?.active == true else { return false }
+        guard let flavor = detail?.metadata?.flavor else { return false }
+        if flavor == "codex" { return detail?.metadata?.capabilities?.codexGoal == true }
+        if flavor == "opencode" { return detail?.metadata?.capabilities?.opencodeGoal == true }
+        return false
+    }
+
+    public var canManageGoal: Bool {
+        goalActionsAvailable && !goalOpPending && !isSending && !configOpPending
+    }
+
+    /// `GET /api/sessions/:id/{codex,opencode}/goal`; refresh on appear and
+    /// after any control so the panel reflects server truth.
+    public func loadGoal() {
+        guard goalActionsAvailable else { return }
+        let flavor = sessionStore.detail(for: sessionId)?.metadata?.flavor ?? "opencode"
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let response = try await self.api.getGoal(sessionId: self.sessionId, flavor: flavor)
+                self.liveGoal = response.goal
+            } catch {
+                self.emit(.notice(Self.errorMessage(error, fallback: "Failed to load goal")))
+            }
+        }
+    }
+
+    /// POST a goal action (`pause`/`resume`/`clear` or `update` with objective).
+    public func manageGoal(action: String, objective: String? = nil) {
+        guard canManageGoal else { return }
+        let flavor = sessionStore.detail(for: sessionId)?.metadata?.flavor ?? "opencode"
+        // Codex `update` also accepts tokenBudget; OpenCode counts rounds,
+        // so never send a budget for it.
+        let request = APIClient.GoalRequest(
+            action: action,
+            objective: objective,
+            tokenBudget: nil
+        )
+        goalOpPending = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.goalOpPending = false }
+            do {
+                let response = try await self.api.manageGoal(
+                    sessionId: self.sessionId, flavor: flavor, payload: request
+                )
+                self.liveGoal = response.goal
+            } catch {
+                self.emit(.notice(Self.errorMessage(error, fallback: "Goal action failed")))
+            }
+            // Refresh even on failure: the action may have landed on the server.
+            self.loadGoal()
         }
     }
 

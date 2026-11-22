@@ -106,7 +106,7 @@ final class ChatModel {
     var statusPanelData: ChatStatusPanelData? {
         let detail = hub.sessionStore.detail(for: sessionId)
         return ChatStatusPanelData.build(
-            goal: latestGoal,
+            goal: interactor.liveGoal ?? latestGoal,
             tasks: detail?.todos,
             blocks: blocks,
             teamState: detail?.teamState
@@ -324,6 +324,7 @@ final class ChatModel {
             self?.scheduleRecompute()
         }
         interactor.activate()
+        interactor.loadGoal()
         dictation.onEvent = { [weak self] event in
             guard let self else { return }
             switch event {
@@ -402,6 +403,13 @@ final class ChatModel {
     }
 
     // MARK: - Actions
+
+    /// Goal controls surfaced in the status panel.
+    var canManageGoal: Bool { interactor.canManageGoal }
+
+    func manageGoal(action: String, objective: String? = nil) {
+        interactor.manageGoal(action: action, objective: objective)
+    }
 
     func resetDisplayedReadReceipt() { displayedReadRevision = nil }
 
