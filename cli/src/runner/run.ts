@@ -2315,7 +2315,10 @@ export function buildCliArgs(
   if (options.effort && (agent === 'claude' || agent === 'grok' || agent === 'pi' || agent === 'agy' || agent === 'kimi' || agent === 'copilot')) {
     args.push('--effort', options.effort);
   }
-  if (options.modelReasoningEffort && (agent === 'codex' || agent === 'dsh' || agent === 'opencode')) {
+  // DSH manages reasoning effort through its ACP server. The dsh CLI rejects
+  // --model-reasoning-effort outright (effort is restored from session state on
+  // resume), so passing it here makes every dsh spawn with a stored effort exit 1.
+  if (options.modelReasoningEffort && (agent === 'codex' || agent === 'opencode')) {
     args.push('--model-reasoning-effort', options.modelReasoningEffort);
   }
   if (options.serviceTier && agent === 'codex') {

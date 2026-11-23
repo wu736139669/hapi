@@ -172,7 +172,7 @@ describe('buildCliArgs', () => {
         expect(args).not.toContain('--hapi-session-id')
     })
 
-    it('passes DSH native and HAPI session ids separately on resume', () => {
+    it('passes DSH native and HAPI session ids separately on resume, without the effort flag', () => {
         const args = buildCliArgs('dsh', {
             directory: '/tmp',
             resumeSessionId: 'dsh-session-1',
@@ -192,10 +192,17 @@ describe('buildCliArgs', () => {
             '--existing-session-id',
             'hapi-session-1',
             '--model',
-            'deepseek-v4-pro',
-            '--model-reasoning-effort',
-            'max'
+            'deepseek-v4-pro'
         ])
+    })
+
+    it('never passes --model-reasoning-effort to dsh (ACP server owns effort)', () => {
+        const args = buildCliArgs('dsh', {
+            directory: '/tmp',
+            modelReasoningEffort: 'high'
+        })
+        expect(args).not.toContain('--model-reasoning-effort')
+        expect(args).not.toContain('high')
     })
 
     it('passes --existing-session-id for cursor resume when existingSessionId is set (#991)', () => {
