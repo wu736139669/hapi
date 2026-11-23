@@ -21,11 +21,18 @@ export function useSessionGuestAuth(
       ? (search as { share: string }).share
       : null;
   const sessionId = pathname.match(/^\/sessions\/([^/]+)/)?.[1] ?? null;
-  const auth = searchShare
-    ? readSessionGuest(searchShare)
-    : sessionId
-      ? readSessionGuestBySession(decodeURIComponent(sessionId))
-      : null;
+  // Storage parsing returns a fresh object on every render. Keep the parsed
+  // auth value stable so consumers that key effects on ApiClient do not tear
+  // down and recreate their requests on every state update.
+  const auth = useMemo(
+    () =>
+      searchShare
+        ? readSessionGuest(searchShare)
+        : sessionId
+          ? readSessionGuestBySession(decodeURIComponent(sessionId))
+          : null,
+    [searchShare, sessionId],
+  );
   return useMemo(() => {
     if (!auth) return { auth: null, api: null, shareToken: null };
     return {
