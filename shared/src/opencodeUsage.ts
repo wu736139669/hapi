@@ -11,6 +11,13 @@ import type { OpencodeUsageReportRow } from './usage'
  * HAPI's live pipeline only sees the final model step of a turn, so both the
  * hub's local reconciliation job and each session process (reporting its own
  * machine's store) derive the dashboard numbers from this file instead.
+ *
+ * OpenCode v2 moved sessions into `session_v2` and messages into
+ * `session_message`. Those rows have no `role` inside `data` (the `type`
+ * column carries it) and put provider/model ids under `model`. Both message
+ * tables are read, with v2 taking precedence when a session appears in both:
+ * older stores mirrored the same messages into both tables, so summing them
+ * would double count.
  */
 
 export type OpencodeAssistantUsage = {
@@ -24,6 +31,17 @@ export type OpencodeAssistantUsage = {
 
 export type OpencodeSessionUsage = {
     rows: OpencodeUsageReportRow[]
+    messages: number
+}
+
+type MessageRow = {
+    session_id: string
+    data: string
+    type?: string
+}
+
+type SessionAccumulation = {
+    buckets: Map<string, OpencodeUsageReportRow>
     messages: number
 }
 
@@ -72,11 +90,15 @@ function localDayKey(createdAtMs: number): string {
 }
 
 /**
- * Parse one `message.data` JSON row from the OpenCode store. Only assistant
- * messages carry provider accounting; zero-token rows (aborted or synthetic
- * messages) are skipped so they do not inflate the request count.
+ * Parse one message row's JSON payload. Only assistant messages carry
+ * provider accounting; zero-token rows (aborted or synthetic messages) are
+ * skipped so they do not inflate the request count.
+ *
+ * Legacy `message.data` has `role` plus top-level `providerID`/`modelID`.
+ * OpenCode v2 `session_message.data` has neither: `messageType` is the table's
+ * `type` column and the model ids live under `model`.
  */
-export function parseOpencodeAssistantUsage(raw: string): OpencodeAssistantUsage | null {
+export function parseOpencodeAssistantUsage(raw: string, messageType?: string): OpencodeAssistantUsage | null {
     let parsed: unknown
     try {
         parsed = JSON.parse(raw)
@@ -84,7 +106,9 @@ export function parseOpencodeAssistantUsage(raw: string): OpencodeAssistantUsage
         return null
     }
     const message = asRecord(parsed)
-    if (!message || message.role !== 'assistant') return null
+    if (!message) return null
+    const role = asString(message.role) ?? (messageType === 'assistant' ? 'assistant' : null)
+    if (role !== 'assistant') return null
     const tokens = asRecord(message.tokens)
     if (!tokens) return null
     const cache = asRecord(tokens.cache)
@@ -98,8 +122,9 @@ export function parseOpencodeAssistantUsage(raw: string): OpencodeAssistantUsage
     const createdAt = asCount(time?.created)
     if (createdAt <= 0) return null
 
-    const providerId = asString(message.providerID)
-    const modelId = asString(message.modelID) ?? asString(asRecord(message.model)?.modelID)
+    const modelRecord = asRecord(message.model)
+    const providerId = asString(message.providerID) ?? asString(modelRecord?.providerID)
+    const modelId = asString(message.modelID) ?? asString(modelRecord?.modelID) ?? asString(modelRecord?.id)
     const model = providerId && modelId
         ? `${providerId}/${modelId}`
         : modelId ?? 'unknown'
@@ -117,8 +142,18 @@ export function parseOpencodeAssistantUsage(raw: string): OpencodeAssistantUsage
     }
 }
 
+/** Table names that hold message payloads, in precedence order (v2 first). */
+const MESSAGE_TABLES = ['session_message', 'message'] as const
+
+function availableMessageTables(db: {
+    prepare: (sql: string) => { all: () => unknown }
+}): Set<string> {
+    const rows = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>
+    return new Set(rows.map((row) => row.name))
+}
+
 /**
- * Every OpenCode session id present in the store's message table. Used by a
+ * Every OpenCode session id present in the store's message tables. Used by a
  * machine's runner to report all of its sessions (including ones whose
  * process already exited) in a single pass.
  */
@@ -127,10 +162,16 @@ export async function listOpencodeSessionIds(dbPath: string): Promise<string[]> 
     const { Database } = await import('bun:sqlite')
     const db = new Database(dbPath, { readonly: true })
     try {
-        const rows = db.prepare('SELECT DISTINCT session_id FROM message').all() as Array<{ session_id: string }>
-        return rows
-            .map((row) => row.session_id)
-            .filter((id): id is string => typeof id === 'string' && id.length > 0)
+        const tables = availableMessageTables(db)
+        const ids = new Set<string>()
+        for (const table of MESSAGE_TABLES) {
+            if (!tables.has(table)) continue
+            const rows = db.prepare(`SELECT DISTINCT session_id FROM ${table}`).all() as Array<{ session_id: string }>
+            for (const row of rows) {
+                if (typeof row.session_id === 'string' && row.session_id.length > 0) ids.add(row.session_id)
+            }
+        }
+        return Array.from(ids)
     } finally {
         db.close()
     }
@@ -139,9 +180,10 @@ export async function listOpencodeSessionIds(dbPath: string): Promise<string[]> 
 /** Fold one message row's token counters into its (day, model) bucket. */
 function accumulateOpencodeUsage(
     buckets: Map<string, OpencodeUsageReportRow>,
-    data: string
+    data: string,
+    messageType?: string
 ): boolean {
-    const usage = parseOpencodeAssistantUsage(data)
+    const usage = parseOpencodeAssistantUsage(data, messageType)
     if (!usage) return false
     const key = `${usage.day}|${usage.model}`
     const bucket = buckets.get(key) ?? {
@@ -160,6 +202,33 @@ function accumulateOpencodeUsage(
     bucket.requests += 1
     buckets.set(key, bucket)
     return true
+}
+
+function accumulateRow(
+    target: Map<string, SessionAccumulation>,
+    sessionId: string,
+    data: string,
+    messageType?: string
+): void {
+    const entry = target.get(sessionId) ?? { buckets: new Map<string, OpencodeUsageReportRow>(), messages: 0 }
+    if (accumulateOpencodeUsage(entry.buckets, data, messageType)) entry.messages += 1
+    target.set(sessionId, entry)
+}
+
+/** v2 mirrors older sessions; only fall back to legacy rows it did not cover. */
+function preferredUsage(
+    v2: SessionAccumulation | undefined,
+    legacy: SessionAccumulation | undefined
+): SessionAccumulation | undefined {
+    if (v2 && v2.messages > 0) return v2
+    if (legacy && legacy.messages > 0) return legacy
+    return v2 ?? legacy
+}
+
+function toSessionUsage(entry: SessionAccumulation | undefined): OpencodeSessionUsage {
+    return entry && entry.messages > 0
+        ? { rows: Array.from(entry.buckets.values()), messages: entry.messages }
+        : { rows: [], messages: 0 }
 }
 
 /**
@@ -183,15 +252,27 @@ export async function readOpencodeUsageForSessions(
     const { Database } = await import('bun:sqlite')
     const db = new Database(dbPath, { readonly: true })
     try {
-        const selectMessages = db.prepare('SELECT data FROM message WHERE session_id = ?')
-        for (const sessionId of opencodeSessionIds) {
-            const messageRows = selectMessages.all(sessionId) as Array<{ data: string }>
-            const buckets = new Map<string, OpencodeUsageReportRow>()
-            let messages = 0
-            for (const row of messageRows) {
-                if (accumulateOpencodeUsage(buckets, row.data)) messages += 1
+        const tables = availableMessageTables(db)
+        const v2 = new Map<string, SessionAccumulation>()
+        const legacy = new Map<string, SessionAccumulation>()
+        if (tables.has('session_message')) {
+            const select = db.prepare('SELECT session_id, type, data FROM session_message WHERE session_id = ?')
+            for (const sessionId of opencodeSessionIds) {
+                for (const row of select.all(sessionId) as MessageRow[]) {
+                    accumulateRow(v2, row.session_id, row.data, row.type)
+                }
             }
-            result.set(sessionId, { rows: Array.from(buckets.values()), messages })
+        }
+        if (tables.has('message')) {
+            const select = db.prepare('SELECT session_id, data FROM message WHERE session_id = ?')
+            for (const sessionId of opencodeSessionIds) {
+                for (const row of select.all(sessionId) as MessageRow[]) {
+                    accumulateRow(legacy, row.session_id, row.data)
+                }
+            }
+        }
+        for (const sessionId of opencodeSessionIds) {
+            result.set(sessionId, toSessionUsage(preferredUsage(v2.get(sessionId), legacy.get(sessionId))))
         }
     } finally {
         db.close()
@@ -202,10 +283,10 @@ export async function readOpencodeUsageForSessions(
 
 /**
  * Like `readOpencodeUsageForSessions` but for every session present in the
- * store (the machine-level runner path). Reads the message table in a single
- * sequential pass: the per-session index queries above translate into one
- * scattered page fetch per message across the multi-GB store, while a table
- * scan reads the same pages in storage order.
+ * store (the machine-level runner path). Reads each message table in a single
+ * sequential pass: per-session index queries translate into one scattered
+ * page fetch per message across the multi-GB store, while a table scan reads
+ * the same pages in storage order.
  */
 export async function readOpencodeUsageForAllSessions(
     dbPath: string
@@ -216,25 +297,26 @@ export async function readOpencodeUsageForAllSessions(
     const { Database } = await import('bun:sqlite')
     const db = new Database(dbPath, { readonly: true })
     try {
-        const rows = db.prepare('SELECT session_id, data FROM message').all() as Array<{
-            session_id: string
-            data: string
-        }>
-        const bucketsBySession = new Map<string, Map<string, OpencodeUsageReportRow>>()
-        const messagesBySession = new Map<string, number>()
-        for (const row of rows) {
-            if (typeof row.session_id !== 'string' || row.session_id.length === 0) continue
-            const buckets = bucketsBySession.get(row.session_id) ?? new Map<string, OpencodeUsageReportRow>()
-            if (accumulateOpencodeUsage(buckets, row.data)) {
-                messagesBySession.set(row.session_id, (messagesBySession.get(row.session_id) ?? 0) + 1)
+        const tables = availableMessageTables(db)
+        const v2 = new Map<string, SessionAccumulation>()
+        const legacy = new Map<string, SessionAccumulation>()
+        if (tables.has('session_message')) {
+            const rows = db.prepare('SELECT session_id, type, data FROM session_message').all() as MessageRow[]
+            for (const row of rows) {
+                accumulateRow(v2, row.session_id, row.data, row.type)
             }
-            bucketsBySession.set(row.session_id, buckets)
         }
-        for (const [sessionId, buckets] of bucketsBySession) {
-            result.set(sessionId, {
-                rows: Array.from(buckets.values()),
-                messages: messagesBySession.get(sessionId) ?? 0
-            })
+        if (tables.has('message')) {
+            const rows = db.prepare('SELECT session_id, data FROM message').all() as MessageRow[]
+            for (const row of rows) {
+                // Mirrored legacy rows describe the same requests as v2 rows.
+                if ((v2.get(row.session_id)?.messages ?? 0) > 0) continue
+                accumulateRow(legacy, row.session_id, row.data)
+            }
+        }
+        const ids = new Set<string>([...v2.keys(), ...legacy.keys()])
+        for (const sessionId of ids) {
+            result.set(sessionId, toSessionUsage(preferredUsage(v2.get(sessionId), legacy.get(sessionId))))
         }
     } finally {
         db.close()

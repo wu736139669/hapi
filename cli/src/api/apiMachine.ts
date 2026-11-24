@@ -796,9 +796,19 @@ export class ApiMachineClient {
     /**
      * Report this machine's OpenCode usage snapshots to the hub. Best-effort:
      * a dropped report is re-sent by the next scan interval.
+     *
+     * The hub caps one report at 500 sessions; a machine can hold far more
+     * than that, so split large snapshots into batches instead of letting the
+     * hub reject the whole report. Batches are idempotent absolute snapshots.
      */
     reportOpencodeUsage(sessions: OpencodeUsageSessionReport[]): void {
-        this.socket.emit('opencode-usage-report', { machineId: this.machine.id, sessions })
+        const batchSize = 250
+        for (let index = 0; index < sessions.length; index += batchSize) {
+            this.socket.emit('opencode-usage-report', {
+                machineId: this.machine.id,
+                sessions: sessions.slice(index, index + batchSize)
+            })
+        }
     }
 
     /**

@@ -50,6 +50,7 @@ vi.mock('../modules/common/opencodeSessions', () => ({
     listLocalOpencodeSessionsWithMessagesByIds: vi.fn().mockResolvedValue([])
 }))
 
+import type { OpencodeUsageSessionReport } from '@hapi/protocol/usage'
 import { ApiMachineClient, normalizeWindowsDriveRoot } from './apiMachine'
 import { registerLocalSessionSource } from '../modules/common/localSessions/registry'
 import { codexLocalSessionSource } from '../modules/common/localSessions/sources/codex'
@@ -1124,6 +1125,50 @@ describe('ApiMachineClient child-exit notices', () => {
                 processStartMarker: 'Mon Jan  1 00:00:00 2024',
                 time: expect.any(Number)
             })
+        } finally {
+            client.shutdown()
+        }
+    })
+})
+
+describe('ApiMachineClient opencode usage reports', () => {
+    beforeEach(() => {
+        ioMock.mockReset()
+    })
+
+    it('splits large machine snapshots below the hub session cap', () => {
+        const machine = makeMachine('machine-usage-report')
+        const socket = {
+            on: vi.fn(),
+            emit: vi.fn(),
+            emitWithAck: vi.fn().mockResolvedValue({ result: 'success', version: 1 }),
+            close: vi.fn()
+        }
+        ioMock.mockReturnValue(socket)
+        const sessions: OpencodeUsageSessionReport[] = Array.from({ length: 501 }, (_, index) => ({
+            opencodeSessionId: `ses_${index}`,
+            rows: [{
+                day: '2026-11-24',
+                model: 'opencode/flash',
+                inputTokens: 1,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                cacheCreationTokens: 0,
+                requests: 1
+            }]
+        }))
+
+        const client = new ApiMachineClient('cli-token', machine)
+        try {
+            client.connect()
+            client.reportOpencodeUsage(sessions)
+            const reports = socket.emit.mock.calls.filter(([event]) => event === 'opencode-usage-report')
+            expect(reports).toHaveLength(3)
+            expect(reports.map(([, payload]) => payload.sessions.length)).toEqual([250, 250, 1])
+            for (const [, payload] of reports) {
+                expect(payload.machineId).toBe(machine.id)
+                expect(payload.sessions.length).toBeLessThanOrEqual(500)
+            }
         } finally {
             client.shutdown()
         }
