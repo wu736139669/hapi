@@ -188,32 +188,41 @@ struct SessionListView: View {
     /// thousands of rows nobody sees (~80 ms main-thread stalls while
     /// scrolling the chat). A side-by-side split never disappears and stays
     /// live; returning refreshes once.
+    @ViewBuilder
     private var sessionList: some View {
-        let snapshot = frozenSnapshot ?? model.snapshot
-        return KeyedContent(key: ListRenderKey(
-            snapshot: snapshot,
-            selectable: selection != nil,
-            theme: theme,
-            filters: model.filters,
-            metrics: metrics,
-            collapseOverrides: collapseOverrides,
-            order: model.order
-        )) {
-            list(snapshot)
-        }
-        .equatable()
-        .onAppear {
-            frozenSnapshot = nil
-            if hasAppeared {
-                // Returning from a chat: the list was frozen for performance;
-                // force a fresh REST reconciliation so read/status changes do
-                // not wait for the next SSE edge.
-                Task { await model.refresh() }
-            } else {
-                hasAppeared = true
+        // The disk snapshot is an offline fallback. During the first online
+        // sync, keep it out of the live surface so SSE replay cannot animate
+        // the list from an old history to the current server state.
+        if !model.hasRefreshedOnce && !model.isOffline {
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            let snapshot = frozenSnapshot ?? model.snapshot
+            KeyedContent(key: ListRenderKey(
+                snapshot: snapshot,
+                selectable: selection != nil,
+                theme: theme,
+                filters: model.filters,
+                metrics: metrics,
+                collapseOverrides: collapseOverrides,
+                order: model.order
+            )) {
+                list(snapshot)
             }
+            .equatable()
+            .onAppear {
+                frozenSnapshot = nil
+                if hasAppeared {
+                    // Returning from a chat: the list was frozen for performance;
+                    // force a fresh REST reconciliation so read/status changes do
+                    // not wait for the next SSE edge.
+                    Task { await model.refresh() }
+                } else {
+                    hasAppeared = true
+                }
+            }
+            .onDisappear { frozenSnapshot = model.snapshot }
         }
-        .onDisappear { frozenSnapshot = model.snapshot }
     }
 
     private func list(_ snapshot: SessionListSnapshot) -> some View {
