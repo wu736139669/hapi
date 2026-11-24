@@ -30,7 +30,7 @@ import { FueCallout, FueDot } from '@/components/Fue'
 
 function PinnedSectionIcon(props: { className?: string }) {
     return (
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className={props.className} aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className={props.className} aria-hidden="true">
             <path d="M12 17v5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
             <path d="M5 17h14" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
             <path d="M7 4V2h10v2l-2 5v4l2 2H7l2-2V9Z" />

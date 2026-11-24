@@ -87,7 +87,7 @@ function MachineFilterChip(props: {
             side="bottom"
             align="start"
             className={cn('shrink-0 rounded-full border transition-colors', selected ? chipSelectedClass : chipIdleClass)}
-            tooltipClassName="pointer-events-auto before:absolute before:inset-x-0 before:-top-1 before:h-1 before:content-[''] px-3 py-2 min-w-[16rem] max-md:hidden"
+            tooltipClassName="pointer-events-auto before:absolute before:inset-x-0 before:-top-1 before:h-1 before:content-[''] px-3 py-2 min-w-[16rem] hidden md:block"
         >
             <MachineHealthTooltipBody presentation={machine.healthPresentation!} />
         </HoverTooltip>
@@ -105,7 +105,7 @@ export function MachineFilterBar(props: {
         <div
             role="group"
             aria-label={t('sessions.machineFilter.label')}
-            className="flex flex-wrap items-center gap-1.5 px-2 pb-2 max-md:hidden"
+            className="hidden md:flex flex-wrap items-center gap-1.5 px-2 pb-2"
         >
             <button
                 type="button"
@@ -164,7 +164,7 @@ export function MachineSummaryRow(props: { machine: MachineFilterItem }) {
                     target={content}
                     side="bottom"
                     align="start"
-                    tooltipClassName="pointer-events-auto before:absolute before:inset-x-0 before:-top-1 before:h-1 before:content-[''] px-3 py-2 min-w-[16rem] max-md:hidden"
+                    tooltipClassName="pointer-events-auto before:absolute before:inset-x-0 before:-top-1 before:h-1 before:content-[''] px-3 py-2 min-w-[16rem] hidden md:block"
                 >
                     <MachineHealthTooltipBody presentation={props.machine.healthPresentation!} />
                 </HoverTooltip>

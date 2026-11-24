@@ -482,7 +482,7 @@
 				CODE_SIGN_ENTITLEMENTS = Hapi/Hapi.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Hapi/Hapi-macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				DEVELOPMENT_TEAM = X75CUV458P;
 				ENABLE_PREVIEWS = YES;
@@ -499,7 +499,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.34.1;
+				MARKETING_VERSION = 0.36.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.wusu.hapi;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTS_MACCATALYST = YES;
@@ -517,7 +517,7 @@
 				CODE_SIGN_ENTITLEMENTS = Hapi/Hapi.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Hapi/Hapi-macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				DEVELOPMENT_TEAM = X75CUV458P;
 				ENABLE_PREVIEWS = YES;
@@ -534,7 +534,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.34.1;
+				MARKETING_VERSION = 0.36.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.wusu.hapi;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTS_MACCATALYST = YES;
@@ -550,7 +550,7 @@
 				CODE_SIGN_ENTITLEMENTS = HapiNotificationService/HapiNotificationService.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "HapiNotificationService/HapiNotificationService-macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				DEVELOPMENT_TEAM = X75CUV458P;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -562,7 +562,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.34.1;
+				MARKETING_VERSION = 0.36.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.wusu.hapi.HapiNotificationService;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -579,7 +579,7 @@
 				CODE_SIGN_ENTITLEMENTS = HapiNotificationService/HapiNotificationService.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "HapiNotificationService/HapiNotificationService-macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
 				DEVELOPMENT_TEAM = X75CUV458P;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -591,7 +591,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.34.1;
+				MARKETING_VERSION = 0.36.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.wusu.hapi.HapiNotificationService;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -608,7 +608,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = HapiWidgets/HapiWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEVELOPMENT_TEAM = X75CUV458P;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HapiWidgets/Info.plist;
@@ -619,7 +619,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.34.1;
+				MARKETING_VERSION = 0.36.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.wusu.hapi.HapiWidgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -638,7 +638,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = HapiWidgets/HapiWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEVELOPMENT_TEAM = X75CUV458P;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HapiWidgets/Info.plist;
@@ -649,7 +649,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.34.1;
+				MARKETING_VERSION = 0.36.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.wusu.hapi.HapiWidgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;

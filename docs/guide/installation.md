@@ -58,6 +58,33 @@ Or with Homebrew:
 brew install tiann/tap/hapi
 ```
 
+### Windows host
+
+The npm package installs the Windows x64 HAPI binary automatically. In
+PowerShell, install it and connect this machine to the same hub as your other
+devices:
+
+```powershell
+npm install -g @twsxtd/hapi --registry=https://registry.npmjs.org
+$env:HAPI_API_URL = "https://your-hub.example.com"
+hapi auth login
+hapi runner start
+hapi runner status
+```
+
+Use the hub URL and access token shown by `hapi hub --relay` on the hub host.
+The first `hapi runner start` creates this Windows machine's ID and registers
+it with the hub. It then appears in **Settings → Machines** and in the machine
+selector when you create a session. Install the agent CLIs you want to run on
+Windows before starting sessions. Web terminals use PowerShell when available,
+then Windows PowerShell or `cmd.exe`.
+
+To keep the runner connected after PowerShell closes, run it under a Windows
+service manager such as pm2, or start it from Task Scheduler. The token is saved
+in `%USERPROFILE%\.hapi\settings.json`. Keep `HAPI_API_URL` in the service's
+environment as well, because the URL set in a PowerShell window is scoped to
+that window.
+
 ### Upgrades that still run an older version
 
 The `@twsxtd/hapi` package is a launcher. Its platform binary (for example,

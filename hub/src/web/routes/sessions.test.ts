@@ -2473,11 +2473,10 @@ describe('sessions routes', () => {
         const scheduledIds: string[][] = []
         const engine = {
             getSessionsByNamespace: () => sessions,
-            getFutureScheduledMessageCounts: (ids: string[]) => {
+            getFutureScheduledMessageStats: (ids: string[]) => {
                 scheduledIds.push(ids)
-                return new Map([[ids[0]!, 2]])
+                return new Map([[ids[0]!, { count: 2, nextScheduledAt: 1000 }]])
             },
-            getNextScheduledAtBySessionIds: (ids: string[]) => new Map([[ids[0]!, 1000]]),
             getPrimaryAttachedJobsBySessionIds: () => new Map(),
             allocateAttachedJobVersion: () => Date.now(),
             resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })
@@ -2509,8 +2508,7 @@ describe('sessions routes', () => {
         const session = createSession({ id: 'content-session' })
         const engine = {
             getSessionsByNamespace: () => [session],
-            getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
-            getNextScheduledAtBySessionIds: (ids: string[]) => new Map(ids.map((id) => [id, null])),
+            getFutureScheduledMessageStats: (ids: string[]) => new Map(ids.map((id) => [id, { count: 0, nextScheduledAt: null }])),
             getPrimaryAttachedJobsBySessionIds: () => new Map(),
             allocateAttachedJobVersion: () => Date.now(),
             hasPotentiallyIncompleteSessionContent: (namespace: string, query: string, sessionIds?: readonly string[]) => {
@@ -2573,8 +2571,7 @@ describe('sessions routes', () => {
         let receivedSessionIds: readonly string[] | undefined
         const engine = {
             getSessionsByNamespace: () => sessions,
-            getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
-            getNextScheduledAtBySessionIds: (ids: string[]) => new Map(ids.map((id) => [id, null])),
+            getFutureScheduledMessageStats: (ids: string[]) => new Map(ids.map((id) => [id, { count: 0, nextScheduledAt: null }])),
             getPrimaryAttachedJobsBySessionIds: () => new Map(),
             allocateAttachedJobVersion: () => Date.now(),
             hasPotentiallyIncompleteSessionContent: () => false,
@@ -2607,8 +2604,7 @@ describe('sessions routes', () => {
     it('rejects an oversized content-search body before JSON parsing', async () => {
         const engine = {
             getSessionsByNamespace: () => [],
-            getFutureScheduledMessageCounts: () => new Map(),
-            getNextScheduledAtBySessionIds: () => new Map(),
+            getFutureScheduledMessageStats: () => new Map(),
             searchSessionContent: () => []
         } as unknown as Partial<SyncEngine>
         const app = new Hono<WebAppEnv>()
@@ -2639,8 +2635,7 @@ describe('sessions routes', () => {
             searchSessionContentMatches: () => {
                 throw new Error('must reject before searching')
             },
-            getFutureScheduledMessageCounts: () => new Map(),
-            getNextScheduledAtBySessionIds: () => new Map()
+            getFutureScheduledMessageStats: () => new Map()
         } as unknown as Partial<SyncEngine>
         const app = new Hono<WebAppEnv>()
         app.use('*', async (c, next) => {
@@ -2749,8 +2744,7 @@ describe('sessions routes', () => {
         ]
         const engine = {
             getSessionsByNamespace: () => sessions,
-            getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
-            getNextScheduledAtBySessionIds: (_ids: string[]) => new Map<string, number>(),
+            getFutureScheduledMessageStats: (ids: string[]) => new Map(ids.map((id) => [id, { count: 0, nextScheduledAt: null }])),
             getPrimaryAttachedJobsBySessionIds: () => new Map(),
             allocateAttachedJobVersion: () => Date.now(),
             resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })
@@ -2906,8 +2900,7 @@ describe('sessions routes', () => {
         ]
         const engine = {
             getSessionsByNamespace: () => sessions,
-            getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
-            getNextScheduledAtBySessionIds: (_ids: string[]) => new Map<string, number>(),
+            getFutureScheduledMessageStats: (ids: string[]) => new Map(ids.map((id) => [id, { count: 0, nextScheduledAt: null }])),
             getPrimaryAttachedJobsBySessionIds: () => new Map(),
             allocateAttachedJobVersion: () => Date.now(),
             resolveSessionAccess: () => ({ ok: false, reason: 'not-found' as const })
@@ -2942,8 +2935,7 @@ describe('sessions routes', () => {
         let primary: typeof runningJob | null = runningJob
         const engine = {
             getSessionsByNamespace: () => [session],
-            getFutureScheduledMessageCounts: (ids: string[]) => new Map(ids.map((id) => [id, 0])),
-            getNextScheduledAtBySessionIds: (_ids: string[]) => new Map<string, number>(),
+            getFutureScheduledMessageStats: (ids: string[]) => new Map(ids.map((id) => [id, { count: 0, nextScheduledAt: null }])),
             allocateAttachedJobVersion: (id: string) => {
                 expect(id).toBe(session.id)
                 callOrder.push('allocate')

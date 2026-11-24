@@ -95,7 +95,7 @@ describe('MachineFilterBar', () => {
         expect(tooltip!.textContent).toContain('CPU')
         expect(tooltip!.textContent).toContain('12%')
         // Popup is hidden below the md breakpoint (mobile shows nothing)
-        expect(tooltip!.className).toContain('max-md:hidden')
+        expect(tooltip!.className).toContain('hidden md:block')
         // A pseudo-element bridges the mt-1 gap so the popup stays open while entered
         expect(tooltip!.className).toContain('before:-top-1')
     })
@@ -122,7 +122,7 @@ describe('MachineFilterBar', () => {
     it('is hidden below the md breakpoint (mobile uses MachineFilterMenu)', () => {
         renderBar()
 
-        expect(screen.getByRole('group', { name: 'Filter sessions by machine' }).className).toContain('max-md:hidden')
+        expect(screen.getByRole('group', { name: 'Filter sessions by machine' }).className).toContain('hidden md:flex')
     })
 })
 
@@ -161,7 +161,7 @@ describe('MachineSummaryRow', () => {
         expect(tooltip!.textContent).toContain('Machine capacity')
         expect(tooltip!.textContent).toContain('12%')
         // The inline metrics cover touch layouts; the popup itself is desktop-only
-        expect(tooltip!.className).toContain('max-md:hidden')
+        expect(tooltip!.className).toContain('hidden md:block')
         // A pseudo-element bridges the mt-1 gap so the popup stays open while entered
         expect(tooltip!.className).toContain('before:-top-1')
     })

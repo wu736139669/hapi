@@ -254,15 +254,14 @@ export function createSessionsRoutes(
         if (limit !== null) {
             sessionRecords = sessionRecords.slice(0, limit)
         }
-        const scheduledCounts = engine.getFutureScheduledMessageCounts(sessionRecords.map((session) => session.id))
-        const nextScheduledAt = engine.getNextScheduledAtBySessionIds(sessionRecords.map((session) => session.id))
-        const previews = store?.sessions.getLastUserMessagePreviews(sessionRecords.map((session) => session.id)) ?? new Map()
-        const assistantPreviews = store?.sessions.getLastAssistantMessagePreviews(sessionRecords.map((session) => session.id)) ?? new Map()
+        const sessionIds = sessionRecords.map((session) => session.id)
+        const scheduledStats = engine.getFutureScheduledMessageStats(sessionIds)
+        const previews = store?.sessions.getLastUserMessagePreviews(sessionIds) ?? new Map()
+        const assistantPreviews = store?.sessions.getLastAssistantMessagePreviews(sessionIds) ?? new Map()
         // Watermark BEFORE reading jobs. If a mutation lands between read and
         // allocate, SSE gets version V with the new value while this response
         // would return the older value labeled V+1 — useSSE then rejects the
         // real patch as stale. Allocate first so concurrent emits always win.
-        const sessionIds = sessionRecords.map((session) => session.id)
         const attachedJobVersions = new Map(
             sessionIds.map((id) => [id, engine.allocateAttachedJobVersion(id)])
         )
@@ -275,12 +274,13 @@ export function createSessionsRoutes(
             })
             const preview = previews.get(session.id)
             const assistantPreview = assistantPreviews.get(session.id)
+            const scheduled = scheduledStats.get(session.id)
             return {
                 ...summary,
                 ...(preview ? { lastUserMessagePreview: preview } : {}),
                 ...(assistantPreview ? { lastAssistantMessagePreview: assistantPreview } : {}),
-                futureScheduledMessageCount: scheduledCounts.get(session.id) ?? 0,
-                nextScheduledAt: nextScheduledAt.get(session.id) ?? null
+                futureScheduledMessageCount: scheduled?.count ?? 0,
+                nextScheduledAt: scheduled?.nextScheduledAt ?? null
             }
         })
 
@@ -317,8 +317,7 @@ export function createSessionsRoutes(
             scopedSessionIds
         )
         const matchedSessionIds = matches.map((match) => match.sessionId)
-        const scheduledCounts = engine.getFutureScheduledMessageCounts(matchedSessionIds)
-        const nextScheduledAt = engine.getNextScheduledAtBySessionIds(matchedSessionIds)
+        const scheduledStats = engine.getFutureScheduledMessageStats(matchedSessionIds)
         // Same job extras as GET /sessions — content-search summaries replace the
         // live list rows, so omitting attachedJob drops meters and the active-filter
         // jobs exception for matching idle sessions (#1424).
@@ -337,8 +336,8 @@ export function createSessionsRoutes(
                 return [{
                     session: {
                         ...summary,
-                        futureScheduledMessageCount: scheduledCounts.get(session.id) ?? 0,
-                        nextScheduledAt: nextScheduledAt.get(session.id) ?? null
+                        futureScheduledMessageCount: scheduledStats.get(session.id)?.count ?? 0,
+                        nextScheduledAt: scheduledStats.get(session.id)?.nextScheduledAt ?? null
                     },
                     match: {
                         messageId: match.messageId,

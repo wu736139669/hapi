@@ -45,8 +45,7 @@ describe('session-attached jobs routes (tiann/hapi#1404)', () => {
                 _runId: string | undefined
             ) => jobKey,
             getSessionsByNamespace: () => [session],
-            getFutureScheduledMessageCounts: () => new Map(),
-            getNextScheduledAtBySessionIds: () => new Map(),
+            getFutureScheduledMessageStats: () => new Map(),
             getPrimaryAttachedJobsBySessionIds: (ids: string[]) => {
                 const map = new Map<string, AttachedJob>()
                 const primary = [...jobs.values()].find((j) => j.status === 'running')
@@ -195,8 +194,7 @@ describe('session-attached jobs routes (tiann/hapi#1404)', () => {
         }
         const engine = {
             getSessionsByNamespace: () => [session],
-            getFutureScheduledMessageCounts: () => new Map([[session.id, 0]]),
-            getNextScheduledAtBySessionIds: () => new Map([[session.id, null]]),
+            getFutureScheduledMessageStats: () => new Map([[session.id, { count: 0, nextScheduledAt: null }]]),
             getPrimaryAttachedJobsBySessionIds: (ids: string[]) => {
                 const map = new Map<string, AttachedJob>()
                 for (const id of ids) map.set(id, job)

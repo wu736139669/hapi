@@ -46,13 +46,19 @@ const UNKNOWN_FLAVOR_BADGE = {
 export function AgentFlavorIcon({ flavor, className }: { flavor?: string | null; className?: string }) {
     const normalized = (flavor ?? '').trim().toLowerCase()
     const sizeClass = className ?? 'h-4 w-4'
+    // Keep brand SVGs bounded even while a stale PWA stylesheet is being
+    // replaced. The class remains the source of truth when it is available.
+    const sizeMatch = sizeClass.match(/(?:^|\s)h-(\d+(?:\.\d+)?)\b/)
+    const sizeRem = sizeMatch ? Number(sizeMatch[1]) * 0.25 : 1
+    const sizeStyle = { width: `${sizeRem}rem`, height: `${sizeRem}rem` }
     if (normalized === 'copilot') {
         return (
             <span
                 aria-hidden="true"
                 className={`inline-flex items-center justify-center leading-none text-[#24292f] dark:text-[#e6edf3] ${sizeClass}`}
+                style={sizeStyle}
             >
-                <CopilotIcon size="100%" />
+                <CopilotIcon size={`${sizeRem}rem`} />
             </span>
         )
     }
@@ -64,8 +70,9 @@ export function AgentFlavorIcon({ flavor, className }: { flavor?: string | null;
             <span
                 aria-hidden="true"
                 className={`inline-flex items-center justify-center leading-none ${sizeClass}`}
+                style={sizeStyle}
             >
-                <Logo size="100%" />
+                <Logo size={`${sizeRem}rem`} />
             </span>
         )
     }
@@ -75,6 +82,7 @@ export function AgentFlavorIcon({ flavor, className }: { flavor?: string | null;
             <span
                 aria-hidden="true"
                 className={`inline-flex items-center justify-center leading-none text-[var(--app-fg)] ${sizeClass}`}
+                style={sizeStyle}
             >
                 <PiLogo />
             </span>
@@ -86,6 +94,7 @@ export function AgentFlavorIcon({ flavor, className }: { flavor?: string | null;
         <span
             aria-hidden="true"
             className={`inline-flex items-center justify-center rounded-sm text-[8px] font-semibold leading-none ${badge.colors} ${sizeClass}`}
+            style={sizeStyle}
         >
             {badge.label}
         </span>

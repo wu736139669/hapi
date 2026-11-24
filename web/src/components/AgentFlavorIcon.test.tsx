@@ -62,6 +62,8 @@ describe('AgentFlavorIcon', () => {
         const wrapper = getWrapper(container)
         expect(wrapper.className).toContain('h-4')
         expect(wrapper.className).toContain('w-4')
+        expect(wrapper.style.width).toBe('1rem')
+        expect(wrapper.style.height).toBe('1rem')
     })
 
     it('appends the provided className instead of the default size', () => {
@@ -70,6 +72,8 @@ describe('AgentFlavorIcon', () => {
         expect(wrapper.className).toContain('h-6')
         expect(wrapper.className).toContain('w-6')
         expect(wrapper.className).not.toContain('h-4 w-4')
+        expect(wrapper.style.width).toBe('1.5rem')
+        expect(wrapper.style.height).toBe('1.5rem')
     })
 
     it('marks the icon aria-hidden for screen readers (decorative only)', () => {
