@@ -113,10 +113,17 @@ public final class SessionListStore: SessionListStoring {
     @ObservationIgnored private let api: APIClient
     @ObservationIgnored private let snapshot: DiskCache<[SessionSummary]>?
     @ObservationIgnored private let refreshBatch: Duration
-    @ObservationIgnored private var refreshQueued = false
-    /// Serializes overlapping refreshes "monotonic by start": a response is
-    /// applied only when no later-started refresh already applied its own
-    /// (the value-type equivalent of the reference's mutex ordering).
+    /// A scheduled invalidation owns one refresh task. Events that arrive
+    /// while that request is in flight set the pending flag and are folded
+    /// into one follow-up request after the current response is applied.
+    @ObservationIgnored private var scheduledRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var scheduledRefreshPending = false
+    /// Manual refreshes and scheduled invalidations share the same in-flight
+    /// request instead of opening overlapping list requests.
+    @ObservationIgnored private var activeRefreshTask: Task<Void, Error>?
+    /// Orders refresh responses "monotonic by start": a response is applied
+    /// only when no later-started refresh already applied its own (the
+    /// value-type equivalent of the reference's mutex ordering).
     @ObservationIgnored private var refreshGeneration = 0
     @ObservationIgnored private var lastAppliedRefresh = 0
 
@@ -174,6 +181,20 @@ public final class SessionListStore: SessionListStoring {
     // MARK: - Refresh
 
     public func refresh() async throws {
+        if let activeRefreshTask {
+            try await activeRefreshTask.value
+            return
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try await self.performRefresh()
+        }
+        activeRefreshTask = task
+        defer { activeRefreshTask = nil }
+        try await task.value
+    }
+
+    private func performRefresh() async throws {
         refreshGeneration += 1
         let generation = refreshGeneration
         let list = try await api.listSessions()
@@ -201,13 +222,17 @@ public final class SessionListStore: SessionListStoring {
     }
 
     public func scheduleRefresh() {
-        guard !refreshQueued else { return }
-        refreshQueued = true
-        Task { [refreshBatch] in
+        scheduledRefreshPending = true
+        guard scheduledRefreshTask == nil else { return }
+        scheduledRefreshTask = Task { [refreshBatch] in
             try? await Task.sleep(for: refreshBatch)
-            self.refreshQueued = false
-            // Offline burst — the next SSE event or manual refresh retries.
-            try? await self.refresh()
+            guard !Task.isCancelled else { return }
+            repeat {
+                self.scheduledRefreshPending = false
+                // Offline burst — the next SSE event or manual refresh retries.
+                try? await self.refresh()
+            } while self.scheduledRefreshPending
+            self.scheduledRefreshTask = nil
         }
     }
 
@@ -456,11 +481,18 @@ public final class SessionListStore: SessionListStoring {
         }
         var list = sessions
         list[index] = next
-        setSessions(sortSessionSummaries(list))
+        // The base order ignores liveness and output fields. Sorting those
+        // patches only copies and compares the whole list again. A new user
+        // message is the summary patch that can move a row in the base order.
+        let ordered = current.lastUserMessageAt != next.lastUserMessageAt
+            ? sortSessionSummaries(list)
+            : list
+        setSessions(ordered)
         return true
     }
 
     private func setSessions(_ next: [SessionSummary]) {
+        guard next != sessions else { return }
         sessions = next
         listRevision += 1
         snapshot?.scheduleWrite(next)

@@ -52,6 +52,52 @@ struct SessionListStoreTests {
         #expect(changes.count == 1)
     }
 
+    @Test func identicalRefreshDoesNotNotifyObservers() async throws {
+        let (performer, store) = try makeStore()
+        var changeCount = 0
+        store.onSessionsChanged = { _ in changeCount += 1 }
+        let response = try sessionsResponseJSON(storeSummary("s1"))
+
+        await performer.enqueue(json: response)
+        try await store.refresh()
+        let revision = store.listRevision
+
+        await performer.enqueue(json: response)
+        try await store.refresh()
+
+        #expect(changeCount == 1)
+        #expect(store.listRevision == revision)
+    }
+
+    @Test func scheduledRefreshesDuringOneRequestCollapseToOneFollowUp() async throws {
+        let (performer, store) = try makeStore()
+        await performer.enqueue(json: try sessionsResponseJSON(storeSummary("s1")))
+        try await store.refresh()
+
+        await performer.setDelay(nanoseconds: 100_000_000)
+        store.scheduleRefresh()
+        try await Task.sleep(for: .milliseconds(10))
+        store.scheduleRefresh()
+        try await Task.sleep(for: .milliseconds(10))
+        store.scheduleRefresh()
+        try await Task.sleep(for: .milliseconds(250))
+
+        #expect(await performer.requests.count == 3, "one initial request plus one in-flight refresh and one follow-up")
+    }
+
+    @Test func concurrentManualRefreshesShareOneRequest() async throws {
+        let (performer, store) = try makeStore()
+        await performer.enqueue(json: try sessionsResponseJSON(storeSummary("s1")))
+        await performer.setDelay(nanoseconds: 50_000_000)
+
+        async let first: Void = store.refresh()
+        async let second: Void = store.refresh()
+        try await first
+        try await second
+
+        #expect(await performer.requests.count == 1)
+    }
+
     @Test func staleRefreshCannotUndoNewerUserInput() async throws {
         let (performer, store) = try makeStore()
         let snapshot = try sessionsResponseJSON(
