@@ -83,6 +83,9 @@ public final class SessionListStore: SessionListStoring {
     /// real change also bumps ``listRevision`` and schedules a snapshot.
     public private(set) var sessions: [SessionSummary]
 
+    /// Cached machine membership for the session filter menu.
+    public private(set) var machineFilterIds: Set<String>
+
     /// All cached details, keyed by session id.
     public private(set) var details: [String: Session] = [:]
 
@@ -138,7 +141,9 @@ public final class SessionListStore: SessionListStoring {
         self.api = api
         self.snapshot = cache
         self.refreshBatch = refreshBatch
-        self.sessions = cache?.load().map(sortSessionSummaries) ?? []
+        let loadedSessions = cache?.load().map(sortSessionSummaries) ?? []
+        self.sessions = loadedSessions
+        self.machineFilterIds = Set(loadedSessions.map { $0.metadata?.machineId ?? "__unknown__" })
     }
 
     // MARK: - Details
@@ -494,6 +499,7 @@ public final class SessionListStore: SessionListStoring {
     private func setSessions(_ next: [SessionSummary]) {
         guard next != sessions else { return }
         sessions = next
+        machineFilterIds = Set(next.map { $0.metadata?.machineId ?? "__unknown__" })
         listRevision += 1
         snapshot?.scheduleWrite(next)
         onSessionsChanged?(next)

@@ -275,7 +275,10 @@ final class SessionListModel {
     /// All session groups, including historical / unidentified machines.
     /// The online roster is only a source of labels, never filter membership.
     var machineFilterIds: Set<String> {
-        Set(sessionStore.sessions.map { $0.metadata?.machineId ?? unknownMachineFilterId })
+        if let store = sessionStore as? SessionListStore {
+            return store.machineFilterIds
+        }
+        return Set(sessionStore.sessions.map { $0.metadata?.machineId ?? unknownMachineFilterId })
     }
 
     /// Counts are pre-filter. Names, not live counts, determine menu order.

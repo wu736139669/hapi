@@ -116,6 +116,11 @@ public enum WidgetSnapshotBuilder {
     public static let defaultLimit = 20
     public static let defaultRecentWindowMs = 15 * 60 * 1000
 
+    private struct Candidate {
+        let summary: SessionSummary
+        let status: LiveActivityContentState.Status
+    }
+
     public static func build(
         sessions: [SessionSummary],
         hubUrl: String,
@@ -125,7 +130,7 @@ public enum WidgetSnapshotBuilder {
         limit: Int = defaultLimit
     ) -> WidgetSnapshot {
         let cutoff = now - recentWindowMs
-        let rows = sessions.compactMap { summary -> WidgetSnapshot.Session? in
+        let candidates = sessions.compactMap { summary -> Candidate? in
             let status: LiveActivityContentState.Status
             if summary.active {
                 if summary.pendingRequestsCount > 0 {
@@ -147,6 +152,17 @@ public enum WidgetSnapshotBuilder {
                 guard summary.updatedAt >= cutoff else { return nil }
                 status = .done
             }
+            return Candidate(summary: summary, status: status)
+        }
+        .sorted { lhs, rhs in
+            let lp = priority(lhs.status)
+            let rp = priority(rhs.status)
+            if lp != rp { return lp > rp }
+            return lhs.summary.updatedAt > rhs.summary.updatedAt
+        }
+
+        let limited = candidates.prefix(max(0, limit)).map { candidate in
+            let summary = candidate.summary
             let preview = lastMessage(for: summary)
             let result = lastResult(for: summary)
             return WidgetSnapshot.Session(
@@ -154,7 +170,7 @@ public enum WidgetSnapshotBuilder {
                 title: title(for: summary),
                 project: projectName(for: summary),
                 flavor: summary.metadata?.flavor,
-                status: status,
+                status: candidate.status,
                 startedAt: summary.lastUserMessageAt,
                 updatedAt: summary.updatedAt,
                 pendingCount: summary.pendingRequestsCount,
@@ -166,23 +182,15 @@ public enum WidgetSnapshotBuilder {
                 isUnread: unreadSessionIds.contains(summary.id) ? true : nil
             )
         }
-        .sorted { lhs, rhs in
-            let lp = priority(lhs.status)
-            let rp = priority(rhs.status)
-            if lp != rp { return lp > rp }
-            return lhs.updatedAt > rhs.updatedAt
-        }
-
-        let limited = Array(rows.prefix(max(0, limit)))
         return WidgetSnapshot(
             generatedAt: now,
             hubUrl: hubUrl,
             sessions: limited,
-            runningCount: rows.filter { $0.status == .working }.count,
-            needsApprovalCount: rows.filter { $0.status == .needsApproval }.count,
-            needsInputCount: rows.filter { $0.status == .needsInput }.count,
-            needsAttentionCount: rows.filter { $0.status == .needsAttention }.count,
-            idleCount: rows.filter { $0.status == .idle }.count
+            runningCount: candidates.filter { $0.status == .working }.count,
+            needsApprovalCount: candidates.filter { $0.status == .needsApproval }.count,
+            needsInputCount: candidates.filter { $0.status == .needsInput }.count,
+            needsAttentionCount: candidates.filter { $0.status == .needsAttention }.count,
+            idleCount: candidates.filter { $0.status == .idle }.count
         )
     }
 

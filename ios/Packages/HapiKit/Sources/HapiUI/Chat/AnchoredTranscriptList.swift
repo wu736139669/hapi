@@ -396,10 +396,11 @@ public final class TranscriptCollectionController<Item: Identifiable & Equatable
     public override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         guard collection.bounds.width > 24 else { return }
-        if abs(configuredWidth - collection.bounds.width) > 0.5, !applying {
+        if abs(configuredWidth - collection.bounds.width) > 0.5, !applying,
+           !collection.isDragging, !collection.isDecelerating {
             if pending == nil { pending = configuration }
             drain()
-        } else if layout.followsTail, !applying, !collection.isDragging {
+        } else if layout.followsTail, !applying, !collection.isDragging, !collection.isDecelerating {
             layout.correctOffset(to: layout.bottomOffset(collection))
         }
         reportViewport()
@@ -410,6 +411,10 @@ public final class TranscriptCollectionController<Item: Identifiable & Equatable
         pending = configuration
         // The first SwiftUI update may arrive before UIKit supplies bounds.
         guard collection.bounds.width > 24 else { return }
+        // Keep the pan/deceleration path focused on UIKit's scroll work. SwiftUI
+        // may deliver several transcript revisions while the reader is moving.
+        // The latest one remains in `pending` and is committed after the gesture.
+        guard !collection.isDragging, !collection.isDecelerating else { return }
         drain()
     }
 
@@ -583,6 +588,7 @@ public final class TranscriptCollectionController<Item: Identifiable & Equatable
 
     private func finishGesture() {
         layout.followsTail = configuration?.isInspectionPresented != true && layout.bottomOffset(collection) - collection.contentOffset.y <= 1
+        drain()
         reportViewport(deferred: false)
     }
 }
