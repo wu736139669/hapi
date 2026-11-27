@@ -759,11 +759,11 @@ export class RpcGateway {
     }
 
     async listOpencodeModelsForSession(sessionId: string): Promise<RpcListOpencodeModelsResponse> {
-        return await this.sessionRpc(sessionId, RPC_METHODS.ListOpencodeModels, {}) as RpcListOpencodeModelsResponse
+        return await this.sessionRpc(sessionId, RPC_METHODS.ListOpencodeModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListOpencodeModelsResponse
     }
 
     async listOpencodeModelsForCwd(machineId: string, cwd: string): Promise<RpcListOpencodeModelsResponse> {
-        return await this.machineRpc(machineId, RPC_METHODS.ListOpencodeModelsForCwd, { cwd }) as RpcListOpencodeModelsResponse
+        return await this.machineRpc(machineId, RPC_METHODS.ListOpencodeModelsForCwd, { cwd }, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListOpencodeModelsResponse
     }
 
     async listGrokModelsForCwd(machineId: string, cwd: string): Promise<RpcListGrokModelsResponse> {

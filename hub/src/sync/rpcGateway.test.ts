@@ -114,6 +114,19 @@ describe('RpcGateway RPC timeouts', () => {
         expect(timeouts).toEqual([120_000])
     })
 
+    it('uses an extended RPC timeout when listing OpenCode models', async () => {
+        const { gateway, calls, timeouts } = createGateway()
+
+        await gateway.listOpencodeModelsForCwd('machine-1', '/workspace')
+        await gateway.listOpencodeModelsForSession('session-1')
+
+        expect(calls.map((call) => call.method)).toEqual([
+            'machine-1:listOpencodeModelsForCwd',
+            'session-1:listOpencodeModels'
+        ])
+        expect(timeouts).toEqual([120_000, 120_000])
+    })
+
     it('uses an extended RPC timeout when listing Copilot models', async () => {
         const { gateway, timeouts } = createGateway()
 
